@@ -1,0 +1,15 @@
+{
+  "name": "@local-media-agent/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./schemas": "./schemas/index.ts",
+    "./types": "./types/index.ts",
+    "./constants": "./constants/index.ts",
+    "./api-client": "./api-client/index.ts"
+  },
+  "scripts": {
+    "check": "echo \"Shared package schemas are implemented in Phase 3\""
+  }
+}

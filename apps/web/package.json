@@ -1,0 +1,9 @@
+{
+  "name": "@local-media-agent/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo \"Next.js app is implemented in Phase 7\"",
+    "check": "echo \"No web checks configured yet\""
+  }
+}

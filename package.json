@@ -1,0 +1,14 @@
+{
+  "name": "local-media-agent",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "check": "pnpm --recursive check"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  }
+}
