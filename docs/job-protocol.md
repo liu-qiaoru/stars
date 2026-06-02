@@ -102,6 +102,60 @@ TypeScript server 将 status 写为 cancel_requested。
 Python worker 在任务边界检查该状态，尽快停止并写为 cancelled。
 ```
 
+## Python worker 启动与 Phase 4 扫描策略
+
+启动命令：
+
+```bash
+PYTHONPATH=apps/worker-py python -m media_agent_worker
+```
+
+Phase 4 worker 默认单进程循环：
+
+1. 从 PostgreSQL claim 一个 `queued` job。
+2. 将 job 标记为 `running`，写入 `locked_by`、`locked_at` 和 `heartbeat_at`。
+3. 执行 `scan_library` 时递归遍历本地目录。
+4. 执行期间写 heartbeat；完成后写入 `result_json` 并标记 `succeeded`。
+5. 收到 `SIGINT` 或 `SIGTERM` 后停止 claim 新 job，当前 job 到安全边界后结束。
+
+MVP 扫描幂等策略为 `path + size + mtime`：
+
+- 路径不存在于 `media_files` 时插入新记录。
+- 路径已存在且 size/mtime 不变时计为 skipped。
+- 路径已存在但 size 或 mtime 变化时更新记录并将 `index_status` 置回 `pending`。
+
+该策略可能漏掉保留 mtime 和 size 的原地改写。后续 content hash rescan 只在用户手动触发或重点目录上执行，避免默认全库 hash 带来高 I/O。
+
+## Phase 5 索引边界
+
+Phase 5 保持 TypeScript server 与 Python worker 的写入边界：
+
+- TypeScript server 维护 Qdrant collection registry，并负责初始化缺失 collection。
+- TypeScript server 不生成或传递大向量数组。
+- Python worker 执行 `probe_media` 和 `index_media`。
+- Python worker 为图片和固定 30 秒视频片段创建 `media_assets`。
+- Python worker 生成 deterministic mock vectors，写入 Qdrant points，并幂等写入 PostgreSQL `vector_refs`。
+- `point_id` 使用 deterministic UUID，输入包含 `asset_id`、collection、model name/version、vector kind 和 content hash。
+
+### 管线触发链
+
+Python worker 负责管线内部的 job 链式触发，区别于 TypeScript server 的用户 API 层面 job 创建：
+
+```text
+scan_library 完成 → 为每个 created/updated file 创建 probe_media job
+probe_media 完成 → 为该 file 创建 index_media job（默认 balanced + fixed_30s）
+index_media 完成 → Qdrant 向量已写入，无下游 job
+```
+
+`media_files.index_status` 状态流转：
+
+```text
+pending → probed（probe_media 完成后由 worker 写入）
+probed → indexed（真实 embedding 完成后；mock 阶段跳过此状态，直接在 vector_refs 中写 indexed）
+```
+
+`probed` 表示文件 metadata（duration、width、height、codec）已探测完毕，可以创建 index job。
+
 ## Job Types
 
 ### scan_library
@@ -170,7 +224,7 @@ media_files.duration_seconds
 media_files.width
 media_files.height
 media_files.codec
-media_files.index_status
+media_files.index_status（probe 完成后写入 'probed'）
 jobs.*
 ```
 

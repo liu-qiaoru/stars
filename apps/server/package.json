@@ -10,9 +10,12 @@
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.4.6",
+    "@local-media-agent/shared": "workspace:*",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
+    "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
@@ -22,6 +25,7 @@
     "@nestjs/testing": "^11.1.0",
     "@types/node": "^22.15.30",
     "@types/pg": "^8.11.11",
+    "drizzle-kit": "^0.31.10",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vitest": "^3.2.2"

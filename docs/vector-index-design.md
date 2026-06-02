@@ -325,8 +325,10 @@ deleted
 约束：
 
 ```text
-unique(asset_id, collection_name, model_name, model_version, vector_kind, content_hash)
+unique(collection_name, point_id)
 ```
+
+由于 `point_id` 本身由 `(asset_id, collection_name, model_name, model_version, vector_kind, content_hash)` 确定性生成，`unique(collection_name, point_id)` 已隐含保证同一 asset 在同一模型版本下不会产生重复向量。
 
 用途：
 

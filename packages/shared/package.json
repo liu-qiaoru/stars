@@ -7,9 +7,23 @@
     "./schemas": "./schemas/index.ts",
     "./types": "./types/index.ts",
     "./constants": "./constants/index.ts",
-    "./api-client": "./api-client/index.ts"
+    "./api-client": "./api-client/index.ts",
+    "./generated/job-schemas.json": "./generated/job-schemas.json"
   },
   "scripts": {
-    "check": "echo \"Shared package schemas are implemented in Phase 3\""
+    "generate:schemas": "node --import tsx scripts/generate-json-schemas.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm generate:schemas && pnpm typecheck && pnpm test"
+  },
+  "dependencies": {
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "tsx": "^4.22.3",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

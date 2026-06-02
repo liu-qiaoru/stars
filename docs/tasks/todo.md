@@ -10,9 +10,9 @@
 
 ## 当前进度
 
-- 当前阶段：Phase 2A 已完成，等待用户确认是否进入 Phase 3。
-- 最近更新：2026-05-29 14:12 CST，完成 Phase 2 代码从 Fastify 到 NestJS 默认 Express adapter 的迁移。
-- 下一步：用户确认后开始 Phase 3。
+- 当前阶段：Phase 5 已完成，等待用户确认是否进入 Phase 6。
+- 最近更新：2026-06-02，完成 Phase 5 媒体探测与索引骨架，包括 scan → probe → index 触发链和代码/文档一致性修复。
+- 下一步：用户确认后开始 Phase 6。
 
 ## Phase 1：Monorepo 与基础设施
 
@@ -59,50 +59,59 @@ Review：
 
 ## Phase 3：PostgreSQL Schema 与 Drizzle Migrations
 
-- [ ] 添加 libraries、media files、media assets、vector refs、jobs 和 agent runs 的 Drizzle schema。
-- [ ] 添加 Drizzle migration。
-- [ ] 添加 repository helpers。
-- [ ] 添加 model relationship tests。
-- [ ] 在 `packages/shared` 添加 job input/output Zod schemas。
-- [ ] 生成 Python worker 可读取的 JSON Schema。
-- [ ] 添加 schema consistency check。
+- Start：2026-05-31，目标是交付可迁移的 PostgreSQL schema、可测试 repository helpers、共享 job schemas、Python worker JSON Schema 和一致性检查。
+- 验证计划：先为 shared job schemas、Drizzle schema/repository 和 schema consistency 写失败测试；实现后运行 `pnpm --filter @local-media-agent/shared check`、`pnpm --filter @local-media-agent/server check` 和 `pnpm check`。
+
+- [x] 添加 libraries、media files、media assets、vector refs、jobs 和 agent runs 的 Drizzle schema。
+- [x] 添加 Drizzle migration。
+- [x] 添加 repository helpers。
+- [x] 添加 model relationship tests。
+- [x] 在 `packages/shared` 添加 job input/output Zod schemas。
+- [x] 生成 Python worker 可读取的 JSON Schema。
+- [x] 添加 schema consistency check。
 
 Review：
 
-- Result：
-- Notes：
+- Result：新增 Drizzle schema、DatabaseModule、drizzle-kit 配置和标准 migration；覆盖 libraries、media_files、media_assets、vector_refs、jobs、agent_runs、agent_run_events 和 agent_tool_calls。新增 repository helpers，用 PGlite 在测试中迁移空库并创建 library、media file、media asset、vector ref 和 job，同时查询 file/assets/vector refs 关系。`packages/shared` 新增 job type/media/vector 常量、job input/output Zod schemas、JSON Schema 生成脚本和生成物 `packages/shared/generated/job-schemas.json`。
+- Notes：遵循红绿流程，先写 shared job schema 测试、database repository 测试和 schema consistency 测试，观察缺实现失败，再补实现。`pnpm --filter @local-media-agent/shared check` 通过，包含 JSON Schema 生成、TypeScript typecheck 和 3 个 Vitest 测试。`pnpm --filter @local-media-agent/server check` 通过，包含 TypeScript typecheck 和 7 个 Vitest 测试。`pnpm check` 通过。当前命令输出仍提示本机 Node 为 v20.19.6，项目 engines 要求 >=22.0.0；本次验证仍成功，但后续运行建议切到 Node 22 以匹配项目约定。Phase 3 已完成，下一步需等待用户确认后进入 Phase 4。
 
 ## Phase 4：Library 扫描与 Job 创建
 
-- [ ] 添加 library create、list、detail 和 disable/delete APIs。
-- [ ] 添加 scan job API。
-- [ ] 添加 PostgreSQL-backed job claim 机制。
-- [ ] 定义 Python worker 启动命令、heartbeat、超时回收和 graceful shutdown。
-- [ ] 添加 Python worker scan handler。
-- [ ] 添加按扩展名识别 media type。
-- [ ] 添加幂等扫描行为。
+- Start：2026-06-01，目标是交付 library 管理 API、scan job 创建、PostgreSQL-backed job claim/reclaim、Python worker scan handler、按扩展名识别 media type 和幂等扫描。
+- 验证计划：先为 NestJS library/jobs service/controller 和 Python scan handler 写失败测试；实现后运行 `pnpm --filter @local-media-agent/server check`、Python worker 测试和 `pnpm check`。
+
+- [x] 添加 library create、list、detail 和 disable/delete APIs。
+- [x] 添加 scan job API。
+- [x] 添加 PostgreSQL-backed job claim 机制。
+- [x] 定义 Python worker 启动命令、heartbeat、超时回收和 graceful shutdown。
+- [x] 添加 Python worker scan handler。
+- [x] 添加按扩展名识别 media type。
+- [x] 添加幂等扫描行为。
 
 Review：
 
-- Result：
-- Notes：
+- Result：新增 NestJS `LibrariesModule` 和 `JobsModule`，支持创建、列表、详情、禁用和软删除 library，支持 `POST /libraries/{id}/scan` 创建 `scan_library` job，支持 jobs list/detail、按优先级 claim queued job、heartbeat、成功写回和 stale running job 回收。Python worker 新增 `python -m media_agent_worker` 启动入口、scan handler、worker runner、PostgreSQL raw SQL repository helper、按扩展名识别 media type，以及 `path + size + mtime` 幂等扫描写入策略。
+- Notes：遵循红绿流程，先写 TS library/job 测试和 Python worker scan 测试，观察缺模块和占位计数失败，再补实现。验证通过：`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，7 个 test files / 12 个 tests 通过；`PYTHONPATH=apps/worker-py python3 -m unittest discover apps/worker-py/tests`，3 个 Python tests 通过；`corepack pnpm --filter @local-media-agent/shared exec node --import tsx scripts/generate-json-schemas.ts`、`tsc --noEmit` 和 `vitest run` 通过；`git diff --check` 通过。当前 Node 22 环境没有裸 `pnpm` shim，`corepack pnpm --filter ... check` 会在 package script 内部调用裸 `pnpm` 而失败，因此本次使用等价的 `corepack pnpm exec ...` 命令分别验证。未启动真实 PostgreSQL/HTTP server；数据库行为由 PGlite migration 测试覆盖，真实运行前需安装 `apps/worker-py/requirements.txt` 中的 `psycopg[binary]`。
 
 ## Phase 5：媒体探测与索引骨架
 
-- [ ] 添加 Python worker ffprobe 视频和音频探测。
-- [ ] 添加 Python worker 图片尺寸探测。
-- [ ] 添加 media asset 生成。
-- [ ] 添加固定 30 秒视频 segments。
-- [ ] 按 `docs/vector-index-design.md` 在 TypeScript server 中添加 collection registry。
-- [ ] 添加 Qdrant collection 初始化。
-- [ ] 添加 deterministic mock vectors。
-- [ ] 添加 `vector_refs` 与 Qdrant point id 的幂等关联。
-- [ ] 统一由 Python worker 写入 Qdrant points，TypeScript server 只管理 collection 和搜索读取。
+- Start：2026-06-01，目标是交付 Python worker 探测、媒体 asset 生成、固定 30 秒视频 segments、mock vector 写入、`vector_refs` 幂等关联，以及 TS Qdrant collection registry/init。
+- 验证计划：先写 TS Qdrant registry/init 测试和 Python probe/index/mock vector 测试；实现后运行 server/shared/Python worker 验证与 `git diff --check`。
+
+- [x] 添加 Python worker ffprobe 视频和音频探测。
+- [x] 添加 Python worker 图片尺寸探测。
+- [x] 添加 media asset 生成。
+- [x] 添加固定 30 秒视频 segments。
+- [x] 按 `docs/vector-index-design.md` 在 TypeScript server 中添加 collection registry。
+- [x] 添加 Qdrant collection 初始化。
+- [x] 添加 deterministic mock vectors。
+- [x] 添加 `vector_refs` 与 Qdrant point id 的幂等关联。
+- [x] 统一由 Python worker 写入 Qdrant points，TypeScript server 只管理 collection 和搜索读取。
 
 Review：
 
-- Result：
-- Notes：
+- Result：TypeScript server 新增 `QdrantModule`、`VECTOR_COLLECTIONS` registry 和 `QdrantCollectionsService`，按 collection 配置初始化缺失的 Qdrant collections。Python worker 新增 `ProbeHandler`，通过 ffprobe 探测视频/音频 metadata，并用无外部依赖的 PNG/JPEG header parser 获取图片尺寸；新增 `IndexMediaHandler`，为图片生成 image asset，为视频生成固定 30 秒 `video_segment` assets，生成 deterministic point id 和 deterministic mock vectors，写入 Qdrant points，并通过 repository helper 幂等创建 `vector_refs`。新增 scan → probe → index 管线触发链：`ScanHandler` 为 created/updated 文件创建 `probe_media` job，`ProbeHandler` 探测完成后创建 `index_media` job。重命名 `PostgresScanRepository` 为 `PostgresMediaRepository`。修复 `QdrantHttpClient` 死代码、`indexing.py` 测试遗留分支。更新 `vector-index-design.md` 唯一约束和 `job-protocol.md` 管线触发链及 `index_status` 状态流转文档。
+- Notes：遵循红绿流程，先写 TS Qdrant registry/init 测试和 Python probe/index/mock vector 测试，观察缺模块失败，再补实现。验证通过：`corepack pnpm --filter @local-media-agent/server exec vitest run`，8 个 test files / 14 个 tests 通过；`PYTHONPATH=apps/worker-py python3 -m unittest discover apps/worker-py/tests`，11 个 Python tests 通过（含 3 个触发链测试）；shared 的 JSON Schema 生成、typecheck 和 Vitest 通过。未启动真实 Qdrant、真实 PostgreSQL 或实际 ffprobe 命令；Qdrant 初始化和 point 写入用 fake fetch/client 测试覆盖，ffprobe 解析通过注入 runner 测试覆盖。Phase 6 可在此基础上添加 Search API，从 Qdrant 召回后回 PostgreSQL 补齐 metadata。
 
 ## Phase 6：Qdrant Retrieval
 
@@ -154,16 +163,23 @@ Review：
 
 ## Phase 9：Agent MVP
 
-- [ ] 添加 TypeScript lightweight tool router。
-- [ ] MVP 使用规则路由，不依赖 LLM function calling。
-- [ ] 明确规则路由关键词、fallback 到 search、空 query 错误提示。
-- [ ] 添加 `search_media` tool。
-- [ ] 添加 `get_media_detail` tool。
-- [ ] 添加 `create_index_job` tool。
-- [ ] 添加 `export_clip` tool。
+- [ ] 添加 `ai` 和 `@ai-sdk/anthropic` 依赖。
+- [ ] 创建 `AgentModule`（controller、service、tools 目录）。
+- [ ] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `search_media` tool。
+- [ ] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `get_media_detail` tool。
+- [ ] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `create_index_job` tool。
+- [ ] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `export_clip` tool。
+- [ ] AgentService 封装 `generateText` 调用，传入 tools 和 system prompt。
+- [ ] ConfigModule 添加 `ALLOW_EXTERNAL_LLM`、`ANTHROPIC_API_KEY`、`AGENT_MODEL`、`AGENT_MAX_STEPS` 和 tool 超时配置。
+- [ ] AgentService 实现有限步 tool loop，例如 `maxSteps = 4`，并限制单次 run 最大 tool call 数。
+- [ ] AgentService 在外部 LLM 调用前执行候选脱敏，默认不发送绝对路径、源媒体、完整 transcript 或 OCR 全文。
+- [ ] 为 `export_clip` tool 添加服务端 guard：LLM 提出建议后写入 `user_confirmation_required` 事件，不直接创建 job。
+- [ ] 为 `create_index_job` tool 添加服务端 guard：确认流程与 `export_clip` 一致。
 - [ ] 添加 `POST /agent/runs`。
 - [ ] 添加 `GET /agent/runs/{id}`。
+- [ ] 添加 `POST /agent/runs/{id}/confirm`，用于用户确认副作用操作。确认凭证为 `tool_call_id`。
 - [ ] 定义 agent run events 结构。
+- [ ] AgentService 将 `generateText` 返回的 steps 映射为 api-contract 事件类型，写入 `agent_run_events` 表。
 - [ ] 将 agent run state、events 和 tool calls 持久化到 PostgreSQL。
 - [ ] 在前端展示 agent status 和 tool-call summary。
 

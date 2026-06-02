@@ -3,3 +3,8 @@ node_modules/
 .media-agent/
 dist/
 coverage/
+.DS_Store
+*.test.ts
+!apps/server/tests/**/*.test.ts
+!packages/shared/tests/**/*.test.ts
+docs/tasks/

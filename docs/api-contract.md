@@ -13,7 +13,7 @@ Job status：
 Media type：
 
 ```json
-"image" | "video" | "audio" | "text" | "unknown"
+"image" | "video" | "audio" | "document" | "unknown"
 ```
 
 Error response：
@@ -88,6 +88,52 @@ Response：
 }
 ```
 
+## GET /libraries/{id}
+
+返回单个 library。
+
+Response：
+
+```json
+{
+  "id": "8e4b7f3e-40b4-4a9a-8c1e-6d16e7e39a8e",
+  "name": "Main Media Drive",
+  "root_path": "/Volumes/Media",
+  "enabled": true,
+  "created_at": "2026-05-26T10:00:00Z",
+  "updated_at": "2026-05-26T10:00:00Z"
+}
+```
+
+## PATCH /libraries/{id}/disable
+
+禁用一个 library。禁用后不再主动创建新的 scan job，但历史媒体记录保留。
+
+Response：
+
+```json
+{
+  "id": "8e4b7f3e-40b4-4a9a-8c1e-6d16e7e39a8e",
+  "name": "Main Media Drive",
+  "root_path": "/Volumes/Media",
+  "enabled": false,
+  "created_at": "2026-05-26T10:00:00Z",
+  "updated_at": "2026-05-26T10:10:00Z"
+}
+```
+
+## DELETE /libraries/{id}
+
+软删除一个 library。MVP 不立即删除源文件，也不删除本地缓存文件；后续清理策略单独处理。
+
+Response：
+
+```json
+{
+  "deleted": true
+}
+```
+
 ## POST /libraries/{id}/scan
 
 为一个 library 启动扫描任务。
@@ -114,7 +160,7 @@ Response：
       "id": "cdb55173-624f-4ba9-b1d5-f6d0c0f2b1fb",
       "job_type": "scan_library",
       "status": "running",
-      "progress": 0.42,
+      "progress": 42,
       "error_message": null,
       "created_at": "2026-05-26T10:01:00Z",
       "updated_at": "2026-05-26T10:02:00Z"
@@ -134,7 +180,7 @@ Response：
   "id": "cdb55173-624f-4ba9-b1d5-f6d0c0f2b1fb",
   "job_type": "scan_library",
   "status": "succeeded",
-  "progress": 1.0,
+  "progress": 100,
   "input": {
     "library_id": "8e4b7f3e-40b4-4a9a-8c1e-6d16e7e39a8e"
   },
@@ -303,6 +349,8 @@ Agent run 事件结构：
 "run_started" | "tool_call_started" | "tool_call_finished" | "candidate_results" | "user_confirmation_required" | "run_succeeded" | "run_failed"
 ```
 
+`user_confirmation_required` 事件用于副作用工具（`export_clip`、`create_index_job`）。LLM 提出操作建议后，AgentService 不直接执行，而是写入该事件等待前端确认。前端通过 `POST /agent/runs/{id}/confirm` 确认后才创建实际 job。
+
 MVP 可以通过轮询 `GET /agent/runs/{id}` 返回累计事件。后续 SSE 或 WebSocket 应复用同一事件结构。
 
 Response：
@@ -352,5 +400,46 @@ Response：
       "summary": "Candidate segment from a stage presentation."
     }
   ]
+}
+```
+
+## POST /agent/runs/{id}/confirm
+
+确认一个等待用户确认的副作用操作（例如 `export_clip` 或 `create_index_job`）。LLM 提出操作建议后，AgentService 写入 `user_confirmation_required` 事件但不创建 job。前端展示确认 UI，用户确认后调用此端点。
+
+Request：
+
+```json
+{
+  "tool_call_id": "01J..."
+}
+```
+
+Response：
+
+```json
+{
+  "confirmed": true,
+  "job_id": "cdb55173-624f-4ba9-b1d5-f6d0c0f2b1fb"
+}
+```
+
+如果 `tool_call_id` 不存在或已确认，返回 HTTP 404。如果对应的 tool call 不需要确认（例如只读工具），返回 HTTP 400。
+
+## 外部 LLM 未启用时的行为
+
+`ALLOW_EXTERNAL_LLM=false`（默认）时，`POST /agent/runs` 仍然接受请求，但不调用外部 LLM provider。AgentService 返回提示信息，说明当前未启用外部 LLM，用户可在设置中开启。不返回 HTTP 500 或配置错误。
+
+Response（`ALLOW_EXTERNAL_LLM=false`）：
+
+```json
+{
+  "run_id": "0bfec861-c770-47ed-8e0d-1642a7a76591",
+  "status": "succeeded",
+  "prompt": "Find clips that look like a product launch presentation.",
+  "tool_calls": [],
+  "events": [],
+  "results": [],
+  "message": "外部 LLM 未启用。请在设置中开启 ALLOW_EXTERNAL_LLM 以使用 agent 功能。"
 }
 ```

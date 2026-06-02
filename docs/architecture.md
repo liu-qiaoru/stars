@@ -25,11 +25,12 @@ docs            架构、API 和实施文档
 
 - 前端：Next.js、React、TypeScript、Tailwind。
 - 主控 API：TypeScript、NestJS、默认 Express adapter、Zod。
+- Agent LLM：Vercel AI SDK（`ai`）、Anthropic provider（`@ai-sdk/anthropic`）。
 - 数据访问：PostgreSQL、Drizzle、node-postgres。
 - 向量数据库：Qdrant，使用 Qdrant JS client。Collection、point、payload 和 PostgreSQL 引用结构见 `docs/vector-index-design.md`。
 - 后台任务：PostgreSQL-backed jobs。Redis 只作为可选实时事件/pub-sub 通道。
 - Python worker：FFmpeg、ffprobe、PySceneDetect、OpenCLIP 或 SigLIP、faster-whisper 或 whisper.cpp、PaddleOCR 或 EasyOCR。
-- Agent 编排：TypeScript tool router 或 LangGraphJS。Python 不负责 agent 决策，只负责执行媒体/模型重任务。
+- Agent 编排：Vercel AI SDK（`ai`）+ Anthropic provider（`@ai-sdk/anthropic`）。Python 不负责 agent 决策，只负责执行媒体/模型重任务。
 - 外部多模态模型层：通过 TypeScript Model Gateway 接入 OpenAI、Claude、Gemini 或其他提供商。
 - 存储：本地文件系统，用于源素材引用、缓存文件、缩略图、抽帧、转写文本和导出剪辑。
 
@@ -94,7 +95,7 @@ LibrariesModule
 JobsModule
 MediaModule
 SearchModule
-AgentModule
+AgentModule        使用 Vercel AI SDK + Anthropic provider，见 Agent Runtime 章节
 ModelGatewayModule
 ```
 
@@ -151,7 +152,43 @@ MVP 不做跨 collection 全局排序。不同 collection 的 score 不保证可
 
 ### Agent Runtime
 
-Agent Runtime 位于 TypeScript 主控层。Agent 是协调者，不是搜索引擎本身，也不直接操作文件系统。
+Agent Runtime 位于 TypeScript 主控层，使用 Vercel AI SDK 接入 LLM function calling。Agent 是协调者，不是搜索引擎本身，也不直接操作文件系统。
+
+为什么选择 Vercel AI SDK：
+
+- Tool 定义使用 Zod schema，与项目 `packages/shared` 的 schema 体系一致，无双 schema 问题。
+- 核心只负责"接收 prompt → 调 LLM → 执行 tool → 返回结果"，不接管存储、向量、部署等已有架构。
+- `generateText` / `streamText` 是纯函数，与 NestJS service 直接集成，无框架摩擦。
+- 支持 30+ 官方 LLM provider，切换 provider 只需改 model 配置。
+- 不碰 PostgreSQL/Drizzle、Qdrant、Python worker 等现有模块。
+
+不用于：
+
+- Agent 不直接操作文件系统。
+- Agent 不替代搜索引擎或检索逻辑。
+- Agent 的 tool 执行结果写入 PostgreSQL 由 AgentService 负责，不由 AI SDK 负责。
+
+MVP 使用 Anthropic Claude Sonnet 作为默认 LLM provider，但外部 LLM 调用必须由 `ALLOW_EXTERNAL_LLM` 显式启用。`ALLOW_EXTERNAL_LLM=false`（默认）时，Agent API 仍接受请求，但返回提示信息说明未启用，不返回错误。后续可通过 AI SDK 的统一 model 接口切换到其他 provider。
+
+外部 LLM 隐私边界：
+
+- 默认不发送源媒体文件、缩略图、关键帧、音频、视频或完整 transcript/OCR 文本。
+- 默认不发送绝对本地路径；对外部 LLM 只发送脱敏后的文件显示名、media type、时间范围、score、候选摘要和必要 metadata。
+- 如果用户后续开启外部 VLM 或发送候选样本，必须走 Model Gateway 的显式开关和审计记录，不由 Agent tool 直接上传。
+- 所有发往外部 LLM 的 request 摘要必须记录到 `agent_run_events`，便于用户审计。
+
+副作用工具边界：
+
+- `search_media` 和 `get_media_detail` 是只读工具，可以由 LLM function calling 自动触发。
+- `create_index_job` 和 `export_clip` 会创建后台任务或写本地文件，必须经过服务端 deterministic guard。
+- `export_clip` 需要明确 `file_id`、`start_time_seconds`、`end_time_seconds`、用户显式导出意图；LLM 只能提出导出建议，不能独立授权执行。确认流程：LLM 生成建议 → AgentService 写入 `user_confirmation_required` 事件 → 前端展示确认 UI → 用户通过 `POST /agent/runs/{id}/confirm` 确认 → 服务端创建 job。确认凭证为 `tool_call_id`，不需要额外的 token 机制。
+- `create_index_job` 需要明确 library/path 范围和用户显式索引意图，不能因为 LLM 猜测自动触发全库重建。确认流程与 `export_clip` 一致。
+
+Agent loop 边界：
+
+- MVP 使用有限步 tool loop，例如 `maxSteps = 4`。
+- 单次 run 设置最大 tool call 数、超时和错误返回，避免 LLM 反复调用工具。
+- 如果 tool 失败或无法解析参数，AgentService 记录事件并返回可读错误，不让 LLM 重试无限循环。
 
 初始工具：
 
@@ -169,7 +206,20 @@ Agent Runtime 位于 TypeScript 主控层。Agent 是协调者，不是搜索引
 - `make_montage`
 - `reindex_path`
 
-MVP 使用规则路由：包含“找、搜索、检索、search、find”等词时调用 `search_media`；包含“导出、剪辑、clip、export”等词且请求中已有明确 `file_id` 或候选片段时调用 `export_clip`；包含“重新索引、reindex、扫描”等词时创建对应 job。匹配失败时 fallback 到 `search_media`；如果 query 为空或无法形成搜索请求，则返回“无法理解，请换一种说法或指定要搜索的内容”。
+NestJS AgentModule 组织：
+
+```text
+apps/server/src/agent/
+  agent.module.ts       注册 AgentService、依赖 AI SDK provider
+  agent.service.ts      封装 generateText/streamText 调用、tool 注册和事件持久化
+  agent.controller.ts   HTTP API（复用 api-contract 定义的 endpoints）
+  agent.events.ts       将 AI SDK steps 映射为 api-contract 定义的事件类型
+  tools/
+    search-media.tool.ts        调用 SearchService
+    get-media-detail.tool.ts    调用 MediaService
+    create-index-job.tool.ts    调用 JobsService
+    export-clip.tool.ts         调用 JobsService
+```
 
 ### Model Gateway
 

@@ -1,0 +1,478 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "jobs": {
+    "scan_library": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "library_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "root_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scan_mode": {
+            "type": "string",
+            "enum": [
+              "mtime_size",
+              "full"
+            ]
+          }
+        },
+        "required": [
+          "library_id",
+          "root_path",
+          "scan_mode"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "discovered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "discovered",
+          "created",
+          "updated",
+          "skipped",
+          "failed"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "probe_media": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "audio",
+              "document",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "file_id",
+          "path",
+          "media_type"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "duration_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "codec": {
+            "type": "string",
+            "minLength": 1
+          },
+          "streams": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "streams"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "index_media": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "index_profile": {
+            "type": "string",
+            "enum": [
+              "light",
+              "balanced",
+              "dense"
+            ]
+          },
+          "segment_strategy": {
+            "type": "string",
+            "enum": [
+              "fixed_30s",
+              "scene_detection"
+            ]
+          }
+        },
+        "required": [
+          "file_id",
+          "index_profile",
+          "segment_strategy"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "assets_created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "vector_refs_created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "collections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "image_vectors",
+                "video_frame_vectors",
+                "video_segment_vectors",
+                "audio_segment_vectors",
+                "text_chunk_vectors"
+              ]
+            }
+          }
+        },
+        "required": [
+          "assets_created",
+          "vector_refs_created",
+          "collections"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "embed_image": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "collection": {
+            "type": "string",
+            "const": "image_vectors"
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "asset_id",
+          "path",
+          "collection",
+          "model_name",
+          "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "point_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection": {
+            "type": "string",
+            "enum": [
+              "image_vectors",
+              "video_frame_vectors",
+              "video_segment_vectors",
+              "audio_segment_vectors",
+              "text_chunk_vectors"
+            ]
+          },
+          "vector_dim": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "point_id",
+          "collection",
+          "vector_dim",
+          "model_name",
+          "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "embed_video_frame": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "frame_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "collection": {
+            "type": "string",
+            "enum": [
+              "video_frame_vectors",
+              "video_segment_vectors"
+            ]
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "asset_id",
+          "frame_path",
+          "collection",
+          "model_name",
+          "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "point_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection": {
+            "type": "string",
+            "enum": [
+              "image_vectors",
+              "video_frame_vectors",
+              "video_segment_vectors",
+              "audio_segment_vectors",
+              "text_chunk_vectors"
+            ]
+          },
+          "vector_dim": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "point_id",
+          "collection",
+          "vector_dim",
+          "model_name",
+          "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "embed_text": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection": {
+            "type": "string",
+            "enum": [
+              "audio_segment_vectors",
+              "text_chunk_vectors"
+            ]
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "asset_id",
+          "collection",
+          "model_name",
+          "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "point_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection": {
+            "type": "string",
+            "enum": [
+              "image_vectors",
+              "video_frame_vectors",
+              "video_segment_vectors",
+              "audio_segment_vectors",
+              "text_chunk_vectors"
+            ]
+          },
+          "vector_dim": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "point_id",
+          "collection",
+          "vector_dim",
+          "model_name",
+          "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "export_clip": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "start_time_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_time_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "mp4",
+              "mov"
+            ],
+            "default": "mp4"
+          }
+        },
+        "required": [
+          "file_id",
+          "start_time_seconds",
+          "end_time_seconds"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "export_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "duration_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "export_path",
+          "duration_seconds"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    }
+  }
+}

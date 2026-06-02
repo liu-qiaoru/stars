@@ -26,15 +26,28 @@
 
 ## 代码注释规则
 
-- 关键步骤需要增加简洁注释，方便 review 和后续接手。
+- 关键步骤需要增加清晰、足够完整的注释，方便不熟悉 Python、TypeScript server、数据库和 SDK 的读者 review、接手和排查。
+- 注释的默认目标读者是：理解本项目目标，但不一定熟悉 NestJS、Drizzle、PostgreSQL raw SQL、Qdrant client、Python worker、FFmpeg/ffprobe 或模型 SDK 的维护者。
 - 必须注释的区域：
   - 跨语言边界，例如 TypeScript job creation 与 Python worker claim。
+  - Python worker 的 job handler、repository/helper、外部命令或 SDK 调用入口。
+  - NestJS module/controller/service/provider 的职责边界，尤其是为何某段逻辑放在 server 而不是 worker。
+  - Drizzle schema/repository 与 Python raw SQL 访问同一张表时的字段约定。
+  - PostgreSQL job claim、下游 job 触发、幂等 upsert、事务边界和状态流转。
   - Qdrant point id、payload、`vector_refs` 的幂等写入逻辑。
   - job heartbeat、超时回收、graceful shutdown。
   - FFmpeg 命令构造和安全边界。
+  - ffprobe、Qdrant、Vercel AI SDK、embedding/model SDK 等第三方工具调用时的关键参数含义。
   - query embedding RPC 与批量 embedding job 的区别。
   - Agent tool routing 的规则和 fallback。
-- 不写空泛注释。注释应解释“为什么这样做”或“这里保护了什么边界”，不要重复代码表面含义。
+- 注释应优先解释：
+  - 这段代码在整体链路中的位置，例如“API 创建 job、worker 执行 job、Qdrant 只存轻量 payload”。
+  - 为什么使用这个工具/API/SQL 写法，例如 `FOR UPDATE SKIP LOCKED`、deterministic point id、raw SQL helper。
+  - 输入输出字段与协议文档的对应关系，尤其是跨 TS/Python 的 JSON 字段名。
+  - 幂等、重试、失败、超时、取消、隐私和本地文件安全边界。
+  - 后续 Phase 不应该在这里提前承担的职责。
+- 不写空泛注释，也不要机械重复代码表面含义。例如不要写“调用函数 X”，应写“这里用 X 保证同一个 worker claim 后其他 worker 不会重复执行同一个 job”。
+- 对简单纯函数、显而易见的 getter/setter、测试中的普通 arrange/assert，不需要为了凑数量写注释。
 
 ## 验证规则
 
