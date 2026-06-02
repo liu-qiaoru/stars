@@ -4,6 +4,12 @@ import { VECTOR_COLLECTIONS, type VectorCollectionConfig, type VectorCollectionN
 
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
+// vector-index-design.md: payload keyword indexes 用于搜索时按 library_id / media_type 高效过滤
+const PAYLOAD_INDEXES = [
+  { fieldName: "library_id", fieldSchema: "keyword" },
+  { fieldName: "media_type", fieldSchema: "keyword" },
+] as const;
+
 @Injectable()
 export class QdrantCollectionsService {
   constructor(
@@ -45,6 +51,21 @@ export class QdrantCollectionsService {
       created.push(name);
     }
 
+    // vector-index-design.md: 确保 payload keyword indexes 存在（幂等，已存在时不报错）
+    await this.createPayloadIndexes();
+
     return { created, existing };
+  }
+
+  private async createPayloadIndexes() {
+    for (const [name] of Object.entries(this.collections) as [VectorCollectionName, VectorCollectionConfig][]) {
+      for (const { fieldName, fieldSchema } of PAYLOAD_INDEXES) {
+        await this.fetcher(`${this.qdrantUrl}/collections/${name}/index`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ field_name: fieldName, field_schema: fieldSchema }),
+        });
+      }
+    }
   }
 }

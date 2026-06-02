@@ -10,9 +10,9 @@
 
 ## 当前进度
 
-- 当前阶段：Phase 5 已完成，等待用户确认是否进入 Phase 6。
-- 最近更新：2026-06-02，完成 Phase 5 媒体探测与索引骨架，包括 scan → probe → index 触发链和代码/文档一致性修复。
-- 下一步：用户确认后开始 Phase 6。
+- 当前阶段：Phase 6 已完成，等待用户确认是否进入 Phase 7。
+- 最近更新：2026-06-02，完成 Qdrant Retrieval，包括 `POST /search`、Qdrant JS client 搜索、metadata filters、PostgreSQL 回表和按 collection 分组响应。
+- 下一步：用户确认后开始 Phase 7。
 
 ## Phase 1：Monorepo 与基础设施
 
@@ -115,19 +115,22 @@ Review：
 
 ## Phase 6：Qdrant Retrieval
 
-- [ ] 添加 `POST /search`。
-- [ ] 使用 Qdrant JS client 搜索 image 和 video segment collections。
-- [ ] 应用 media type 和 library filters。
-- [ ] 查询 Qdrant 后回 PostgreSQL 补齐完整 metadata。
-- [ ] 按 collection 分组返回搜索结果。
-- [ ] 添加 `limit` 和 `offset` 分页参数。
-- [ ] 返回 file path、score、media type 和 time range。
-- [ ] 添加空结果处理。
+- Start：2026-06-02，目标是交付 `POST /search`，从 Qdrant image/video segment collections 召回后回 PostgreSQL 补齐 metadata，并按 collection 分组返回稳定 JSON。
+- 验证计划：先写 Search service/controller 测试覆盖 image/video 分组、media type/library filters、limit/offset 和空结果；实现后运行 server 验证、shared 验证和 `git diff --check`。
+
+- [x] 添加 `POST /search`。
+- [x] 使用 Qdrant JS client 搜索 image 和 video segment collections。
+- [x] 应用 media type 和 library filters。
+- [x] 查询 Qdrant 后回 PostgreSQL 补齐完整 metadata。
+- [x] 按 collection 分组返回搜索结果。
+- [x] 添加 `limit` 和 `offset` 分页参数。
+- [x] 返回 file path、score、media type 和 time range。
+- [x] 添加空结果处理。
 
 Review：
 
-- Result：
-- Notes：
+- Result：新增 `SearchModule`、`SearchController`、`SearchService` 和 `SearchQueryVectorService`，接入 `POST /search`。`QdrantModule` 新增官方 `@qdrant/js-client-rest` provider；Search service 根据 media type 选择 `image_vectors` 和 `video_segment_vectors`，构造 media type / library Qdrant filter，使用 `limit` / `offset` 分页查询，再通过 `vector_refs -> media_assets -> media_files -> libraries` 回 PostgreSQL 补齐 path、media type 和 time range，按 collection 分组返回结果。空结果返回稳定 `{ limit, offset, groups }` 结构。
+- Notes：Phase 6 仍使用稳定 mock query vector，只验证 Qdrant retrieval/read path；真实 query embedding 按计划留给 Phase 10 的本地模型服务。验证通过：`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，10 个 test files / 17 个 tests 通过；`corepack pnpm --filter @local-media-agent/shared exec node --import tsx scripts/generate-json-schemas.ts`；`corepack pnpm --filter @local-media-agent/shared exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/shared exec vitest run`，3 个 tests 通过；`git diff --check` 通过。`corepack pnpm --filter @local-media-agent/server check` 仍因 package script 内部调用裸 `pnpm` 且当前 shell 没有 pnpm shim 而失败，本次继续使用等价 `corepack pnpm exec ...` 验证。未启动真实 Qdrant/PostgreSQL HTTP 链路；Qdrant 搜索通过 fake client 覆盖，PostgreSQL 回表由 PGlite migration 测试覆盖。
 
 ## Phase 7：Next.js 前端
 

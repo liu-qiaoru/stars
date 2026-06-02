@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { PgliteDatabase } from "drizzle-orm/pglite";
 import {
@@ -148,6 +148,51 @@ export async function getFileWithAssetsAndVectors(db: Database, fileId: string) 
     assets,
     vectorRefs: refs,
   };
+}
+
+export interface SearchMetadataFilters {
+  mediaTypes?: string[];
+  libraryIds?: string[];
+}
+
+export async function listSearchResultMetadata(
+  db: Database,
+  collectionName: string,
+  pointIds: string[],
+  filters: SearchMetadataFilters = {},
+) {
+  if (pointIds.length === 0) {
+    return [];
+  }
+
+  const conditions = [
+    eq(vectorRefs.collectionName, collectionName),
+    inArray(vectorRefs.pointId, pointIds),
+    isNull(mediaFiles.deletedAt),
+    isNull(libraries.deletedAt),
+  ];
+  if (filters.mediaTypes?.length) {
+    conditions.push(inArray(mediaFiles.mediaType, filters.mediaTypes));
+  }
+  if (filters.libraryIds?.length) {
+    conditions.push(inArray(mediaFiles.libraryId, filters.libraryIds));
+  }
+
+  return db
+    .select({
+      pointId: vectorRefs.pointId,
+      assetId: mediaAssets.id,
+      fileId: mediaFiles.id,
+      mediaType: mediaFiles.mediaType,
+      path: mediaFiles.path,
+      startTimeSeconds: mediaAssets.startTimeSeconds,
+      endTimeSeconds: mediaAssets.endTimeSeconds,
+    })
+    .from(vectorRefs)
+    .innerJoin(mediaAssets, eq(vectorRefs.assetId, mediaAssets.id))
+    .innerJoin(mediaFiles, eq(vectorRefs.fileId, mediaFiles.id))
+    .innerJoin(libraries, eq(vectorRefs.libraryId, libraries.id))
+    .where(and(...conditions));
 }
 
 export async function listLibraries(db: Database) {
