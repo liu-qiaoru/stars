@@ -1,7 +1,7 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post } from "@nestjs/common";
-import { LibrariesService } from "./libraries.service.js";
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post } from '@nestjs/common'
+import { LibrariesService } from './libraries.service.js'
 
-@Controller("libraries")
+@Controller('libraries')
 export class LibrariesController {
   constructor(
     @Inject(LibrariesService)
@@ -10,31 +10,31 @@ export class LibrariesController {
 
   @Post()
   createLibrary(@Body() body: { name: string; root_path: string }) {
-    return this.librariesService.createLibrary(body);
+    return this.librariesService.createLibrary(body)
   }
 
   @Get()
   listLibraries() {
-    return this.librariesService.listLibraries();
+    return this.librariesService.listLibraries()
   }
 
-  @Get(":id")
-  getLibrary(@Param("id") id: string) {
-    return this.librariesService.getLibrary(id);
+  @Get(':id')
+  getLibrary(@Param('id') id: string) {
+    return this.librariesService.getLibrary(id)
   }
 
-  @Patch(":id/disable")
-  disableLibrary(@Param("id") id: string) {
-    return this.librariesService.disableLibrary(id);
+  @Patch(':id/disable')
+  disableLibrary(@Param('id') id: string) {
+    return this.librariesService.disableLibrary(id)
   }
 
-  @Delete(":id")
-  deleteLibrary(@Param("id") id: string) {
-    return this.librariesService.deleteLibrary(id);
+  @Delete(':id')
+  deleteLibrary(@Param('id') id: string) {
+    return this.librariesService.deleteLibrary(id)
   }
 
-  @Post(":id/scan")
-  scanLibrary(@Param("id") id: string) {
-    return this.librariesService.createScanJob(id);
+  @Post(':id/scan')
+  scanLibrary(@Param('id') id: string) {
+    return this.librariesService.createScanJob(id)
   }
 }

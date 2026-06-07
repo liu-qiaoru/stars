@@ -1,5 +1,5 @@
-import { Global, Module } from "@nestjs/common";
-import { createSettings, SETTINGS } from "./settings.js";
+import { Global, Module } from '@nestjs/common'
+import { createSettings, SETTINGS } from './settings.js'
 
 @Global()
 @Module({

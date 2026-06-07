@@ -1,0 +1,77 @@
+import type { MediaType } from './api-client'
+
+const mediaTypeLabels: Record<MediaType, string> = {
+  image: '图片',
+  video: '视频',
+  audio: '音频',
+  document: '文档',
+  unknown: '未知',
+}
+
+const collectionLabels: Record<string, string> = {
+  image_vectors: '图片向量',
+  video_segment_vectors: '视频片段向量',
+}
+
+const scoreKindLabels: Record<string, string> = {
+  cosine_similarity: '余弦相似度',
+}
+
+const jobTypeLabels: Record<string, string> = {
+  scan_library: '扫描素材库',
+  probe_media: '探测媒体',
+  index_media: '索引媒体',
+  export_clip: '导出片段',
+}
+
+const statusLabels: Record<string, string> = {
+  queued: '等待中',
+  running: '运行中',
+  succeeded: '已完成',
+  failed: '失败',
+  indexed: '已索引',
+  pending: '待处理',
+}
+
+const assetTypeLabels: Record<string, string> = {
+  image: '图片资产',
+  video_segment: '视频片段',
+  audio_segment: '音频片段',
+}
+
+export function formatMediaType(mediaType: MediaType) {
+  return mediaTypeLabels[mediaType] ?? mediaTypeLabels.unknown
+}
+
+export function formatCollection(collection: string) {
+  return collectionLabels[collection] ?? collection
+}
+
+export function formatScoreKind(scoreKind: string) {
+  return scoreKindLabels[scoreKind] ?? scoreKind
+}
+
+export function formatJobType(jobType: string) {
+  return jobTypeLabels[jobType] ?? jobType
+}
+
+export function formatStatus(status: string) {
+  return statusLabels[status] ?? status
+}
+
+export function formatAssetType(assetType: string) {
+  return assetTypeLabels[assetType] ?? assetType
+}
+
+function formatPlaybackTime(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = Math.floor(totalSeconds % 60)
+  const mm = String(minutes).padStart(2, '0')
+  const ss = String(seconds).padStart(2, '0')
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`
+}
+
+export function formatTimeRange(startSeconds: number, endSeconds: number) {
+  return `${formatPlaybackTime(startSeconds)} – ${formatPlaybackTime(endSeconds)}`
+}

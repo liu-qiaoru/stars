@@ -258,6 +258,45 @@ vector_refs
 jobs.*
 ```
 
+### export_clip
+
+Input：
+
+```json
+{
+  "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
+  "start_time_seconds": 120.0,
+  "end_time_seconds": 150.0,
+  "output_format": "mp4"
+}
+```
+
+约束：
+
+- `end_time_seconds` 必须大于 `start_time_seconds`。
+- Phase 8 只支持视频文件导出。
+- TypeScript server 只创建 `export_clip` job，不读取源媒体，也不运行 FFmpeg。
+- Python worker 根据 `file_id` 回 PostgreSQL 查询源文件路径，然后用 FFmpeg stream copy 导出。
+
+Result：
+
+```json
+{
+  "export_path": ".media-agent/exports/clips/54b83d84-7ff5-4b9a-8d11-fb27fbaf44db-120-150.mp4",
+  "duration_seconds": 30.0
+}
+```
+
+Python worker 可写字段：
+
+```text
+jobs.status
+jobs.progress
+jobs.result_json
+jobs.error_message
+jobs.heartbeat_at
+```
+
 触发关系：
 
 ```text

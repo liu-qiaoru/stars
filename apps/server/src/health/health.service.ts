@@ -1,12 +1,12 @@
-import { Inject, Injectable } from "@nestjs/common";
-import { DEPENDENCY_CHECKS, type DependencyChecks } from "./dependency-checks.js";
+import { Inject, Injectable } from '@nestjs/common'
+import { DEPENDENCY_CHECKS, type DependencyChecks } from './dependency-checks.js'
 
 export interface HealthResponse {
-  status: "ok" | "error";
+  status: 'ok' | 'error'
   dependencies: {
-    database: "ok" | "error";
-    qdrant: "ok" | "error";
-  };
+    database: 'ok' | 'error'
+    qdrant: 'ok' | 'error'
+  }
 }
 
 @Injectable()
@@ -20,14 +20,14 @@ export class HealthService {
     const [database, qdrant] = await Promise.all([
       this.dependencyChecks.database(),
       this.dependencyChecks.qdrant(),
-    ]);
+    ])
 
     return {
-      status: database === "ok" && qdrant === "ok" ? "ok" : "error",
+      status: database === 'ok' && qdrant === 'ok' ? 'ok' : 'error',
       dependencies: {
         database,
         qdrant,
       },
-    };
+    }
   }
 }

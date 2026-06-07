@@ -294,7 +294,7 @@ Request：
   "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
   "start_time_seconds": 120.0,
   "end_time_seconds": 150.0,
-  "mode": "fast"
+  "output_format": "mp4"
 }
 ```
 
@@ -311,7 +311,8 @@ Completed job result：
 
 ```json
 {
-  "export_path": ".media-agent/exports/clips/57c0e91b-4112-4791-8b0c-af67c4d01aa0.mp4"
+  "export_path": ".media-agent/exports/clips/54b83d84-7ff5-4b9a-8d11-fb27fbaf44db-120-150.mp4",
+  "duration_seconds": 30.0
 }
 ```
 

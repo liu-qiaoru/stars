@@ -10,9 +10,9 @@
 
 ## 当前进度
 
-- 当前阶段：Phase 6 已完成，等待用户确认是否进入 Phase 7。
-- 最近更新：2026-06-02，完成 Qdrant Retrieval，包括 `POST /search`、Qdrant JS client 搜索、metadata filters、PostgreSQL 回表和按 collection 分组响应。
-- 下一步：用户确认后开始 Phase 7。
+- 当前阶段：Phase 8 已完成，等待用户确认是否进入 Phase 9。
+- 最近更新：2026-06-07，完成 Clip Export，包括导出 job API、Python FFmpeg worker 和 Media Detail 导出入口。
+- 下一步：完成 Phase 8 后等待用户确认是否进入 Phase 9。
 
 ## Phase 1：Monorepo 与基础设施
 
@@ -134,35 +134,41 @@ Review：
 
 ## Phase 7：Next.js 前端
 
-- [ ] 创建 Next.js app。
-- [ ] 添加 Tailwind。
-- [ ] 添加 app shell navigation。
-- [ ] 添加 Library page。
-- [ ] 添加 Search page。
-- [ ] 添加 Jobs page。
-- [ ] 添加 Media Detail page。
-- [ ] 添加 Agent page。
-- [ ] 添加 typed API client。
-- [ ] 参考 `DESIGN.md` 的视觉语言，并将其工具化适配到媒体管理和检索界面。
+- Start：2026-06-02，目标是交付可运行的 Next.js 前端壳、核心工作流页面和 typed API client；视觉上参考 `DESIGN.md` 的红色 CTA、暖白 chrome、pill 控件和 masonry 影像语言，但保持工具型产品的信息密度。
+- 验证计划：先配置前端测试和 TypeScript 验证；为 API client、导航和 Search 页面写失败测试；实现后运行 web typecheck/test/build，并启动 dev server 用浏览器检查桌面与移动视口。
+
+- [x] 创建 Next.js app。
+- [x] 添加 Tailwind。
+- [x] 添加 app shell navigation。
+- [x] 添加 Library page。
+- [x] 添加 Search page。
+- [x] 添加 Jobs page。
+- [x] 添加 Media Detail page。
+- [x] 添加 Agent page。
+- [x] 添加 typed API client。
+- [x] 参考 `DESIGN.md` 的视觉语言，并将其工具化适配到媒体管理和检索界面。
 
 Review：
 
-- Result：
-- Notes：
+- Result：`apps/web` 从占位 package 变为 Next.js 16 / React 19 / Tailwind 4 前端应用。新增 App Router 页面：`/search`、`/libraries`、`/jobs`、`/media/[id]`、`/agent`，根路径重定向到搜索页。新增 `AppShell` 主导航、Search masonry grouped results、Library 管理面板、Jobs 进度列表、Media detail segments 和 Agent run 表单。新增 typed API client，覆盖 libraries、scan job、jobs、search、media detail 和 agent run 请求。视觉上使用 `DESIGN.md` 的 Pinterest red、暖白 surface、pill 控件、16px/32px 圆角和影像优先 masonry，但布局保持工具型产品的信息密度；本地 demo 缩略图资产保存为 `apps/web/public/demo-media-contact-sheet.png`。
+- Notes：遵循红绿流程，先写 API client、AppShell 和 SearchWorkspace 测试并观察缺模块失败，再实现页面。验证通过：`corepack pnpm --filter @local-media-agent/web check`，包含 `tsc --noEmit`、Vitest 3 个 test files / 4 个 tests、`next build --webpack`，生成 7 个 App Router 页面。浏览器验证通过：启动 `corepack pnpm --filter @local-media-agent/web dev`，检查桌面 `/search`、移动 390px `/search` 和移动导航到 `/libraries`；修正移动导航文字挤压为图标优先。后续按用户要求将前端可见展示文案统一改为中文，并再次通过 web check 与浏览器 `/libraries`、`/search` 验证。Next 16 默认 Turbopack build 在 sandbox 内处理 CSS 时会触发端口绑定 EPERM，本阶段将 build 脚本固定为 `next build --webpack`，并在 `next.config.mjs` 设置 `turbopack.root` 避免 workspace root 误判。
 
 ## Phase 8：Clip Export
 
-- [ ] 添加 `POST /clips/export`。
-- [ ] TypeScript API 创建 `export_clip` job。
-- [ ] Python worker 使用 FFmpeg 导出 clip。
-- [ ] 将 clips 保存到 `.media-agent/exports/clips`。
-- [ ] 添加 export job result。
-- [ ] 添加 Media Detail export action。
+- Start：2026-06-07，目标是交付 `POST /clips/export`、`export_clip` job 创建、Python worker FFmpeg 导出、`.media-agent/exports/clips` 输出目录、job result，以及 Media Detail 页面导出动作。
+- 验证计划：先写 server clips/media API、Python export handler 和前端导出按钮的失败测试；实现后运行 server/shared/Python worker/web 验证，并启动前端 dev server 用浏览器检查 Media Detail。
+
+- [x] 添加 `POST /clips/export`。
+- [x] TypeScript API 创建 `export_clip` job。
+- [x] Python worker 使用 FFmpeg 导出 clip。
+- [x] 将 clips 保存到 `.media-agent/exports/clips`。
+- [x] 添加 export job result。
+- [x] 添加 Media Detail export action。
 
 Review：
 
-- Result：
-- Notes：
+- Result：新增 `ClipsModule`，提供 `POST /clips/export` 并创建 `export_clip` job；新增 `MediaModule`，提供 `GET /media/{id}` 供 Media Detail 页面读取真实 metadata 和 assets；`packages/shared` 的 `export_clip` schema 增加 `end_time_seconds > start_time_seconds` 校验并重新生成 Python worker 可读 JSON Schema。Python worker 新增 `ExportClipHandler`，根据 `file_id` 回表获取源视频路径，用 FFmpeg stream copy 导出到 `.media-agent/exports/clips`，并写回 `export_path` 与 `duration_seconds`。前端 typed API client 新增 `exportClip`，Media Detail 片段卡片新增导出动作和任务状态反馈，真实 `/media/[id]` 页面改为优先读取后端媒体详情，demo/后端不可用时回退 demo。
+- Notes：遵循红绿流程，先写 server clips/media controller 测试、Python export worker 测试、web API client 和 Media Detail 导出按钮测试，并观察缺模块/缺方法失败，再补实现。验证通过：shared JSON Schema 生成；server `tsc --noEmit`；server Vitest 12 个 test files / 23 tests；Python worker unittest 13 tests；shared `tsc --noEmit` 和 Vitest 3 tests；web `check`，包含 typecheck、Vitest 4 个 test files / 6 tests、Next webpack build；`git diff --check`。`corepack pnpm --filter @local-media-agent/server check` 和 shared check 仍因 package script 内部调用裸 `pnpm` 且当前 shell 没有 pnpm shim 失败，本次继续使用等价 `corepack pnpm exec ...` 命令分别验证。浏览器验证复用已有 `localhost:3000` dev server：`/media/demo` 桌面和移动宽度下可见片段与导出按钮；后端 API 未启动时点击导出显示失败状态。未执行真实 FFmpeg 导出命令，FFmpeg 参数通过注入 runner 的 Python 测试覆盖，真实运行前需确保系统可执行 `ffmpeg` 在 PATH 中。
 
 ## Phase 9：Agent MVP
 
@@ -323,3 +329,20 @@ Review：
 
 - Result：
 - Notes：
+
+## 工具链补充：Prettier 与 ESLint
+
+- Start：2026-06-03，目标是在 monorepo 根目录添加通用格式化和 lint 配置，不改变业务 Phase 进度。
+- 假设：当前先使用轻量 recommended 规则，避免一次性引入大量风格规则导致噪音；Next 专属规则后续可在前端规则稳定后再加。
+- 验证计划：运行 Prettier check、ESLint 和 `git diff --check`，只根据验证结果调整配置。
+
+- [x] 添加根目录 Prettier 配置。
+- [x] 添加根目录 ESLint flat config。
+- [x] 添加根目录 lint / format scripts。
+- [x] 安装并锁定必要 devDependencies。
+- [x] 运行格式和 lint 验证。
+
+Review：
+
+- Result：添加根目录 `prettier.config.mjs`、`.prettierignore` 和 `eslint.config.mjs`；根 `package.json` 新增 `lint`、`format` 和 `format:check` scripts，并安装 `eslint`、`@eslint/js`、`typescript-eslint`、`globals`、`eslint-config-prettier` 和 `prettier` devDependencies。按新 Prettier 配置格式化现有代码/配置文件，并删除 `apps/server/src/database/repositories.ts` 中被 lint 发现的无用 `lt` import。
+- Notes：验证通过：`corepack pnpm format:check`；`corepack pnpm lint`；`git diff --check`；`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，10 个 test files / 21 个 tests 通过；`corepack pnpm --filter @local-media-agent/web check`，包含 typecheck、3 个 test files / 4 个 tests 和 Next build；`corepack pnpm --filter @local-media-agent/shared exec node --import tsx scripts/generate-json-schemas.ts`、`tsc --noEmit` 和 Vitest 3 个 tests 通过。`corepack pnpm check` 仍因当前 shell 没有裸 `pnpm` shim 且根脚本内部调用 `pnpm --recursive check` 而失败；该限制与此前 Phase 记录一致，本次未扩大范围重写既有 package check scripts。

@@ -1,7 +1,7 @@
-import { Body, Controller, Inject, Post } from "@nestjs/common";
-import { SearchService, type SearchRequest } from "./search.service.js";
+import { Body, Controller, Inject, Post } from '@nestjs/common'
+import { SearchService, type SearchRequest } from './search.service.js'
 
-@Controller("search")
+@Controller('search')
 export class SearchController {
   constructor(
     @Inject(SearchService)
@@ -10,6 +10,6 @@ export class SearchController {
 
   @Post()
   search(@Body() body: SearchRequest) {
-    return this.searchService.search(body);
+    return this.searchService.search(body)
   }
 }

@@ -3,7 +3,30 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "echo \"Next.js app is implemented in Phase 7\"",
-    "check": "echo \"No web checks configured yet\""
+    "dev": "next dev --hostname 127.0.0.1 --port 3000",
+    "build": "next build --webpack",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit && vitest run && next build --webpack"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.17.0",
+    "next": "^16.2.6",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.16",
+    "@types/react-dom": "^19.2.3",
+    "autoprefixer": "^10.5.0",
+    "jsdom": "^29.1.1",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
   }
 }

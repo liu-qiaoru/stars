@@ -1,12 +1,12 @@
-import { Module } from "@nestjs/common";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-import { ConfigModule } from "../config/config.module.js";
-import { SETTINGS, type Settings } from "../config/settings.js";
-import * as schema from "./schema.js";
+import { Module } from '@nestjs/common'
+import { drizzle } from 'drizzle-orm/node-postgres'
+import { Pool } from 'pg'
+import { ConfigModule } from '../config/config.module.js'
+import { SETTINGS, type Settings } from '../config/settings.js'
+import * as schema from './schema.js'
 
-export const PG_POOL = Symbol("PG_POOL");
-export const DATABASE = Symbol("DATABASE");
+export const PG_POOL = Symbol('PG_POOL')
+export const DATABASE = Symbol('DATABASE')
 
 @Module({
   imports: [ConfigModule],

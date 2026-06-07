@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, lt } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import type { PgliteDatabase } from "drizzle-orm/pglite";
+import { randomUUID } from 'node:crypto'
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
+import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import {
   jobs,
   libraries,
@@ -11,37 +11,39 @@ import {
   type agentRunEvents,
   type agentRuns,
   type agentToolCalls,
-} from "./schema.js";
-import type * as schema from "./schema.js";
+} from './schema.js'
+import type * as schema from './schema.js'
 
-type JsonValue = unknown;
-export type Database = NodePgDatabase<typeof schema> | PgliteDatabase<typeof schema>;
+type JsonValue = unknown
+export type Database = NodePgDatabase<typeof schema> | PgliteDatabase<typeof schema>
 
-type InsertLibrary = typeof libraries.$inferInsert;
-type InsertMediaFile = typeof mediaFiles.$inferInsert;
-type InsertMediaAsset = typeof mediaAssets.$inferInsert;
-type InsertVectorRef = typeof vectorRefs.$inferInsert;
-type InsertJob = typeof jobs.$inferInsert;
+type InsertLibrary = typeof libraries.$inferInsert
+type InsertMediaFile = typeof mediaFiles.$inferInsert
+type InsertMediaAsset = typeof mediaAssets.$inferInsert
+type InsertVectorRef = typeof vectorRefs.$inferInsert
+type InsertJob = typeof jobs.$inferInsert
 
-export async function createLibrary(db: Database, input: Pick<InsertLibrary, "name" | "rootPath">) {
+export async function createLibrary(db: Database, input: Pick<InsertLibrary, 'name' | 'rootPath'>) {
   const [row] = await db
     .insert(libraries)
     .values({
       id: randomUUID(),
       ...input,
     })
-    .returning();
+    .returning()
 
-  return row;
+  return row
 }
 
 export async function createMediaFile(
   db: Database,
   input: Pick<
     InsertMediaFile,
-    "libraryId" | "path" | "relativePath" | "mediaType" | "sizeBytes" | "mtimeMs"
+    'libraryId' | 'path' | 'relativePath' | 'mediaType' | 'sizeBytes' | 'mtimeMs'
   > &
-    Partial<Pick<InsertMediaFile, "contentHash" | "durationSeconds" | "width" | "height" | "codec">>,
+    Partial<
+      Pick<InsertMediaFile, 'contentHash' | 'durationSeconds' | 'width' | 'height' | 'codec'>
+    >,
 ) {
   const [row] = await db
     .insert(mediaFiles)
@@ -49,18 +51,23 @@ export async function createMediaFile(
       id: randomUUID(),
       ...input,
     })
-    .returning();
+    .returning()
 
-  return row;
+  return row
 }
 
 export async function createMediaAsset(
   db: Database,
-  input: Pick<InsertMediaAsset, "fileId" | "assetType"> &
+  input: Pick<InsertMediaAsset, 'fileId' | 'assetType'> &
     Partial<
       Pick<
         InsertMediaAsset,
-        "path" | "startTimeSeconds" | "endTimeSeconds" | "frameTimeSeconds" | "contentHash" | "metadataJson"
+        | 'path'
+        | 'startTimeSeconds'
+        | 'endTimeSeconds'
+        | 'frameTimeSeconds'
+        | 'contentHash'
+        | 'metadataJson'
       >
     >,
 ) {
@@ -70,27 +77,27 @@ export async function createMediaAsset(
       id: randomUUID(),
       ...input,
     })
-    .returning();
+    .returning()
 
-  return row;
+  return row
 }
 
 export async function createVectorRef(
   db: Database,
   input: Pick<
     InsertVectorRef,
-    | "assetId"
-    | "fileId"
-    | "libraryId"
-    | "collectionName"
-    | "pointId"
-    | "modelName"
-    | "modelVersion"
-    | "vectorKind"
-    | "vectorDim"
-    | "distance"
-    | "contentHash"
-    | "indexProfile"
+    | 'assetId'
+    | 'fileId'
+    | 'libraryId'
+    | 'collectionName'
+    | 'pointId'
+    | 'modelName'
+    | 'modelVersion'
+    | 'vectorKind'
+    | 'vectorDim'
+    | 'distance'
+    | 'contentHash'
+    | 'indexProfile'
   >,
 ) {
   // point_id 由 worker 按 vector-index-design 的确定性规则生成；repository 只保存引用关系。
@@ -100,16 +107,16 @@ export async function createVectorRef(
       id: randomUUID(),
       ...input,
     })
-    .returning();
+    .returning()
 
-  return row;
+  return row
 }
 
 export async function createJob(
   db: Database,
-  input: Pick<InsertJob, "jobType"> &
-    Partial<Pick<InsertJob, "priority" | "maxAttempts" | "timeoutSeconds">> & {
-      inputJson: JsonValue;
+  input: Pick<InsertJob, 'jobType'> &
+    Partial<Pick<InsertJob, 'priority' | 'maxAttempts' | 'timeoutSeconds'>> & {
+      inputJson: JsonValue
     },
 ) {
   // input_json 必须来自 packages/shared 的 job schema，Python worker 只消费生成后的 JSON Schema。
@@ -119,9 +126,9 @@ export async function createJob(
       id: randomUUID(),
       ...input,
     })
-    .returning();
+    .returning()
 
-  return row;
+  return row
 }
 
 export async function getFileWithAssetsAndVectors(db: Database, fileId: string) {
@@ -133,26 +140,36 @@ export async function getFileWithAssetsAndVectors(db: Database, fileId: string) 
     },
   })) as
     | (typeof mediaFiles.$inferSelect & {
-        assets: (typeof mediaAssets.$inferSelect)[];
-        vectorRefs: (typeof vectorRefs.$inferSelect)[];
+        assets: (typeof mediaAssets.$inferSelect)[]
+        vectorRefs: (typeof vectorRefs.$inferSelect)[]
       })
-    | undefined;
+    | undefined
 
   if (!file) {
-    return undefined;
+    return undefined
   }
 
-  const { assets, vectorRefs: refs, ...fileRow } = file;
+  const { assets, vectorRefs: refs, ...fileRow } = file
   return {
     file: fileRow,
     assets,
     vectorRefs: refs,
-  };
+  }
+}
+
+export async function getMediaFile(db: Database, fileId: string) {
+  const [row] = await db
+    .select()
+    .from(mediaFiles)
+    .where(and(eq(mediaFiles.id, fileId), isNull(mediaFiles.deletedAt)))
+    .limit(1)
+
+  return row
 }
 
 export interface SearchMetadataFilters {
-  mediaTypes?: string[];
-  libraryIds?: string[];
+  mediaTypes?: string[]
+  libraryIds?: string[]
 }
 
 export async function listSearchResultMetadata(
@@ -162,7 +179,7 @@ export async function listSearchResultMetadata(
   filters: SearchMetadataFilters = {},
 ) {
   if (pointIds.length === 0) {
-    return [];
+    return []
   }
 
   const conditions = [
@@ -170,12 +187,12 @@ export async function listSearchResultMetadata(
     inArray(vectorRefs.pointId, pointIds),
     isNull(mediaFiles.deletedAt),
     isNull(libraries.deletedAt),
-  ];
+  ]
   if (filters.mediaTypes?.length) {
-    conditions.push(inArray(mediaFiles.mediaType, filters.mediaTypes));
+    conditions.push(inArray(mediaFiles.mediaType, filters.mediaTypes))
   }
   if (filters.libraryIds?.length) {
-    conditions.push(inArray(mediaFiles.libraryId, filters.libraryIds));
+    conditions.push(inArray(mediaFiles.libraryId, filters.libraryIds))
   }
 
   return db
@@ -192,11 +209,15 @@ export async function listSearchResultMetadata(
     .innerJoin(mediaAssets, eq(vectorRefs.assetId, mediaAssets.id))
     .innerJoin(mediaFiles, eq(vectorRefs.fileId, mediaFiles.id))
     .innerJoin(libraries, eq(vectorRefs.libraryId, libraries.id))
-    .where(and(...conditions));
+    .where(and(...conditions))
 }
 
 export async function listLibraries(db: Database) {
-  return db.select().from(libraries).where(isNull(libraries.deletedAt)).orderBy(asc(libraries.createdAt));
+  return db
+    .select()
+    .from(libraries)
+    .where(isNull(libraries.deletedAt))
+    .orderBy(asc(libraries.createdAt))
 }
 
 export async function getLibrary(db: Database, id: string) {
@@ -204,42 +225,46 @@ export async function getLibrary(db: Database, id: string) {
     .select()
     .from(libraries)
     .where(and(eq(libraries.id, id), isNull(libraries.deletedAt)))
-    .limit(1);
+    .limit(1)
 
-  return row;
+  return row
 }
 
 export async function getLibraryMediaCounts(db: Database, libraryId: string) {
-  const rows = await db.select().from(mediaFiles).where(eq(mediaFiles.libraryId, libraryId));
+  const rows = await db.select().from(mediaFiles).where(eq(mediaFiles.libraryId, libraryId))
   return {
     mediaCount: rows.length,
-    indexedCount: rows.filter((row) => row.indexStatus === "indexed").length,
-    failedCount: rows.filter((row) => row.indexStatus === "failed").length,
-  };
+    indexedCount: rows.filter((row) => row.indexStatus === 'indexed').length,
+    failedCount: rows.filter((row) => row.indexStatus === 'failed').length,
+  }
 }
 
-export async function updateLibraryStatus(db: Database, id: string, status: "active" | "disabled" | "deleted") {
-  const now = new Date();
+export async function updateLibraryStatus(
+  db: Database,
+  id: string,
+  status: 'active' | 'disabled' | 'deleted',
+) {
+  const now = new Date()
   const [row] = await db
     .update(libraries)
     .set({
       status,
       updatedAt: now,
-      deletedAt: status === "deleted" ? now : null,
+      deletedAt: status === 'deleted' ? now : null,
     })
     .where(eq(libraries.id, id))
-    .returning();
+    .returning()
 
-  return row;
+  return row
 }
 
 export async function listJobs(db: Database) {
-  return db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(50);
+  return db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(50)
 }
 
 export async function getJob(db: Database, id: string) {
-  const [row] = await db.select().from(jobs).where(eq(jobs.id, id)).limit(1);
-  return row;
+  const [row] = await db.select().from(jobs).where(eq(jobs.id, id)).limit(1)
+  return row
 }
 
 export async function claimNextJob(db: Database, workerId: string, now = new Date()) {
@@ -247,71 +272,76 @@ export async function claimNextJob(db: Database, workerId: string, now = new Dat
   const [candidate] = await db
     .select()
     .from(jobs)
-    .where(eq(jobs.status, "queued"))
+    .where(eq(jobs.status, 'queued'))
     .orderBy(desc(jobs.priority), asc(jobs.createdAt))
-    .limit(1);
+    .limit(1)
 
   if (!candidate) {
-    return undefined;
+    return undefined
   }
 
   const [claimed] = await db
     .update(jobs)
     .set({
-      status: "running",
+      status: 'running',
       lockedBy: workerId,
       lockedAt: now,
       heartbeatAt: now,
       attempt: candidate.attempt + 1,
       updatedAt: now,
     })
-    .where(and(eq(jobs.id, candidate.id), eq(jobs.status, "queued")))
-    .returning();
+    .where(and(eq(jobs.id, candidate.id), eq(jobs.status, 'queued')))
+    .returning()
 
-  return claimed;
+  return claimed
 }
 
 export async function reclaimStaleJobs(db: Database, now = new Date()) {
-  const runningJobs = await db.select().from(jobs).where(eq(jobs.status, "running"));
+  const runningJobs = await db.select().from(jobs).where(eq(jobs.status, 'running'))
   const staleIds = runningJobs
     .filter((job) => {
       if (!job.heartbeatAt) {
-        return true;
+        return true
       }
-      return now.getTime() - job.heartbeatAt.getTime() > job.timeoutSeconds * 1000;
+      return now.getTime() - job.heartbeatAt.getTime() > job.timeoutSeconds * 1000
     })
-    .map((job) => job.id);
+    .map((job) => job.id)
 
   for (const id of staleIds) {
     await db
       .update(jobs)
       .set({
-        status: "queued",
+        status: 'queued',
         lockedBy: null,
         lockedAt: null,
         heartbeatAt: null,
         updatedAt: now,
       })
-      .where(eq(jobs.id, id));
+      .where(eq(jobs.id, id))
   }
 
-  return staleIds.length;
+  return staleIds.length
 }
 
-export async function markJobSucceeded(db: Database, id: string, resultJson: JsonValue, now = new Date()) {
+export async function markJobSucceeded(
+  db: Database,
+  id: string,
+  resultJson: JsonValue,
+  now = new Date(),
+) {
   const [row] = await db
     .update(jobs)
     .set({
-      status: "succeeded",
+      status: 'succeeded',
       progress: 100,
       resultJson,
       updatedAt: now,
       finishedAt: now,
     })
     .where(eq(jobs.id, id))
-    .returning();
+    .returning()
 
-  return row;
+  return row
 }
 
 export async function heartbeatJob(db: Database, id: string, now = new Date()) {
@@ -321,12 +351,12 @@ export async function heartbeatJob(db: Database, id: string, now = new Date()) {
       heartbeatAt: now,
       updatedAt: now,
     })
-    .where(and(eq(jobs.id, id), eq(jobs.status, "running")))
-    .returning();
+    .where(and(eq(jobs.id, id), eq(jobs.status, 'running')))
+    .returning()
 
-  return row;
+  return row
 }
 
-export type AgentRunRow = typeof agentRuns.$inferSelect;
-export type AgentRunEventRow = typeof agentRunEvents.$inferSelect;
-export type AgentToolCallRow = typeof agentToolCalls.$inferSelect;
+export type AgentRunRow = typeof agentRuns.$inferSelect
+export type AgentRunEventRow = typeof agentRunEvents.$inferSelect
+export type AgentToolCallRow = typeof agentToolCalls.$inferSelect

@@ -4,7 +4,8 @@ node_modules/
 dist/
 coverage/
 .DS_Store
+apps/web/.next/
+apps/web/tsconfig.tsbuildinfo
 *.test.ts
 # !apps/server/tests/**/*.test.ts
 # !packages/shared/tests/**/*.test.ts
-

@@ -2,7 +2,7 @@
 
 这是一个本地优先的媒体检索与剪辑 Agent，用于管理个人图片、视频、音频和文本素材库。
 
-项目实现遵循 `docs/architecture.md` 的架构设计，并按 `docs/tasks/todo.md` 中的 Phase 分阶段推进。当前阶段已经建立 monorepo 基础设施，并将 TypeScript API 基础服务迁移到 NestJS。
+项目实现遵循 `docs/architecture.md` 的架构设计，并按 `docs/tasks/todo.md` 中的 Phase 分阶段推进。当前阶段已完成后端 API（Phase 1-6）和 Next.js 前端（Phase 7）。
 
 ## 仓库结构
 
@@ -45,19 +45,23 @@ docker compose --env-file .env -f infra/docker-compose.yml --profile realtime up
 
 ## 启动服务
 
-Phase 2A 已提供 NestJS 基础健康检查能力：
+按以下顺序启动（每步在新终端中运行）：
+
+### 1. 基础设施（PostgreSQL + Qdrant）
+
+```bash
+docker compose --env-file .env -f infra/docker-compose.yml up -d postgres qdrant
+```
+
+### 2. 后端 API
 
 ```bash
 pnpm --filter @local-media-agent/server dev
 ```
 
-默认地址来自 `.env`：
+后端默认地址：`http://127.0.0.1:4000`
 
-```text
-http://127.0.0.1:4000
-```
-
-健康检查：
+验证后端是否就绪：
 
 ```bash
 curl http://127.0.0.1:4000/health
@@ -77,6 +81,16 @@ curl http://127.0.0.1:4000/health
 
 如果任一依赖不可用，接口会返回 HTTP 503，并在 `dependencies` 中标出失败项。
 
+### 3. 前端
+
+```bash
+pnpm --filter @local-media-agent/web dev
+```
+
+前端默认地址：`http://127.0.0.1:3000`
+
+前端导航栏右侧会显示后端连接状态（绿色 = 已连接，红色 = 未连接）。如果显示"未连接"，请确认后端 API 已启动。
+
 ## 验证
 
 验证整个 workspace：
@@ -91,10 +105,16 @@ pnpm check
 pnpm --filter @local-media-agent/server check
 ```
 
+只验证前端：
+
+```bash
+pnpm --filter @local-media-agent/web check
+```
+
 验证 Docker Compose 配置：
 
 ```bash
 docker compose --env-file .env -f infra/docker-compose.yml config
 ```
 
-后续 Phase 会继续加入数据库迁移、API contract、Python worker、前端界面和端到端验证。
+后续 Phase 会继续加入 Python worker 真实媒体处理、Agent Runtime 和端到端验证。

@@ -1,10 +1,20 @@
 class WorkerRunner:
-    def __init__(self, *, worker_id, job_repository, scan_handler=None, probe_handler=None, index_handler=None):
+    def __init__(
+        self,
+        *,
+        worker_id,
+        job_repository,
+        scan_handler=None,
+        probe_handler=None,
+        index_handler=None,
+        export_handler=None,
+    ):
         self.worker_id = worker_id
         self.job_repository = job_repository
         self.scan_handler = scan_handler
         self.probe_handler = probe_handler
         self.index_handler = index_handler
+        self.export_handler = export_handler
         self._shutdown_requested = False
 
     def request_shutdown(self):
@@ -26,6 +36,8 @@ class WorkerRunner:
                 result = self.probe_handler.handle(job["input_json"])
             elif job["job_type"] == "index_media" and self.index_handler is not None:
                 result = self.index_handler.handle(job["input_json"])
+            elif job["job_type"] == "export_clip" and self.export_handler is not None:
+                result = self.export_handler.handle(job["input_json"])
             else:
                 raise ValueError(f"Unsupported job type: {job['job_type']}")
             self.job_repository.mark_succeeded(job["id"], result)

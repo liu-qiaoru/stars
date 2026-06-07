@@ -1,0 +1,10 @@
+node_modules/
+.claude/
+.next/
+dist/
+coverage/
+.media-agent/
+apps/server/drizzle/meta/
+packages/shared/generated/
+apps/web/public/
+pnpm-lock.yaml

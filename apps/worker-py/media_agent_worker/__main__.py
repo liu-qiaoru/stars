@@ -2,6 +2,7 @@ import os
 import signal
 import time
 
+from .exporting import ExportClipHandler
 from .indexing import IndexMediaHandler
 from .probe import ProbeHandler
 from .qdrant import QdrantHttpClient
@@ -22,6 +23,7 @@ def main():
         scan_handler=ScanHandler(media_repository, job_repository=job_repository),
         probe_handler=ProbeHandler(media_repository, job_repository=job_repository),
         index_handler=IndexMediaHandler(media_repository, QdrantHttpClient()),
+        export_handler=ExportClipHandler(media_repository),
     )
 
     def request_shutdown(_signum, _frame):

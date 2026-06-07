@@ -1,7 +1,7 @@
-import { Controller, Get, Inject, Param } from "@nestjs/common";
-import { JobsService } from "./jobs.service.js";
+import { Controller, Get, Inject, Param } from '@nestjs/common'
+import { JobsService } from './jobs.service.js'
 
-@Controller("jobs")
+@Controller('jobs')
 export class JobsController {
   constructor(
     @Inject(JobsService)
@@ -10,11 +10,11 @@ export class JobsController {
 
   @Get()
   listJobs() {
-    return this.jobsService.listJobs();
+    return this.jobsService.listJobs()
   }
 
-  @Get(":id")
-  getJob(@Param("id") id: string) {
-    return this.jobsService.getJob(id);
+  @Get(':id')
+  getJob(@Param('id') id: string) {
+    return this.jobsService.getJob(id)
   }
 }

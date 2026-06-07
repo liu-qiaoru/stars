@@ -9,5 +9,11 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node", "vitest"]
   },
-  "include": ["schemas/**/*.ts", "constants/**/*.ts", "types/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "schemas/**/*.ts",
+    "constants/**/*.ts",
+    "types/**/*.ts",
+    "scripts/**/*.ts",
+    "tests/**/*.ts"
+  ]
 }
