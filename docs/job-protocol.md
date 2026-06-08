@@ -126,15 +126,15 @@ MVP 扫描幂等策略为 `path + size + mtime`：
 
 该策略可能漏掉保留 mtime 和 size 的原地改写。后续 content hash rescan 只在用户手动触发或重点目录上执行，避免默认全库 hash 带来高 I/O。
 
-## Phase 5 索引边界
+## Phase 5/10 索引边界
 
-Phase 5 保持 TypeScript server 与 Python worker 的写入边界：
+Phase 5 建立索引骨架，Phase 10 起切换为真实 SigLIP embedding。TypeScript server 与 Python worker 的写入边界保持不变：
 
 - TypeScript server 维护 Qdrant collection registry，并负责初始化缺失 collection。
 - TypeScript server 不生成或传递大向量数组。
 - Python worker 执行 `probe_media` 和 `index_media`。
 - Python worker 为图片和固定 30 秒视频片段创建 `media_assets`。
-- Python worker 生成 deterministic mock vectors，写入 Qdrant points，并幂等写入 PostgreSQL `vector_refs`。
+- Phase 10 起，`index_media` 只创建 pending `vector_refs`；真实向量由下游 embedding jobs 写入 Qdrant。
 - `point_id` 使用 deterministic UUID，输入包含 `asset_id`、collection、model name/version、vector kind 和 content hash。
 
 ### 管线触发链
@@ -144,14 +144,16 @@ Python worker 负责管线内部的 job 链式触发，区别于 TypeScript serv
 ```text
 scan_library 完成 → 为每个 created/updated file 创建 probe_media job
 probe_media 完成 → 为该 file 创建 index_media job（默认 balanced + fixed_30s）
-index_media 完成 → Qdrant 向量已写入，无下游 job
+index_media 完成 → 创建 assets 和 pending vector_refs
+POST /jobs/embedding/queue-pending → 为 pending vector_refs 创建 embed_image / embed_video_frame jobs
+embedding job 完成 → Qdrant point 已写入，vector_ref.status = indexed
 ```
 
 `media_files.index_status` 状态流转：
 
 ```text
 pending → probed（probe_media 完成后由 worker 写入）
-probed → indexed（真实 embedding 完成后；mock 阶段跳过此状态，直接在 vector_refs 中写 indexed）
+probed → indexed（真实 embedding 完成后）
 ```
 
 `probed` 表示文件 metadata（duration、width、height、codec）已探测完毕，可以创建 index job。
@@ -258,6 +260,70 @@ vector_refs
 jobs.*
 ```
 
+触发关系：
+
+```text
+1. TypeScript server 创建 index_media job。
+2. Python worker 执行 index_media，创建 assets 和 pending vector_refs。
+3. TypeScript server 的索引协调入口扫描 pending vector_refs。
+4. 协调任务按 collection 和 asset_type 创建 embed_image 或 embed_video_frame jobs。
+```
+
+推荐该解耦方式，避免 index_media 同时承担资产生成、真实模型推理和下游任务编排。
+
+### embed_image
+
+Input：
+
+```json
+{
+  "asset_id": "uuid",
+  "path": "/Volumes/Media/image.jpg",
+  "collection": "image_vectors",
+  "model_name": "google/siglip-base-patch16-224",
+  "model_version": "siglip-base-patch16-224"
+}
+```
+
+Result：
+
+```json
+{
+  "point_id": "uuid",
+  "collection": "image_vectors",
+  "vector_dim": 768,
+  "model_name": "google/siglip-base-patch16-224",
+  "model_version": "siglip-base-patch16-224"
+}
+```
+
+### embed_video_frame
+
+Input：
+
+```json
+{
+  "asset_id": "uuid",
+  "frame_path": "/Volumes/Media/video.mp4",
+  "frame_time_seconds": 45.0,
+  "collection": "video_segment_vectors",
+  "model_name": "google/siglip-base-patch16-224",
+  "model_version": "siglip-base-patch16-224"
+}
+```
+
+Result：
+
+```json
+{
+  "point_id": "uuid",
+  "collection": "video_segment_vectors",
+  "vector_dim": 768,
+  "model_name": "google/siglip-base-patch16-224",
+  "model_version": "siglip-base-patch16-224"
+}
+```
+
 ### export_clip
 
 Input：
@@ -295,69 +361,6 @@ jobs.progress
 jobs.result_json
 jobs.error_message
 jobs.heartbeat_at
-```
-
-触发关系：
-
-```text
-1. TypeScript server 创建 index_media job。
-2. Python worker 执行 index_media，创建 assets、pending vector_refs，并在 mock 阶段写入 mock vectors。
-3. 真实 embedding 阶段，index_media 完成后，TypeScript server 或索引协调任务扫描 pending vector_refs。
-4. 协调任务按 collection 和 asset_type 创建 embed_image、embed_video_frame 或 text embedding jobs。
-```
-
-推荐该解耦方式，避免 index_media 同时承担资产生成、真实模型推理和下游任务编排。
-
-### embed_image
-
-Input：
-
-```json
-{
-  "asset_id": "uuid",
-  "path": "/Volumes/Media/image.jpg",
-  "collection": "image_vectors",
-  "model_name": "openclip",
-  "model_version": "ViT-B-32-laion2b"
-}
-```
-
-Result：
-
-```json
-{
-  "point_id": "uuid",
-  "collection": "image_vectors",
-  "vector_dim": 512,
-  "model_name": "openclip",
-  "model_version": "ViT-B-32-laion2b"
-}
-```
-
-### embed_video_frame
-
-Input：
-
-```json
-{
-  "asset_id": "uuid",
-  "frame_path": ".media-agent/cache/frames/file/frame.jpg",
-  "collection": "video_frame_vectors",
-  "model_name": "openclip",
-  "model_version": "ViT-B-32-laion2b"
-}
-```
-
-Result：
-
-```json
-{
-  "point_id": "uuid",
-  "collection": "video_frame_vectors",
-  "vector_dim": 512,
-  "model_name": "openclip",
-  "model_version": "ViT-B-32-laion2b"
-}
 ```
 
 ### scene_detection
@@ -472,7 +475,6 @@ Python worker 不可以：
 
 Python worker 负责写入 Qdrant points：
 
-- Phase 5 mock vectors 由 Python worker 写入 Qdrant。
 - Phase 10 真实 embeddings 由 Python worker 写入 Qdrant。
 - Python worker 写入成功后更新 `vector_refs`。
 
@@ -483,4 +485,4 @@ TypeScript server 负责：
 - 执行 Qdrant search。
 - 回 PostgreSQL 补齐结果 metadata。
 
-这样可以避免在 TypeScript 和 Python 之间传递大向量数组，也避免 mock 写入和真实写入分属两个进程。
+这样可以避免在 TypeScript 和 Python 之间传递大向量数组，也避免索引协调逻辑和真实模型推理耦合在同一个 job 中。

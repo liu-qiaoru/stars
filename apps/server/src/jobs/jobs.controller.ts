@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param } from '@nestjs/common'
+import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common'
 import { JobsService } from './jobs.service.js'
 
 @Controller('jobs')
@@ -16,5 +16,10 @@ export class JobsController {
   @Get(':id')
   getJob(@Param('id') id: string) {
     return this.jobsService.getJob(id)
+  }
+
+  @Post('embedding/queue-pending')
+  queuePendingEmbeddingJobs(@Body() body: { limit?: number }) {
+    return this.jobsService.queuePendingEmbeddingJobs(body?.limit)
   }
 }

@@ -1,16 +1,16 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import {
+  agentRunEvents,
+  agentRuns,
+  agentToolCalls,
   jobs,
   libraries,
   mediaAssets,
   mediaFiles,
   vectorRefs,
-  type agentRunEvents,
-  type agentRuns,
-  type agentToolCalls,
 } from './schema.js'
 import type * as schema from './schema.js'
 
@@ -22,6 +22,10 @@ type InsertMediaFile = typeof mediaFiles.$inferInsert
 type InsertMediaAsset = typeof mediaAssets.$inferInsert
 type InsertVectorRef = typeof vectorRefs.$inferInsert
 type InsertJob = typeof jobs.$inferInsert
+type InsertAgentRun = typeof agentRuns.$inferInsert
+type InsertAgentRunEvent = typeof agentRunEvents.$inferInsert
+type InsertAgentToolCall = typeof agentToolCalls.$inferInsert
+const POINT_NAMESPACE = 'f3f4e35a-688d-4f79-99e0-91f9480a5827'
 
 export async function createLibrary(db: Database, input: Pick<InsertLibrary, 'name' | 'rootPath'>) {
   const [row] = await db
@@ -129,6 +133,128 @@ export async function createJob(
     .returning()
 
   return row
+}
+
+export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 100) {
+  return db
+    .select({
+      vectorRefId: vectorRefs.id,
+      assetId: vectorRefs.assetId,
+      fileId: vectorRefs.fileId,
+      libraryId: vectorRefs.libraryId,
+      collectionName: vectorRefs.collectionName,
+      pointId: vectorRefs.pointId,
+      modelName: vectorRefs.modelName,
+      modelVersion: vectorRefs.modelVersion,
+      vectorKind: vectorRefs.vectorKind,
+      vectorDim: vectorRefs.vectorDim,
+      assetType: mediaAssets.assetType,
+      assetPath: mediaAssets.path,
+      startTimeSeconds: mediaAssets.startTimeSeconds,
+      endTimeSeconds: mediaAssets.endTimeSeconds,
+      frameTimeSeconds: mediaAssets.frameTimeSeconds,
+      filePath: mediaFiles.path,
+      mediaType: mediaFiles.mediaType,
+    })
+    .from(vectorRefs)
+    .innerJoin(mediaAssets, eq(vectorRefs.assetId, mediaAssets.id))
+    .innerJoin(mediaFiles, eq(vectorRefs.fileId, mediaFiles.id))
+    .where(
+      and(
+        eq(vectorRefs.status, 'pending'),
+        inArray(vectorRefs.collectionName, [
+          'image_vectors',
+          'video_frame_vectors',
+          'video_segment_vectors',
+        ]),
+        isNull(mediaFiles.deletedAt),
+      ),
+    )
+    .orderBy(asc(vectorRefs.createdAt))
+    .limit(limitCount)
+}
+
+export async function resetVectorRefsForCollection(
+  db: Database,
+  input: Pick<
+    InsertVectorRef,
+    'collectionName' | 'modelName' | 'modelVersion' | 'vectorKind' | 'vectorDim' | 'distance'
+  >,
+) {
+  const rows = await db
+    .select()
+    .from(vectorRefs)
+    .where(eq(vectorRefs.collectionName, input.collectionName))
+
+  let updated = 0
+  for (const row of rows) {
+    await db
+      .update(vectorRefs)
+      .set({
+        pointId: deterministicPointId({
+          assetId: row.assetId,
+          collectionName: input.collectionName,
+          modelName: input.modelName,
+          modelVersion: input.modelVersion,
+          vectorKind: input.vectorKind,
+          contentHash: row.contentHash,
+        }),
+        modelName: input.modelName,
+        modelVersion: input.modelVersion,
+        vectorKind: input.vectorKind,
+        vectorDim: input.vectorDim,
+        distance: input.distance,
+        status: 'pending',
+        updatedAt: new Date(),
+      })
+      .where(eq(vectorRefs.id, row.id))
+    updated += 1
+  }
+
+  return updated
+}
+
+function deterministicPointId(input: {
+  assetId: string
+  collectionName: string
+  modelName: string
+  modelVersion: string
+  vectorKind: string
+  contentHash: string
+}) {
+  const namespace = Buffer.from(POINT_NAMESPACE.replaceAll('-', ''), 'hex')
+  const name = Buffer.from(
+    [
+      input.assetId,
+      input.collectionName,
+      input.modelName,
+      input.modelVersion,
+      input.vectorKind,
+      input.contentHash,
+    ].join('|'),
+    'utf8',
+  )
+  const digest = createHash('sha1').update(namespace).update(name).digest()
+  digest[6] = (digest[6] & 0x0f) | 0x50
+  digest[8] = (digest[8] & 0x3f) | 0x80
+  const hex = digest.subarray(0, 16).toString('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+export async function listActiveEmbeddingJobs(db: Database) {
+  return db
+    .select({
+      jobType: jobs.jobType,
+      inputJson: jobs.inputJson,
+    })
+    .from(jobs)
+    .where(
+      and(
+        inArray(jobs.jobType, ['embed_image', 'embed_video_frame']),
+        inArray(jobs.status, ['queued', 'running']),
+      ),
+    )
+    .limit(500)
 }
 
 export async function getFileWithAssetsAndVectors(db: Database, fileId: string) {
@@ -353,6 +479,127 @@ export async function heartbeatJob(db: Database, id: string, now = new Date()) {
     })
     .where(and(eq(jobs.id, id), eq(jobs.status, 'running')))
     .returning()
+
+  return row
+}
+
+export async function createAgentRun(db: Database, input: Pick<InsertAgentRun, 'prompt'>) {
+  const [row] = await db
+    .insert(agentRuns)
+    .values({
+      id: randomUUID(),
+      ...input,
+    })
+    .returning()
+
+  return row
+}
+
+export async function updateAgentRun(
+  db: Database,
+  id: string,
+  input: Partial<Pick<InsertAgentRun, 'status' | 'summary' | 'finishedAt'>>,
+  now = new Date(),
+) {
+  const [row] = await db
+    .update(agentRuns)
+    .set({
+      ...input,
+      updatedAt: now,
+    })
+    .where(eq(agentRuns.id, id))
+    .returning()
+
+  return row
+}
+
+export async function createAgentRunEvent(
+  db: Database,
+  input: Pick<InsertAgentRunEvent, 'runId' | 'eventType' | 'payloadJson'> &
+    Partial<Pick<InsertAgentRunEvent, 'toolCallId'>>,
+) {
+  const [row] = await db
+    .insert(agentRunEvents)
+    .values({
+      id: randomUUID(),
+      ...input,
+    })
+    .returning()
+
+  return row
+}
+
+export async function createAgentToolCall(
+  db: Database,
+  input: Pick<
+    InsertAgentToolCall,
+    'runId' | 'toolCallId' | 'toolName' | 'status' | 'inputJson'
+  > &
+    Partial<
+      Pick<InsertAgentToolCall, 'outputJson' | 'errorMessage' | 'requiresConfirmation'>
+    >,
+) {
+  const [row] = await db
+    .insert(agentToolCalls)
+    .values({
+      id: randomUUID(),
+      ...input,
+    })
+    .returning()
+
+  return row
+}
+
+export async function updateAgentToolCall(
+  db: Database,
+  runId: string,
+  toolCallId: string,
+  input: Partial<
+    Pick<
+      InsertAgentToolCall,
+      'status' | 'outputJson' | 'errorMessage' | 'requiresConfirmation' | 'confirmedAt'
+    >
+  >,
+  now = new Date(),
+) {
+  const [row] = await db
+    .update(agentToolCalls)
+    .set({
+      ...input,
+      updatedAt: now,
+    })
+    .where(and(eq(agentToolCalls.runId, runId), eq(agentToolCalls.toolCallId, toolCallId)))
+    .returning()
+
+  return row
+}
+
+export async function getAgentRunWithEventsAndTools(db: Database, id: string) {
+  const [run] = await db.select().from(agentRuns).where(eq(agentRuns.id, id)).limit(1)
+  if (!run) {
+    return undefined
+  }
+
+  const events = await db
+    .select()
+    .from(agentRunEvents)
+    .where(eq(agentRunEvents.runId, id))
+    .orderBy(asc(agentRunEvents.createdAt))
+  const toolCalls = await db
+    .select()
+    .from(agentToolCalls)
+    .where(eq(agentToolCalls.runId, id))
+    .orderBy(asc(agentToolCalls.createdAt))
+
+  return { ...run, events, toolCalls }
+}
+
+export async function getAgentToolCall(db: Database, runId: string, toolCallId: string) {
+  const [row] = await db
+    .select()
+    .from(agentToolCalls)
+    .where(and(eq(agentToolCalls.runId, runId), eq(agentToolCalls.toolCallId, toolCallId)))
+    .limit(1)
 
   return row
 }

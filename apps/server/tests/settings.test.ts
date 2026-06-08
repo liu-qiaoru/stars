@@ -15,6 +15,49 @@ describe("createSettings", () => {
       serverPort: 5001,
       databaseUrl: "postgres://user:pass@localhost:5432/media_agent_test",
       qdrantUrl: "http://localhost:6333",
+      modelServiceUrl: "http://127.0.0.1:4020",
+      modelServiceTimeoutMs: 10000,
+      allowExternalLlm: false,
+      anthropicApiKey: undefined,
+      agentModel: "disabled",
+      agentMaxSteps: 4,
+      agentToolTimeoutMs: 10000,
+    });
+  });
+
+  test("读取 Agent 外部模型配置并保留默认关闭", () => {
+    expect(
+      createSettings({
+        DATABASE_URL: "postgres://user:pass@localhost:5432/media_agent_test",
+        QDRANT_URL: "http://localhost:6333",
+        MODEL_SERVICE_URL: "http://127.0.0.1:5005",
+        MODEL_SERVICE_TIMEOUT_MS: "2500",
+      }),
+    ).toMatchObject({
+      modelServiceUrl: "http://127.0.0.1:5005",
+      modelServiceTimeoutMs: 2500,
+      allowExternalLlm: false,
+      agentModel: "disabled",
+      agentMaxSteps: 4,
+      agentToolTimeoutMs: 10000,
+    });
+
+    expect(
+      createSettings({
+        DATABASE_URL: "postgres://user:pass@localhost:5432/media_agent_test",
+        QDRANT_URL: "http://localhost:6333",
+        ALLOW_EXTERNAL_LLM: "true",
+        ANTHROPIC_API_KEY: "test-key",
+        AGENT_MODEL: "qwen3.7-plus",
+        AGENT_MAX_STEPS: "3",
+        AGENT_TOOL_TIMEOUT_MS: "2500",
+      }),
+    ).toMatchObject({
+      allowExternalLlm: true,
+      anthropicApiKey: "test-key",
+      agentModel: "qwen3.7-plus",
+      agentMaxSteps: 3,
+      agentToolTimeoutMs: 2500,
     });
   });
 

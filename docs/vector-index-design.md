@@ -87,32 +87,32 @@ text_chunk_vectors
 
 每个 collection 必须有明确配置。实现时应在 TypeScript server 中维护一个 collection registry。
 
-示例：
+示例（Phase 10 起使用 SigLIP，向量维度以运行时校验的实际输出为准）：
 
 ```ts
 VECTOR_COLLECTIONS = {
   image_vectors: {
     modality: "image",
     vectorKind: "image_embedding",
-    modelName: "openclip",
-    modelVersion: "ViT-B-32-laion2b",
-    vectorDim: 512,
+    modelName: "google/siglip-base-patch16-224",
+    modelVersion: "siglip-base-patch16-224",
+    vectorDim: 768, // 运行时校验：SigLIP-base hidden_size
     distance: "Cosine",
   },
   video_frame_vectors: {
     modality: "video",
     vectorKind: "frame_embedding",
-    modelName: "openclip",
-    modelVersion: "ViT-B-32-laion2b",
-    vectorDim: 512,
+    modelName: "google/siglip-base-patch16-224",
+    modelVersion: "siglip-base-patch16-224",
+    vectorDim: 768,
     distance: "Cosine",
   },
   video_segment_vectors: {
     modality: "video",
-    vectorKind: "segment_embedding",
-    modelName: "openclip",
-    modelVersion: "ViT-B-32-laion2b",
-    vectorDim: 512,
+    vectorKind: "representative_frame_embedding",
+    modelName: "google/siglip-base-patch16-224",
+    modelVersion: "siglip-base-patch16-224",
+    vectorDim: 768,
     distance: "Cosine",
   },
   audio_segment_vectors: {
@@ -134,7 +134,7 @@ VECTOR_COLLECTIONS = {
 } as const;
 ```
 
-`vector_dim` 必须来自实际 embedding 模型，不应硬编码成无法追踪的魔法数字。模型变更时，应创建新版本记录，并重建对应 collection 或对应 points。
+`vector_dim` 必须来自实际 embedding 模型输出，不应硬编码成无法追踪的魔法数字。SigLIP 公开配置主线显示 hidden_size 768，但实现必须在模型加载或首次推理时读取并校验实际输出维度。模型变更时，应创建新版本记录，并重建对应 collection 或对应 points。Qdrant 不支持修改已有 collection 的向量维度，因此模型升级需要删除并重建 collection。
 
 ## Qdrant Point 结构
 
@@ -152,9 +152,9 @@ VECTOR_COLLECTIONS = {
     "asset_type": "video_segment",
     "start_time_seconds": 120.0,
     "end_time_seconds": 150.0,
-    "model_name": "openclip",
-    "model_version": "ViT-B-32-laion2b",
-    "vector_kind": "segment_embedding",
+    "model_name": "siglip",
+    "model_version": "siglip-base-patch16-224",
+    "vector_kind": "representative_frame_embedding",
     "content_hash": "hash-of-segment-input",
     "index_profile": "balanced"
   }
@@ -373,11 +373,11 @@ vector_collections
 ```text
 1. 从 PostgreSQL 读取 media_asset。
 2. 读取对应缓存或源文件片段。
-3. Python worker 生成 mock vector 或真实 embedding。
-4. Python worker 根据 collection registry 的生成副本校验 vector_dim。
-5. 生成 deterministic point_id。
+3. `index_media` 创建 pending `vector_refs`，不直接写入 Qdrant。
+4. TypeScript server 的显式协调入口扫描 pending `vector_refs`，创建 embedding jobs。
+5. Python worker 执行 embedding job，生成 SigLIP embedding 并校验 vector_dim。
 6. Python worker upsert point 到 Qdrant。
-7. Python worker upsert vector_refs 到 PostgreSQL。
+7. Python worker 将对应 `vector_refs.status` 更新为 `indexed`。
 8. Python worker 更新 job progress。
 ```
 

@@ -227,7 +227,7 @@ Model Gateway 位于 TypeScript 主控层，用统一接口封装本地 Python w
 
 在线搜索需要低延迟 query embedding。真实 embedding 阶段默认增加本地 Python model service，只监听 localhost，负责加载模型并提供 `/embed/text`、`/embed/image` 等轻量 RPC。批量索引仍通过 PostgreSQL jobs 进入 Python worker。
 
-Python worker 和 Python model service 是两个进程模式，可以共享同一套推理代码。Phase 5-9 只启动 worker，不启动 model service。Phase 10 起启动 model service。为避免 MPS/内存压力，默认策略是：在线 query embedding 由 model service 常驻模型处理；批量 embedding job 由 worker 分批加载模型，执行后释放，或配置为调用 model service 批处理端点。
+Python worker 和 Python model service 是两个进程模式，可以共享同一套推理代码。Phase 5-9 只启动 worker，不启动 model service。Phase 10 起启动 model service：`python -m media_agent_worker.model_service` 默认监听 `127.0.0.1:4020`，TypeScript `ModelGatewayService` 通过 `MODEL_SERVICE_URL` 调用 `/embed/text` 获取 query embedding。为避免 MPS/内存压力，默认策略是：在线 query embedding 由 model service 常驻模型处理；worker 进程内的 image/video embedding handlers 共享同一个 SigLIP embedder，避免同一 worker 重复加载模型。Apple Silicon 上可用 `SIGLIP_DEVICE=mps`，资源紧张时用 `SIGLIP_DEVICE=cpu`，CUDA 机器可用 `SIGLIP_DEVICE=cuda`。
 
 ### Clip Export
 

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from media_agent_worker.indexing import IndexMediaHandler, deterministic_point_id, mock_vector
+from media_agent_worker.indexing import IndexMediaHandler, deterministic_point_id
 from media_agent_worker.probe import ProbeHandler, parse_image_dimensions
 from media_agent_worker.worker import WorkerRunner
 
@@ -27,6 +27,7 @@ class FakeMediaRepository:
             asset["asset_type"],
             asset.get("start_time_seconds"),
             asset.get("end_time_seconds"),
+            asset.get("frame_time_seconds"),
             asset.get("path"),
         )
         if key not in self.assets:
@@ -38,14 +39,6 @@ class FakeMediaRepository:
         created = key not in self.vector_refs
         self.vector_refs[key] = vector_ref
         return "created" if created else "skipped"
-
-
-class FakeQdrantClient:
-    def __init__(self):
-        self.points = []
-
-    def upsert_point(self, collection_name, point):
-        self.points.append((collection_name, point))
 
 
 class InMemoryJobRepository:
@@ -126,7 +119,7 @@ class ProbeAndIndexTest(unittest.TestCase):
         self.assertEqual(job_repository.created_jobs[0]["input_json"]["file_id"], "file-1")
         self.assertEqual(job_repository.created_jobs[0]["input_json"]["segment_strategy"], "fixed_30s")
 
-    def test_index_media_creates_30s_video_segments_and_mock_vectors_idempotently(self):
+    def test_index_media_creates_30s_video_segments_and_pending_vector_refs_idempotently(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = str(Path(tmp_dir) / "video.mp4")
             Path(video_path).write_bytes(b"video")
@@ -138,8 +131,7 @@ class ProbeAndIndexTest(unittest.TestCase):
                 "media_type": "video",
                 "duration_seconds": 65.0,
             }
-            qdrant = FakeQdrantClient()
-            handler = IndexMediaHandler(repository, qdrant)
+            handler = IndexMediaHandler(repository)
             job_input = {
                 "file_id": "file-1",
                 "index_profile": "balanced",
@@ -161,19 +153,17 @@ class ProbeAndIndexTest(unittest.TestCase):
             })
             self.assertEqual(len(repository.assets), 3)
             self.assertEqual(len(repository.vector_refs), 3)
-            self.assertEqual(len(qdrant.points), 6)
-            collection_name, point = qdrant.points[0]
-            self.assertEqual(collection_name, "video_segment_vectors")
-            self.assertEqual(len(point["vector"]), 512)
-            self.assertEqual(point["payload"]["file_id"], "file-1")
-            self.assertEqual(point["payload"]["asset_type"], "video_segment")
+            vector_ref = next(iter(repository.vector_refs.values()))
+            self.assertEqual(vector_ref["model_name"], "google/siglip-base-patch16-224")
+            self.assertEqual(vector_ref["model_version"], "siglip-base-patch16-224")
+            self.assertEqual(vector_ref["vector_dim"], 768)
 
     def test_deterministic_mock_vector_and_point_id_are_stable(self):
         point_id = deterministic_point_id(
             asset_id="asset-1",
             collection_name="video_segment_vectors",
-            model_name="mock",
-            model_version="phase5",
+            model_name="google/siglip-base-patch16-224",
+            model_version="siglip-base-patch16-224",
             vector_kind="representative_frame_embedding",
             content_hash="asset-1:0:30",
         )
@@ -183,14 +173,12 @@ class ProbeAndIndexTest(unittest.TestCase):
             deterministic_point_id(
                 asset_id="asset-1",
                 collection_name="video_segment_vectors",
-                model_name="mock",
-                model_version="phase5",
+                model_name="google/siglip-base-patch16-224",
+                model_version="siglip-base-patch16-224",
                 vector_kind="representative_frame_embedding",
                 content_hash="asset-1:0:30",
             ),
         )
-        self.assertEqual(mock_vector(point_id, 4), mock_vector(point_id, 4))
-        self.assertEqual(len(mock_vector(point_id, 4)), 4)
 
     def test_worker_runner_dispatches_probe_and_index_jobs(self):
         probe_repo = InMemoryJobRepository({"id": "probe-1", "job_type": "probe_media", "input_json": {"file_id": "file-1"}})

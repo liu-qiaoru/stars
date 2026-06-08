@@ -196,6 +196,28 @@ Response：
 }
 ```
 
+## POST /jobs/embedding/queue-pending
+
+扫描 pending `vector_refs`，为真实视觉 embedding 创建下游 worker jobs。该接口不传递向量数据，只创建 `embed_image` 或 `embed_video_frame` jobs。
+
+Request：
+
+```json
+{
+  "limit": 100
+}
+```
+
+Response：
+
+```json
+{
+  "scanned": 2,
+  "created": 2,
+  "skipped": 0
+}
+```
+
 ## POST /search
 
 搜索已索引的 media assets。
@@ -347,7 +369,7 @@ Agent run 事件结构：
 事件类型：
 
 ```json
-"run_started" | "tool_call_started" | "tool_call_finished" | "candidate_results" | "user_confirmation_required" | "run_succeeded" | "run_failed"
+"run_started" | "tool_call_started" | "tool_call_finished" | "candidate_results" | "user_confirmation_required" | "user_confirmation_pending" | "run_succeeded" | "run_failed"
 ```
 
 `user_confirmation_required` 事件用于副作用工具（`export_clip`、`create_index_job`）。LLM 提出操作建议后，AgentService 不直接执行，而是写入该事件等待前端确认。前端通过 `POST /agent/runs/{id}/confirm` 确认后才创建实际 job。
@@ -359,7 +381,7 @@ Response：
 ```json
 {
   "run_id": "0bfec861-c770-47ed-8e0d-1642a7a76591",
-  "status": "queued"
+  "status": "succeeded"
 }
 ```
 
@@ -376,14 +398,18 @@ Response：
   "prompt": "Find clips that look like a product launch presentation.",
   "tool_calls": [
     {
+      "tool_call_id": "search-1",
       "name": "search_media",
-      "summary": "Searched video segments for product launch presentation."
+      "status": "succeeded",
+      "summary": "search_media completed",
+      "requires_confirmation": false
     }
   ],
   "events": [
     {
       "event_id": "01J...",
       "type": "tool_call_finished",
+      "tool_call_id": "search-1",
       "created_at": "2026-05-26T10:06:10Z",
       "payload": {
         "tool_name": "search_media",
@@ -420,8 +446,8 @@ Response：
 
 ```json
 {
-  "confirmed": true,
-  "job_id": "cdb55173-624f-4ba9-b1d5-f6d0c0f2b1fb"
+  "job_id": "cdb55173-624f-4ba9-b1d5-f6d0c0f2b1fb",
+  "status": "queued"
 }
 ```
 
@@ -437,10 +463,6 @@ Response（`ALLOW_EXTERNAL_LLM=false`）：
 {
   "run_id": "0bfec861-c770-47ed-8e0d-1642a7a76591",
   "status": "succeeded",
-  "prompt": "Find clips that look like a product launch presentation.",
-  "tool_calls": [],
-  "events": [],
-  "results": [],
-  "message": "外部 LLM 未启用。请在设置中开启 ALLOW_EXTERNAL_LLM 以使用 agent 功能。"
+  "message": "外部大模型未启用；已记录任务，但不会调用云端模型。"
 }
 ```

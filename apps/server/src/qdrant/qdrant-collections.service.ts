@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common'
 import { SETTINGS, type Settings } from '../config/settings.js'
 import {
   VECTOR_COLLECTIONS,
@@ -7,6 +7,10 @@ import {
 } from './vector-collections.js'
 
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>
+type ResetVectorRefs = (
+  collectionName: VectorCollectionName,
+  config: VectorCollectionConfig,
+) => Promise<void>
 
 // vector-index-design.md: payload keyword indexes 用于搜索时按 library_id / media_type 高效过滤
 const PAYLOAD_INDEXES = [
@@ -15,13 +19,16 @@ const PAYLOAD_INDEXES = [
 ] as const
 
 @Injectable()
-export class QdrantCollectionsService {
+export class QdrantCollectionsService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(QdrantCollectionsService.name)
+
   constructor(
     @Inject(SETTINGS) settingsOrUrl: Settings | string,
     private readonly fetcher: Fetcher = fetch,
     private readonly collections: Partial<
       Record<VectorCollectionName, VectorCollectionConfig>
     > = VECTOR_COLLECTIONS,
+    private readonly resetVectorRefsForCollection?: ResetVectorRefs,
   ) {
     this.qdrantUrl =
       typeof settingsOrUrl === 'string'
@@ -31,9 +38,19 @@ export class QdrantCollectionsService {
 
   private readonly qdrantUrl: string
 
+  async onApplicationBootstrap() {
+    try {
+      await this.ensureCollections()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.warn(`Qdrant collection initialization failed: ${message}`)
+    }
+  }
+
   async ensureCollections() {
     const created: string[] = []
     const existing: string[] = []
+    const recreated: string[] = []
 
     for (const [name, config] of Object.entries(this.collections) as [
       VectorCollectionName,
@@ -42,11 +59,45 @@ export class QdrantCollectionsService {
       const collectionUrl = `${this.qdrantUrl}/collections/${name}`
       const response = await this.fetcher(collectionUrl, { method: 'GET' })
       if (response.ok) {
+        if (await this.needsRecreate(response, config)) {
+          await this.fetcher(collectionUrl, { method: 'DELETE' })
+          await this.createCollection(collectionUrl, name, config)
+          await this.resetVectorRefsForCollection?.(name, config)
+          recreated.push(name)
+          continue
+        }
         existing.push(name)
         continue
       }
 
-      const createResponse = await this.fetcher(collectionUrl, {
+      await this.createCollection(collectionUrl, name, config)
+      created.push(name)
+    }
+
+    // vector-index-design.md: 确保 payload keyword indexes 存在（幂等，已存在时不报错）
+    await this.createPayloadIndexes()
+
+    return recreated.length ? { created, existing, recreated } : { created, existing }
+  }
+
+  private async needsRecreate(response: Response, config: VectorCollectionConfig) {
+    try {
+      const body = (await response.json()) as {
+        result?: { config?: { params?: { vectors?: { size?: number } } } }
+      }
+      const actualSize = body.result?.config?.params?.vectors?.size
+      return typeof actualSize === 'number' && actualSize !== config.vectorDim
+    } catch {
+      return false
+    }
+  }
+
+  private async createCollection(
+    collectionUrl: string,
+    name: VectorCollectionName,
+    config: VectorCollectionConfig,
+  ) {
+    const createResponse = await this.fetcher(collectionUrl, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -56,16 +107,9 @@ export class QdrantCollectionsService {
           },
         }),
       })
-      if (!createResponse.ok) {
-        throw new Error(`Failed to create Qdrant collection ${name}: HTTP ${createResponse.status}`)
-      }
-      created.push(name)
+    if (!createResponse.ok) {
+      throw new Error(`Failed to create Qdrant collection ${name}: HTTP ${createResponse.status}`)
     }
-
-    // vector-index-design.md: 确保 payload keyword indexes 存在（幂等，已存在时不报错）
-    await this.createPayloadIndexes()
-
-    return { created, existing }
   }
 
   private async createPayloadIndexes() {

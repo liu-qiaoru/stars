@@ -1,15 +1,51 @@
 'use client'
 
+import { useState } from 'react'
 import { Bot, Send } from 'lucide-react'
-import { createApiClient } from '../lib/api-client'
+import { createApiClient, type AgentRunDetail } from '../lib/api-client'
 
-export function AgentWorkspace() {
-  async function startRun(formData: FormData) {
-    const prompt = String(formData.get('prompt') ?? '').trim()
-    if (!prompt) {
+interface AgentApiClient {
+  createAgentRun(input: { prompt: string; allow_external_vlm: boolean }): Promise<{
+    run_id: string
+    status: string
+    message?: string
+  }>
+  getAgentRun(id: string): Promise<AgentRunDetail>
+  confirmAgentToolCall(id: string, toolCallId: string): Promise<{ job_id: string; status: string }>
+}
+
+export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: AgentApiClient }) {
+  const [prompt, setPrompt] = useState('')
+  const [run, setRun] = useState<AgentRunDetail | null>(null)
+  const [statusMessage, setStatusMessage] = useState('外部大模型默认关闭')
+
+  async function startRun() {
+    const trimmedPrompt = prompt.trim()
+    if (!trimmedPrompt) {
       return
     }
-    await createApiClient().createAgentRun({ prompt, allow_external_vlm: false })
+    setStatusMessage('正在启动任务...')
+    const created = await apiClient.createAgentRun({
+      prompt: trimmedPrompt,
+      allow_external_vlm: false,
+    })
+    setStatusMessage(created.message ?? `任务状态：${created.status}`)
+    const detail = await apiClient.getAgentRun(created.run_id)
+    setRun(detail)
+  }
+
+  async function confirmToolCall(toolCallId: string) {
+    if (!run) {
+      return
+    }
+    const job = await apiClient.confirmAgentToolCall(run.id, toolCallId)
+    setStatusMessage(`已创建任务 ${job.job_id}`)
+    setRun(await apiClient.getAgentRun(run.id))
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    void startRun()
   }
 
   return (
@@ -23,9 +59,11 @@ export function AgentWorkspace() {
           <h1 className="page-title">任务运行器</h1>
         </div>
       </div>
-      <form action={startRun} className="mt-6 space-y-3">
+      <form onSubmit={handleSubmit} className="mt-6 space-y-3">
         <textarea
           name="prompt"
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
           className="text-input min-h-36 w-full resize-y"
           placeholder="查找包含清晰产品镜头的发布会片段"
         />
@@ -36,8 +74,38 @@ export function AgentWorkspace() {
       </form>
       <div className="mt-6 rounded-[16px] bg-[var(--surface-card)] p-4">
         <p className="text-sm font-bold">外部大模型</p>
-        <p className="muted">默认关闭</p>
+        <p className="muted">{statusMessage}</p>
       </div>
+      {run ? (
+        <div className="mt-4 space-y-3">
+          <div className="info-tile">
+            <span>运行状态</span>
+            <strong>{run.status}</strong>
+          </div>
+          {run.summary ? <p className="muted">{run.summary}</p> : null}
+          <div className="grid gap-3">
+            {run.tool_calls.map((toolCall) => (
+              <article key={toolCall.tool_call_id} className="row-card">
+                <div>
+                  <h3 className="card-title">{toolCall.name}</h3>
+                  <p className="muted">{toolCall.summary}</p>
+                </div>
+                {toolCall.requires_confirmation ? (
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => {
+                      void confirmToolCall(toolCall.tool_call_id)
+                    }}
+                  >
+                    确认
+                  </button>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

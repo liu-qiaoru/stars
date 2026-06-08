@@ -7,6 +7,8 @@ class WorkerRunner:
         scan_handler=None,
         probe_handler=None,
         index_handler=None,
+        embed_image_handler=None,
+        embed_video_frame_handler=None,
         export_handler=None,
     ):
         self.worker_id = worker_id
@@ -14,6 +16,8 @@ class WorkerRunner:
         self.scan_handler = scan_handler
         self.probe_handler = probe_handler
         self.index_handler = index_handler
+        self.embed_image_handler = embed_image_handler
+        self.embed_video_frame_handler = embed_video_frame_handler
         self.export_handler = export_handler
         self._shutdown_requested = False
 
@@ -36,6 +40,10 @@ class WorkerRunner:
                 result = self.probe_handler.handle(job["input_json"])
             elif job["job_type"] == "index_media" and self.index_handler is not None:
                 result = self.index_handler.handle(job["input_json"])
+            elif job["job_type"] == "embed_image" and self.embed_image_handler is not None:
+                result = self.embed_image_handler.handle(job["input_json"])
+            elif job["job_type"] == "embed_video_frame" and self.embed_video_frame_handler is not None:
+                result = self.embed_video_frame_handler.handle(job["input_json"])
             elif job["job_type"] == "export_clip" and self.export_handler is not None:
                 result = self.export_handler.handle(job["input_json"])
             else:

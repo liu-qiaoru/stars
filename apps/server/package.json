@@ -10,12 +10,14 @@
     "check": "pnpm typecheck && pnpm test"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.81",
     "@electric-sql/pglite": "^0.4.6",
     "@local-media-agent/shared": "workspace:*",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
     "@qdrant/js-client-rest": "^1.18.0",
+    "ai": "^6.0.197",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",

@@ -195,13 +195,14 @@ class PostgresMediaRepository:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, content_hash
+                SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash
                 FROM media_assets
                 WHERE file_id = %s
                   AND asset_type = %s
                   AND COALESCE(path, '') = COALESCE(%s, '')
                   AND COALESCE(start_time_seconds, -1) = COALESCE(%s, -1)
                   AND COALESCE(end_time_seconds, -1) = COALESCE(%s, -1)
+                  AND COALESCE(frame_time_seconds, -1) = COALESCE(%s, -1)
                 """,
                 (
                     asset["file_id"],
@@ -209,6 +210,7 @@ class PostgresMediaRepository:
                     asset.get("path"),
                     asset.get("start_time_seconds"),
                     asset.get("end_time_seconds"),
+                    asset.get("frame_time_seconds"),
                 ),
             )
             previous = cursor.fetchone()
@@ -220,16 +222,17 @@ class PostgresMediaRepository:
                     "path": previous[3],
                     "start_time_seconds": float(previous[4]) if previous[4] is not None else None,
                     "end_time_seconds": float(previous[5]) if previous[5] is not None else None,
-                    "content_hash": previous[6],
+                    "frame_time_seconds": float(previous[6]) if previous[6] is not None else None,
+                    "content_hash": previous[7],
                 }
 
             asset_id = str(uuid.uuid4())
             cursor.execute(
                 """
                 INSERT INTO media_assets (
-                  id, file_id, asset_type, path, start_time_seconds, end_time_seconds, content_hash
+                  id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     asset_id,
@@ -238,14 +241,13 @@ class PostgresMediaRepository:
                     asset.get("path"),
                     asset.get("start_time_seconds"),
                     asset.get("end_time_seconds"),
+                    asset.get("frame_time_seconds"),
                     asset.get("content_hash"),
                 ),
             )
         self.connection.commit()
         return {"id": asset_id, **asset}
 
-    # Mock 阶段直接标记为 indexed，因为 mock vector 无需真实模型推理。
-    # 真实 embedding 阶段应先写 pending，模型推理成功后再更新为 indexed。
     def upsert_vector_ref(self, **vector_ref):
         with self.connection.cursor() as cursor:
             cursor.execute(
@@ -267,7 +269,7 @@ class PostgresMediaRepository:
                   model_name, model_version, vector_kind, vector_dim, distance,
                   content_hash, index_profile, status
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'indexed')
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
                 """,
                 (
                     str(uuid.uuid4()),
@@ -287,6 +289,60 @@ class PostgresMediaRepository:
             )
         self.connection.commit()
         return "created"
+
+    def get_vector_ref_for_embedding(self, *, asset_id, collection_name, model_name, model_version):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                  vr.asset_id, vr.file_id, vr.library_id, vr.collection_name, vr.point_id,
+                  vr.model_name, vr.model_version, vr.vector_kind, vr.vector_dim, vr.distance,
+                  vr.content_hash, vr.index_profile, ma.asset_type, mf.media_type,
+                  ma.start_time_seconds, ma.end_time_seconds, ma.frame_time_seconds
+                FROM vector_refs vr
+                JOIN media_assets ma ON ma.id = vr.asset_id
+                JOIN media_files mf ON mf.id = vr.file_id
+                WHERE vr.asset_id = %s
+                  AND vr.collection_name = %s
+                  AND vr.model_name = %s
+                  AND vr.model_version = %s
+                """,
+                (asset_id, collection_name, model_name, model_version),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f"Vector ref not found for asset: {asset_id}")
+        return {
+            "asset_id": str(row[0]),
+            "file_id": str(row[1]),
+            "library_id": str(row[2]),
+            "collection_name": row[3],
+            "point_id": str(row[4]),
+            "model_name": row[5],
+            "model_version": row[6],
+            "vector_kind": row[7],
+            "vector_dim": row[8],
+            "distance": row[9],
+            "content_hash": row[10],
+            "index_profile": row[11],
+            "asset_type": row[12],
+            "media_type": row[13],
+            "start_time_seconds": float(row[14]) if row[14] is not None else None,
+            "end_time_seconds": float(row[15]) if row[15] is not None else None,
+            "frame_time_seconds": float(row[16]) if row[16] is not None else None,
+        }
+
+    def mark_vector_ref_indexed(self, point_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE vector_refs
+                SET status = 'indexed', updated_at = now()
+                WHERE point_id = %s
+                """,
+                (point_id,),
+            )
+        self.connection.commit()
 
 
 def connect_from_env():

@@ -7,5 +7,6 @@ import { MediaService } from './media.service.js'
   imports: [DatabaseModule],
   controllers: [MediaController],
   providers: [MediaService],
+  exports: [MediaService],
 })
 export class MediaModule {}

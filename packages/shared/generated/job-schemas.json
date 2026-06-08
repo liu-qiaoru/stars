@@ -280,6 +280,10 @@
             "type": "string",
             "minLength": 1
           },
+          "frame_time_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
           "collection": {
             "type": "string",
             "enum": [
@@ -299,80 +303,6 @@
         "required": [
           "asset_id",
           "frame_path",
-          "collection",
-          "model_name",
-          "model_version"
-        ],
-        "additionalProperties": false,
-        "$schema": "http://json-schema.org/draft-07/schema#"
-      },
-      "output": {
-        "type": "object",
-        "properties": {
-          "point_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "collection": {
-            "type": "string",
-            "enum": [
-              "image_vectors",
-              "video_frame_vectors",
-              "video_segment_vectors",
-              "audio_segment_vectors",
-              "text_chunk_vectors"
-            ]
-          },
-          "vector_dim": {
-            "type": "integer",
-            "exclusiveMinimum": 0
-          },
-          "model_name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "model_version": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "point_id",
-          "collection",
-          "vector_dim",
-          "model_name",
-          "model_version"
-        ],
-        "additionalProperties": false,
-        "$schema": "http://json-schema.org/draft-07/schema#"
-      }
-    },
-    "embed_text": {
-      "input": {
-        "type": "object",
-        "properties": {
-          "asset_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "collection": {
-            "type": "string",
-            "enum": [
-              "audio_segment_vectors",
-              "text_chunk_vectors"
-            ]
-          },
-          "model_name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "model_version": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "required": [
-          "asset_id",
           "collection",
           "model_name",
           "model_version"

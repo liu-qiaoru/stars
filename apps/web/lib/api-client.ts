@@ -89,6 +89,37 @@ export interface MediaDetail {
   assets: MediaAsset[]
 }
 
+export interface AgentToolCallSummary {
+  tool_call_id: string
+  name: string
+  status: string
+  summary: string
+  requires_confirmation?: boolean
+}
+
+export interface AgentRunDetail {
+  id: string
+  status: string
+  prompt: string
+  summary: string | null
+  tool_calls: AgentToolCallSummary[]
+  events: Array<{
+    event_id: string
+    type: string
+    tool_call_id?: string | null
+    created_at: string
+    payload: unknown
+  }>
+  results: Array<{
+    file_id: string
+    asset_id: string
+    start_time_seconds: number | null
+    end_time_seconds: number | null
+    score: number
+    summary: string
+  }>
+}
+
 interface ApiClientOptions {
   baseUrl?: string
   fetcher?: typeof fetch
@@ -139,6 +170,15 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<{ run_id: string; status: string; message?: string }>('/agent/runs', {
         method: 'POST',
         body: JSON.stringify(input),
+      }),
+    getAgentRun: (id: string) =>
+      request<AgentRunDetail>(`/agent/runs/${id}`, {
+        method: 'GET',
+      }),
+    confirmAgentToolCall: (id: string, toolCallId: string) =>
+      request<{ job_id: string; status: string }>(`/agent/runs/${id}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({ tool_call_id: toolCallId }),
       }),
   }
 }

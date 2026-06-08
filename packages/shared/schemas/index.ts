@@ -61,14 +61,8 @@ export const embedImageInputSchema = z.object({
 export const embedVideoFrameInputSchema = z.object({
   asset_id: uuidSchema,
   frame_path: z.string().min(1),
+  frame_time_seconds: nonNegativeNumberSchema.optional(),
   collection: z.union([z.literal('video_frame_vectors'), z.literal('video_segment_vectors')]),
-  model_name: z.string().min(1),
-  model_version: z.string().min(1),
-})
-
-export const embedTextInputSchema = z.object({
-  asset_id: uuidSchema,
-  collection: z.union([z.literal('audio_segment_vectors'), z.literal('text_chunk_vectors')]),
   model_name: z.string().min(1),
   model_version: z.string().min(1),
 })
@@ -102,7 +96,6 @@ export const jobInputSchemas = {
   index_media: indexMediaInputSchema,
   embed_image: embedImageInputSchema,
   embed_video_frame: embedVideoFrameInputSchema,
-  embed_text: embedTextInputSchema,
   export_clip: exportClipInputSchema,
 } satisfies Record<z.infer<typeof jobTypeSchema>, z.ZodTypeAny>
 
@@ -112,6 +105,5 @@ export const jobOutputSchemas = {
   index_media: indexMediaOutputSchema,
   embed_image: embeddingOutputSchema,
   embed_video_frame: embeddingOutputSchema,
-  embed_text: embeddingOutputSchema,
   export_clip: exportClipOutputSchema,
 } satisfies Record<z.infer<typeof jobTypeSchema>, z.ZodTypeAny>

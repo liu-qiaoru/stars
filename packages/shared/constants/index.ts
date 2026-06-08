@@ -4,7 +4,6 @@ export const jobTypes = [
   'index_media',
   'embed_image',
   'embed_video_frame',
-  'embed_text',
   'export_clip',
 ] as const
 

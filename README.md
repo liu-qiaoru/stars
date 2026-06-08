@@ -21,7 +21,7 @@ docs              架构、API、任务协议、向量索引和实施记录
 - pnpm 10 或更新版本
 - OrbStack、Docker Desktop，或其他兼容 Docker Compose 的本地容器运行时
 
-Python worker 的依赖会在后续 Phase 添加。
+Python worker Phase 10 起需要安装 `apps/worker-py/requirements.txt` 中的 `torch`、`transformers` 和 `pillow`，用于 SigLIP embedding。
 
 ## 初始化
 

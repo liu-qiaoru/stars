@@ -6,17 +6,24 @@ POINT_NAMESPACE = uuid.UUID("f3f4e35a-688d-4f79-99e0-91f9480a5827")
 
 VECTOR_CONFIGS = {
     "image_vectors": {
-        "vector_dim": 512,
-        "model_name": "mock",
-        "model_version": "phase5",
+        "vector_dim": 768,
+        "model_name": "google/siglip-base-patch16-224",
+        "model_version": "siglip-base-patch16-224",
         "vector_kind": "image_embedding",
         "distance": "Cosine",
     },
     "video_segment_vectors": {
-        "vector_dim": 512,
-        "model_name": "mock",
-        "model_version": "phase5",
+        "vector_dim": 768,
+        "model_name": "google/siglip-base-patch16-224",
+        "model_version": "siglip-base-patch16-224",
         "vector_kind": "representative_frame_embedding",
+        "distance": "Cosine",
+    },
+    "video_frame_vectors": {
+        "vector_dim": 768,
+        "model_name": "google/siglip-base-patch16-224",
+        "model_version": "siglip-base-patch16-224",
+        "vector_kind": "frame_embedding",
         "distance": "Cosine",
     },
 }
@@ -25,17 +32,6 @@ VECTOR_CONFIGS = {
 def deterministic_point_id(*, asset_id, collection_name, model_name, model_version, vector_kind, content_hash):
     joined = "|".join([asset_id, collection_name, model_name, model_version, vector_kind, content_hash])
     return str(uuid.uuid5(POINT_NAMESPACE, joined))
-
-
-def mock_vector(seed, vector_dim):
-    digest = hashlib.sha256(seed.encode("utf-8")).digest()
-    values = []
-    counter = 0
-    while len(values) < vector_dim:
-        block = hashlib.sha256(digest + counter.to_bytes(4, "big")).digest()
-        values.extend(((byte / 127.5) - 1.0) for byte in block)
-        counter += 1
-    return values[:vector_dim]
 
 
 def fixed_30s_segments(duration_seconds):
@@ -50,10 +46,17 @@ def fixed_30s_segments(duration_seconds):
     return segments
 
 
+def file_content_hash(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 class IndexMediaHandler:
-    def __init__(self, repository, qdrant_client):
+    def __init__(self, repository):
         self.repository = repository
-        self.qdrant_client = qdrant_client
 
     def handle(self, job_input):
         file = self.repository.get_media_file(job_input["file_id"])
@@ -69,27 +72,29 @@ class IndexMediaHandler:
                     "file_id": file["id"],
                     "asset_type": "image",
                     "path": file["path"],
-                    "content_hash": file["path"],
+                    "content_hash": file_content_hash(file["path"]),
+                    "collection_name": "image_vectors",
                 }
             ]
-            collection_name = "image_vectors"
         elif media_type == "video":
-            asset_inputs = [
-                {
-                    "file_id": file["id"],
-                    "asset_type": "video_segment",
-                    "start_time_seconds": start,
-                    "end_time_seconds": end,
-                    "content_hash": f"{file['id']}:{start:g}:{end:g}",
-                }
-                for start, end in fixed_30s_segments(file.get("duration_seconds"))
-            ]
-            collection_name = "video_segment_vectors"
+            asset_inputs = []
+            for start, end in fixed_30s_segments(file.get("duration_seconds")):
+                asset_inputs.append(
+                    {
+                        "file_id": file["id"],
+                        "asset_type": "video_segment",
+                        "start_time_seconds": start,
+                        "end_time_seconds": end,
+                        "content_hash": f"{file['id']}:segment:{start:g}:{end:g}",
+                        "collection_name": "video_segment_vectors",
+                    }
+                )
         else:
             raise ValueError(f"Unsupported index media type: {media_type}")
 
-        config = VECTOR_CONFIGS[collection_name]
         for asset_input in asset_inputs:
+            collection_name = asset_input.pop("collection_name")
+            config = VECTOR_CONFIGS[collection_name]
             asset = self.repository.upsert_media_asset(**asset_input)
             content_hash = asset_input["content_hash"]
             point_id = deterministic_point_id(
@@ -117,27 +122,6 @@ class IndexMediaHandler:
             if outcome == "created":
                 assets_created += 1
                 vector_refs_created += 1
-            self.qdrant_client.upsert_point(
-                collection_name,
-                {
-                    "id": point_id,
-                    "vector": mock_vector(point_id, config["vector_dim"]),
-                    "payload": {
-                        "asset_id": asset["id"],
-                        "file_id": file["id"],
-                        "library_id": file["library_id"],
-                        "media_type": media_type,
-                        "asset_type": asset["asset_type"],
-                        "start_time_seconds": asset.get("start_time_seconds"),
-                        "end_time_seconds": asset.get("end_time_seconds"),
-                        "model_name": config["model_name"],
-                        "model_version": config["model_version"],
-                        "vector_kind": config["vector_kind"],
-                        "content_hash": content_hash,
-                        "index_profile": index_profile,
-                    },
-                },
-            )
             if collection_name not in collections:
                 collections.append(collection_name)
 

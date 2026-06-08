@@ -46,8 +46,8 @@ export class SearchService {
       selectedCollections.map(async ({ collection }) => {
         const config = VECTOR_COLLECTIONS[collection]
         const points = await this.qdrantClient.search(collection, {
-          // Search API 只读取 Qdrant。query vector 目前是 Phase6 mock，后续由 Model Gateway/local model service 替换。
-          vector: this.queryVectorService.embedQuery(request.query, config.vectorDim),
+          // Search API 只读取 Qdrant；query embedding 由本地 model service 同步生成，批量媒体 embedding 仍走 worker job。
+          vector: await this.queryVectorService.embedQuery(request.query, config.vectorDim),
           filter: this.buildFilter(request.library_ids),
           limit: request.limit,
           offset: request.offset,

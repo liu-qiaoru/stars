@@ -10,9 +10,9 @@
 
 ## 当前进度
 
-- 当前阶段：Phase 8 已完成，等待用户确认是否进入 Phase 9。
-- 最近更新：2026-06-07，完成 Clip Export，包括导出 job API、Python FFmpeg worker 和 Media Detail 导出入口。
-- 下一步：完成 Phase 8 后等待用户确认是否进入 Phase 9。
+- 当前阶段：Phase 10 已完成，等待用户确认后进入 Phase 11。
+- 最近更新：2026-06-07，完成 Phase 10 真实视觉 embedding。
+- 下一步：用户确认后进入 Phase 11 视频 Scene Segmentation。
 
 ## Phase 1：Monorepo 与基础设施
 
@@ -172,47 +172,61 @@ Review：
 
 ## Phase 9：Agent MVP
 
-- [ ] 添加 `ai` 和 `@ai-sdk/anthropic` 依赖。
-- [ ] 创建 `AgentModule`（controller、service、tools 目录）。
-- [ ] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `search_media` tool。
-- [ ] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `get_media_detail` tool。
-- [ ] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `create_index_job` tool。
-- [ ] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `export_clip` tool。
-- [ ] AgentService 封装 `generateText` 调用，传入 tools 和 system prompt。
-- [ ] ConfigModule 添加 `ALLOW_EXTERNAL_LLM`、`ANTHROPIC_API_KEY`、`AGENT_MODEL`、`AGENT_MAX_STEPS` 和 tool 超时配置。
-- [ ] AgentService 实现有限步 tool loop，例如 `maxSteps = 4`，并限制单次 run 最大 tool call 数。
-- [ ] AgentService 在外部 LLM 调用前执行候选脱敏，默认不发送绝对路径、源媒体、完整 transcript 或 OCR 全文。
-- [ ] 为 `export_clip` tool 添加服务端 guard：LLM 提出建议后写入 `user_confirmation_required` 事件，不直接创建 job。
-- [ ] 为 `create_index_job` tool 添加服务端 guard：确认流程与 `export_clip` 一致。
-- [ ] 添加 `POST /agent/runs`。
-- [ ] 添加 `GET /agent/runs/{id}`。
-- [ ] 添加 `POST /agent/runs/{id}/confirm`，用于用户确认副作用操作。确认凭证为 `tool_call_id`。
-- [ ] 定义 agent run events 结构。
-- [ ] AgentService 将 `generateText` 返回的 steps 映射为 api-contract 事件类型，写入 `agent_run_events` 表。
-- [ ] 将 agent run state、events 和 tool calls 持久化到 PostgreSQL。
-- [ ] 在前端展示 agent status 和 tool-call summary。
+- Start：2026-06-07，目标是交付可持久化的 Agent run、事件、tool call summary 和副作用确认流；Agent 只编排现有 `search_media`、`get_media_detail`、`create_index_job`、`export_clip` 能力，不承担检索质量提升，检索质量仍留给 Phase 10-14。
+- 假设：外部 LLM 默认关闭；实现保留 Vercel AI SDK/provider 边界，但不把 Phase 9 绑定死到单一供应商。测试使用 fake runner，不要求真实 API key；后续可接 DeepSeek/Qwen/OpenAI/Anthropic provider。
+- 验证计划：先写 settings、AgentService、controller、typed API client 和前端状态展示的失败测试；实现后运行 server/shared/web 验证与浏览器检查。
+
+- [x] 添加 `ai` 和 `@ai-sdk/anthropic` 依赖。
+- [x] 创建 `AgentModule`（controller、service、tools 目录）。
+- [x] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `search_media` tool。
+- [x] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `get_media_detail` tool。
+- [x] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `create_index_job` tool。
+- [x] 使用 Vercel AI SDK `tool()` + Zod schema 定义 `export_clip` tool。
+- [x] AgentService 封装 `generateText` 调用，传入 tools 和 system prompt。
+- [x] ConfigModule 添加 `ALLOW_EXTERNAL_LLM`、`ANTHROPIC_API_KEY`、`AGENT_MODEL`、`AGENT_MAX_STEPS` 和 tool 超时配置。
+- [x] AgentService 实现有限步 tool loop，例如 `maxSteps = 4`，并限制单次 run 最大 tool call 数。
+- [x] AgentService 在外部 LLM 调用前执行候选脱敏，默认不发送绝对路径、源媒体、完整 transcript 或 OCR 全文。
+- [x] 为 `export_clip` tool 添加服务端 guard：LLM 提出建议后写入 `user_confirmation_required` 事件，不直接创建 job。
+- [x] 为 `create_index_job` tool 添加服务端 guard：确认流程与 `export_clip` 一致。
+- [x] 添加 `POST /agent/runs`。
+- [x] 添加 `GET /agent/runs/{id}`。
+- [x] 添加 `POST /agent/runs/{id}/confirm`，用于用户确认副作用操作。确认凭证为 `tool_call_id`。
+- [x] 定义 agent run events 结构。
+- [x] AgentService 将 `generateText` 返回的 steps 映射为 api-contract 事件类型，写入 `agent_run_events` 表。
+- [x] 将 agent run state、events 和 tool calls 持久化到 PostgreSQL。
+- [x] 在前端展示 agent status 和 tool-call summary。
 
 Review：
 
-- Result：
-- Notes：
+- Result：新增 `AgentModule`、`AgentController`、`AgentService`、provider runner 和 Agent tools，提供 `POST /agent/runs`、`GET /agent/runs/{id}`、`POST /agent/runs/{id}/confirm`。新增 `ALLOW_EXTERNAL_LLM`、`ANTHROPIC_API_KEY`、`AGENT_MODEL`、`AGENT_MAX_STEPS`、`AGENT_TOOL_TIMEOUT_MS` 配置，默认不调用外部大模型。`search_media`、`get_media_detail`、`create_index_job`、`export_clip` 均以 Vercel AI SDK `tool()` 定义；副作用工具只写入等待确认的 tool call 和 `user_confirmation_required` 事件，确认后才创建 `index_media` 或 `export_clip` job。Agent run、events 和 tool calls 持久化到 PostgreSQL，前端 Agent 页面展示 run 状态、summary、tool-call summary 和确认按钮。`.env.example` 和 `docs/api-contract.md` 已同步 Agent 配置与响应契约。
+- Notes：遵循红绿流程，先写 settings、Agent controller/service、web API client 和 AgentWorkspace 失败测试，再补实现。验证通过：`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，13 个 test files / 27 tests 通过；`corepack pnpm --filter @local-media-agent/shared exec node --import tsx scripts/generate-json-schemas.ts`、`tsc --noEmit` 和 Vitest 3 tests 通过；`corepack pnpm --dir apps/web exec tsc --noEmit`、Vitest 5 个 test files / 8 tests、`next build --webpack` 通过；`git diff --check` 通过。浏览器烟测通过：授权启动 `corepack pnpm --filter @local-media-agent/web dev`，`GET /agent` 返回 200，HTML 含 Agent 页面、输入框 placeholder 和“启动任务”。本阶段没有真实调用外部 LLM；Anthropic runner 只在 `ALLOW_EXTERNAL_LLM=true` 且配置 API key 后启用，测试使用 fake runner。tool output 在进入 provider 前移除本地绝对路径、cache path 和文本全文字段，真实检索质量仍留给 Phase 10-14。
 
 ## Phase 10：真实视觉 Embedding
 
-- [ ] TypeScript Model Gateway 添加 embedding job 接口。
-- [ ] 添加本地 Python model service，用于搜索时同步生成 query embedding。
-- [ ] 明确 Python worker 与 model service 的进程模式、启动时机和 MPS 内存策略。
-- [ ] Python worker 接入 OpenCLIP 或 SigLIP。
-- [ ] index_media 完成后创建下游 embedding jobs。
-- [ ] 为图片生成 image vectors。
-- [ ] 为视频关键帧生成 frame vectors。
-- [ ] 记录 model name、version 和 vector dim。
-- [ ] 支持 CPU、MPS 和 CUDA 设备选择。
+- Start：2026-06-07，目标是用 SigLIP 替换 Phase 5/6 的 mock vision vectors，交付本地 Python model service、真实 query/image/video-frame/video-segment embedding、Qdrant 写入和搜索链路。
+- 假设：默认模型为 `google/siglip-base-patch16-224`。公开配置主线显示 hidden size 768，历史配置曾出现 `projection_dim: 512`，因此实现必须在模型加载或首次推理时读取并校验实际输出维度；Qdrant collection vector size 以运行时确认的 SigLIP 输出维度为准。
+- 实施补充：当前分支直接实施，不创建新分支；沿用 Phase 9 未提交改动作为基线，不回滚既有工作区内容。索引协调先做显式 API/Service 入口扫描 pending `vector_refs` 并创建 embedding jobs，不提前加入后台定时器。
+- 验证计划：先写 Python SigLIP embedder/model service 测试、TypeScript Model Gateway/SearchQueryVectorService 失败测试、worker embedding job 测试和 registry/schema 测试；实现后运行 server/shared/Python worker 验证与 `git diff --check`。真实模型下载/推理如果因网络或本机资源受限无法在 CI 测试中跑，单元测试使用 fake model，真实模型用手动 smoke test 覆盖。
+
+- [x] TypeScript Model Gateway 添加 embedding job 接口。
+- [x] 添加本地 Python model service（常驻 localhost RPC），提供 `/embed/text` 和 `/embed/image` 端点。
+- [x] 更新 `SearchQueryVectorService`，从 mock SHA-256 向量改为调用 model service `/embed/text`。
+- [x] 明确 Python worker 与 model service 的进程模式、启动时机和 MPS 内存策略。
+- [x] Python worker 接入 SigLIP（`google/siglip-base-patch16-224`），运行时校验实际输出维度。
+- [x] 修改 `index_media`：只创建 assets 和 pending `vector_refs`，不再直接写 mock vectors 到 Qdrant。
+- [x] TypeScript server 索引协调任务扫描 pending `vector_refs`，创建下游 `embed_image` / `embed_video_frame` jobs。
+- [x] 为图片生成 image vectors（`image_vectors`）。
+- [x] 保留视频关键帧 embedding handler 和 `video_frame_vectors` registry，实际 frame ref 生成延后到 Phase 11 scene/keyframe 阶段，避免 Phase 10 对同一 midpoint 帧重复嵌入。
+- [x] 为视频 segment 生成 representative frame vectors（`video_segment_vectors`），与 Phase 6 搜索链路一致。
+- [x] 更新 `VECTOR_COLLECTIONS` registry：model name、version 和 vectorDim 改为 SigLIP 配置。
+- [x] 重建 Qdrant collections（Phase 5 创建的 dim=512/384 collections 需要删除并重建）。
+- [x] 记录 model name、version 和 vector dim 到 `vector_refs`。
+- [x] 支持 CPU、MPS 和 CUDA 设备选择。
 
 Review：
 
-- Result：
-- Notes：
+- Result：新增 TypeScript `ModelGatewayModule` / `ModelGatewayService`，搜索 query embedding 改为同步调用本地 Python model service `/embed/text`，并校验返回 `vector_dim` 与 registry 一致。新增 `POST /jobs/embedding/queue-pending` 和 `JobsService.queuePendingEmbeddingJobs()`，扫描 pending `vector_refs` 并创建 `embed_image` / `embed_video_frame` jobs。Qdrant registry 切到 `google/siglip-base-patch16-224` / `siglip-base-patch16-224` / 768 维；collection 初始化在启动生命周期执行，发现旧维度时会删除并重建，并将对应 collection 的 `vector_refs` 升级为当前模型元数据后重置为 pending。Python worker 新增 SigLIP embedder、CPU/MPS/CUDA device 选择、本地 stdlib HTTP model service、image/video frame embedding handlers、FFmpeg representative frame extraction，并将 embedding job 成功后的 Qdrant point 写入和 `vector_refs.status='indexed'` 更新放在同一 worker 边界。`index_media` 现在只创建 assets 和 pending `vector_refs`，视频固定 30 秒 segment 只创建 `video_segment_vectors` refs；`video_frame_vectors` 留给 Phase 11 真实关键帧。
+- Notes：遵循红绿流程，先写 settings、Qdrant registry 重建、Search model gateway、pending vector_refs 协调、Python model service / embedding worker、index_media pending refs 测试并观察缺实现失败，再补实现。Review 修复后补充验证：Qdrant collection 初始化已接入 Nest 启动生命周期，启动初始化失败只记录 warning 不阻断；collection 重建会把旧 `vector_refs` 升级到当前 collection registry 的 model/version/vectorDim/point_id 并重置为 pending；audio/text collection registry 恢复为 MiniLM 384 维；移除未实现的 `embed_text` worker job schema；worker 内 image/video handlers 共享同一个 SigLIP embedder；FFmpeg 抽帧失败会清理临时文件；Phase 10 不再为每个 30 秒 segment 额外生成未搜索的 `video_frame_vectors` ref。验证通过：`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，13 个 test files / 31 tests 通过；`PYTHONPATH=apps/worker-py python3 -m unittest discover apps/worker-py/tests`，22 tests 通过；shared JSON Schema 生成、`tsc --noEmit` 和 Vitest 4 tests 通过；`git diff --check` 通过。未下载或运行真实 SigLIP 权重，真实模型下载/推理需要本机先安装 `apps/worker-py/requirements.txt` 依赖并具备 Hugging Face 模型访问；单元测试通过 fake embedder 覆盖协议、维度校验和 Qdrant 写入边界。
 
 ## Phase 11：视频 Scene Segmentation
 

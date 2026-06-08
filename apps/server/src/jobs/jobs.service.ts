@@ -4,8 +4,11 @@ import {
   claimNextJob,
   getJob,
   heartbeatJob,
+  listActiveEmbeddingJobs,
   listJobs,
+  listPendingEmbeddingVectorRefs,
   markJobSucceeded,
+  createJob,
   reclaimStaleJobs,
   type Database,
 } from '../database/repositories.js'
@@ -52,6 +55,82 @@ export class JobsService {
       throw new NotFoundException('Job not found')
     }
     return this.toResponse(row)
+  }
+
+  async queuePendingEmbeddingJobs(limit = 100) {
+    const pendingRefs = await listPendingEmbeddingVectorRefs(this.db, limit)
+    const activeJobs = await listActiveEmbeddingJobs(this.db)
+    const activeKeys = new Set(
+      activeJobs.map((job) => {
+        const input = job.inputJson as { asset_id?: string; collection?: string; model_name?: string; model_version?: string }
+        return this.embeddingJobKey(input)
+      }),
+    )
+    let created = 0
+    let skipped = 0
+
+    for (const ref of pendingRefs) {
+      const input = this.toEmbeddingJobInput(ref)
+      const key = this.embeddingJobKey(input)
+      if (activeKeys.has(key)) {
+        skipped += 1
+        continue
+      }
+      await createJob(this.db, {
+        jobType: input.collection === 'image_vectors' ? 'embed_image' : 'embed_video_frame',
+        inputJson: input,
+      })
+      activeKeys.add(key)
+      created += 1
+    }
+
+    return {
+      scanned: pendingRefs.length,
+      created,
+      skipped,
+    }
+  }
+
+  private toEmbeddingJobInput(ref: Awaited<ReturnType<typeof listPendingEmbeddingVectorRefs>>[number]) {
+    if (ref.collectionName === 'image_vectors') {
+      return {
+        asset_id: ref.assetId,
+        path: ref.assetPath ?? ref.filePath,
+        collection: ref.collectionName,
+        model_name: ref.modelName,
+        model_version: ref.modelVersion,
+      }
+    }
+
+    return {
+      asset_id: ref.assetId,
+      frame_path: ref.assetPath ?? ref.filePath,
+      frame_time_seconds: this.representativeFrameTime(ref),
+      collection: ref.collectionName,
+      model_name: ref.modelName,
+      model_version: ref.modelVersion,
+    }
+  }
+
+  private representativeFrameTime(
+    ref: Awaited<ReturnType<typeof listPendingEmbeddingVectorRefs>>[number],
+  ) {
+    if (ref.frameTimeSeconds !== null) {
+      return Number(ref.frameTimeSeconds)
+    }
+    if (ref.startTimeSeconds !== null && ref.endTimeSeconds !== null) {
+      return (Number(ref.startTimeSeconds) + Number(ref.endTimeSeconds)) / 2
+    }
+    return 0
+  }
+
+  private embeddingJobKey(input: {
+    asset_id?: string
+    collection?: string
+    model_name?: string
+    model_version?: string
+  }) {
+    return `${input.asset_id ?? ''}|${input.collection ?? ''}|${input.model_name ?? ''}|${input.model_version ?? ''}`
   }
 
   private toResponse(row: Awaited<ReturnType<typeof getJob>>) {
