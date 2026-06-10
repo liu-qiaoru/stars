@@ -23,7 +23,7 @@ pnpm --filter @local-media-agent/server dev       # dev server on :4010 (or SERV
 pnpm --filter @local-media-agent/shared check     # generate schemas + typecheck + test
 
 # Python worker tests (from repo root)
-PYTHONPATH=apps/worker-py python3 -m unittest discover apps/worker-py/tests
+PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 
 # Database migration
 pnpm --filter @local-media-agent/server exec drizzle-kit generate   # generate migration from schema changes
@@ -39,7 +39,7 @@ docker compose --env-file .env -f infra/docker-compose.yml config    # validate 
 ### Monorepo Layout
 
 - `apps/server` — NestJS API (Express adapter, ESM). All business logic, HTTP endpoints, database access, Qdrant reads, agent runtime.
-- `apps/worker-py` — Python worker. Claims jobs from PostgreSQL, executes media/model tasks (scan, probe, embed, transcribe, OCR, clip export). Writes to PostgreSQL and Qdrant.
+- `apps/worker-py` — Python 3.12 worker. Claims jobs from PostgreSQL, executes media/model tasks (scan, probe, embed, transcribe, OCR, clip export). Writes to PostgreSQL and Qdrant.
 - `packages/shared` — Zod schemas, TypeScript types, constants, generated JSON Schema for Python worker. **TypeScript owns all schemas.** Python reads generated JSON Schema, never imports TS code.
 - `apps/web` — Next.js frontend. Not yet implemented (Phase 7).
 - `infra/` — Docker Compose for PostgreSQL, Qdrant, optional Redis.

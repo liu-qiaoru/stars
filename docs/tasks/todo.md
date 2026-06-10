@@ -10,9 +10,9 @@
 
 ## 当前进度
 
-- 当前阶段：Phase 10 已完成，等待用户确认后进入 Phase 11。
-- 最近更新：2026-06-07，完成 Phase 10 真实视觉 embedding。
-- 下一步：用户确认后进入 Phase 11 视频 Scene Segmentation。
+- 当前阶段：Phase 11 已完成实现、单元/服务验证和真实 PySceneDetect + FFmpeg smoke 验证。
+- 最近更新：2026-06-09，安装 Python 3.12、PySceneDetect 和 FFmpeg，并完成真实 scene 检测/抽帧 smoke。
+- 下一步：用户确认后进入 Phase 12 语音转写与文本检索。
 
 ## Phase 1：Monorepo 与基础设施
 
@@ -230,17 +230,28 @@ Review：
 
 ## Phase 11：视频 Scene Segmentation
 
-- [ ] Python worker 添加 PySceneDetect scene detection。
-- [ ] 在 job protocol 中实现 `scene_detection` job。
-- [ ] 保存 scene start/end。
-- [ ] 为每个 scene 选择 1 到 3 个关键帧。
-- [ ] 合并过短 scenes。
-- [ ] 保留固定时间切片 fallback。
+- Start：2026-06-08，目标是用 PySceneDetect scene boundaries 替换默认固定 30 秒视频切片，同时保留固定切片 fallback，让搜索和媒体详情返回更语义完整的 scene 范围。
+- 假设：本阶段继续沿用 Phase 10 的直接实施方式，不新建分支；PySceneDetect 作为可选运行依赖接入，单元测试使用 fake detector/runner，不要求 CI 下载额外模型或读取真实视频；数据库不新增表，scene、keyframe 和 fallback metadata 写入现有 `media_assets.metadata_json`。
+- 权衡：scene detection 失败时不阻断索引，回退 `fixed_30s` 可以保持现有搜索链路可用；短 scene 合并先使用简单阈值，避免引入复杂 shot clustering；每个 scene 关键帧限制为 1 到 3 个，控制 `video_frame_vectors` 数量。
+- 验证计划：先写 `index_media` `segment_strategy` 扩展与 scene/keyframe `metadata_json` 约定测试、Python scene detection handler / index fallback / 重索引清理测试、worker dispatch 测试和必要的 server/web 回归测试；确认失败后实现。完成后运行 shared schema/type/test、server type/test、Python worker unittest、web check（如前端展示变更）和 `git diff --check`。
+
+- [x] `index_media` 实现 `segment_strategy='scene_detection'` 分支（不新增独立 job 类型）。
+- [x] Python worker 接入 PySceneDetect（`ContentDetector`，阈值 27），检测 scene 边界。
+- [x] 合并短于 `SCENE_MIN_SECONDS`（默认 3s）的 scene。
+- [x] 为每个 scene 生成代表帧（中点）`video_segment` asset → `video_segment_vectors`。
+- [x] 为每个 scene 按 scene 时长生成 0-2 个关键帧 `video_frame` asset → `video_frame_vectors`（与代表帧不重复）。
+- [x] scene 分组与策略标识写入 `media_assets.metadata_json`（scene_id / keyframe_index / segment_strategy），不新增 DB 列。
+- [x] 重索引/策略切换时先失效该 file 下旧 video_segment/video_frame assets 与 vector_refs。
+- [x] Fallback：PySceneDetect 抛错 / 0 scene / scene 数超 2000 时回退 `fixed_30s`，job 不失败。
+- [x] scene 切片 `scene_id` 写入 Qdrant payload。
+- [x] 视频默认 `segment_strategy='scene_detection'`（probe→index_media 链路）。
+- [x] 单元测试注入 fake detector。
+- [x] 集成测试用极小 fixture 视频覆盖真实检测+抽帧。
 
 Review：
 
-- Result：
-- Notes：
+- Result：`index_media` 的视频路径新增 `scene_detection` 分支，不新增独立 job type；PySceneDetect 通过可注入 detector 接入，默认使用 `ContentDetector(threshold=27)`，并在 worker 内合并短 scene、生成 scene `video_segment` assets、额外生成 0-2 个 `video_frame` keyframes，统一创建 pending `vector_refs`。scene/fallback/keyframe 信息写入 `media_assets.metadata_json`，embedding worker 将 `scene_id`、`segment_strategy` 和 `keyframe_index` 写入 Qdrant payload。`probe_media` 创建视频 index job 时默认使用 `segment_strategy='scene_detection'`。策略切换时旧 video segment/frame assets 标记 stale，对应 vector refs 标记 stale；搜索 hydration 只接受 indexed refs，避免旧 Qdrant point 残留被返回。Media Detail 返回 asset `metadata_json`，Search 结果返回 `scene_id`。
+- Notes：遵循红绿流程，先补 shared schema、Python index/probe/embedding 和 server media/search metadata 测试并观察缺实现失败，再实现。验证通过：shared JSON Schema 生成、`tsc --noEmit` 和 Vitest 1 test；server `tsc --noEmit` 和 Vitest 14 files / 33 tests；Python worker unittest 26 tests；web `check`（typecheck、Vitest 5 files / 8 tests、Next webpack build）；`git diff --check`。2026-06-09 已安装 Homebrew Python 3.12.13，并用 `PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests` 验证 26 tests 通过。随后创建项目 `.venv`，按官方命令 `.venv/bin/python -m pip install --upgrade scenedetect` 安装 PySceneDetect 0.7 / OpenCV 4.13.0 / NumPy 2.4.6，并通过 Homebrew 安装 FFmpeg 8.1。真实 smoke：用 FFmpeg 生成 3 段纯色视频，`detect_scenes_pyscenedetect()` 检测出 3 个 scene，`extract_video_frame()` 成功抽帧；临时 fixture 和 frame 已清理。
 
 ## Phase 12：语音转写与文本检索
 

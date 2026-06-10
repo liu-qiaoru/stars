@@ -2,3 +2,4 @@ psycopg[binary]>=3.2,<4
 pillow>=10,<12
 torch>=2.3,<3
 transformers>=4.44,<5
+scenedetect>=0.7,<1

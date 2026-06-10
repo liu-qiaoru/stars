@@ -86,7 +86,7 @@ class ProbeHandler:
             self.job_repository.create_job("index_media", {
                 "file_id": file_id,
                 "index_profile": "balanced",
-                "segment_strategy": "fixed_30s",
+                "segment_strategy": "scene_detection" if media_type == "video" else "fixed_30s",
             })
 
         return metadata

@@ -252,6 +252,7 @@ Response：
           "path": "/Volumes/Media/video.mp4",
           "start_time_seconds": 120.0,
           "end_time_seconds": 150.0,
+          "scene_id": "scene-0007",
           "score": 0.82,
           "reason": "vector_match"
         }
@@ -299,7 +300,12 @@ Response：
       "start_time_seconds": 120.0,
       "end_time_seconds": 150.0,
       "cache_path": null,
-      "text_content": null
+      "text_content": null,
+      "metadata_json": {
+        "scene_id": "scene-0007",
+        "keyframe_index": 0,
+        "segment_strategy": "scene_detection"
+      }
     }
   ]
 }

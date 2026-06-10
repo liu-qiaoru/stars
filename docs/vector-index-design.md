@@ -237,13 +237,14 @@ document_chunk
 
 ## Segment Vector 策略
 
-MVP 中 `video_segment_vectors` 使用代表帧策略：
+`video_segment_vectors` 使用代表帧策略。Phase 11 起 video segment 来自 PySceneDetect 的 scene（fallback 为固定 30s 切片）：
 
 ```text
-1. 每个 video segment 选一个代表帧。
-2. 代表帧优先选择 scene 中点。
-3. 如果中点帧质量差，再选择最清晰或最接近命中条件的关键帧。
-4. segment point 的 `vector_kind` 使用 `representative_frame_embedding`。
+1. 每个 scene 选一个代表帧，取 scene 中点。
+2. 代表帧写入 video_segment asset（vector_kind='representative_frame_embedding'）→ video_segment_vectors。
+3. 代表帧只进 video_segment_vectors，不重复进 video_frame_vectors。
+4. scene 另生成 0-2 个关键帧（video_frame asset，vector_kind='frame_embedding'）→ video_frame_vectors；数量按 scene 时长（≤15s 不加；15-45s 加 1；>45s 加 2），与代表帧不重复。
+5. scene 代表帧 asset 与其关键帧 asset 在 media_assets.metadata_json 中共享同一 scene_id（不新增 DB 列）；固定切片 scene_id 为 null。
 ```
 
 不在 MVP 中使用简单平均池化作为默认策略。原因是一个 scene 内可能包含镜头移动、主体变化或字幕切换，平均后可能削弱关键视觉信号。

@@ -102,7 +102,8 @@ export async function createVectorRef(
     | 'distance'
     | 'contentHash'
     | 'indexProfile'
-  >,
+  > &
+    Partial<Pick<InsertVectorRef, 'status'>>,
 ) {
   // point_id 由 worker 按 vector-index-design 的确定性规则生成；repository 只保存引用关系。
   const [row] = await db
@@ -152,6 +153,7 @@ export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 
       assetPath: mediaAssets.path,
       startTimeSeconds: mediaAssets.startTimeSeconds,
       endTimeSeconds: mediaAssets.endTimeSeconds,
+      metadataJson: mediaAssets.metadataJson,
       frameTimeSeconds: mediaAssets.frameTimeSeconds,
       filePath: mediaFiles.path,
       mediaType: mediaFiles.mediaType,
@@ -311,6 +313,7 @@ export async function listSearchResultMetadata(
   const conditions = [
     eq(vectorRefs.collectionName, collectionName),
     inArray(vectorRefs.pointId, pointIds),
+    eq(vectorRefs.status, 'indexed'),
     isNull(mediaFiles.deletedAt),
     isNull(libraries.deletedAt),
   ]
@@ -330,6 +333,7 @@ export async function listSearchResultMetadata(
       path: mediaFiles.path,
       startTimeSeconds: mediaAssets.startTimeSeconds,
       endTimeSeconds: mediaAssets.endTimeSeconds,
+      metadataJson: mediaAssets.metadataJson,
     })
     .from(vectorRefs)
     .innerJoin(mediaAssets, eq(vectorRefs.assetId, mediaAssets.id))

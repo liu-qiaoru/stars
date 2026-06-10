@@ -138,6 +138,10 @@ class EmbeddingWorkerTest(unittest.TestCase):
                 "media_type": "video",
                 "start_time_seconds": 30.0,
                 "end_time_seconds": 60.0,
+                "metadata_json": {
+                    "scene_id": "scene-0002",
+                    "segment_strategy": "scene_detection",
+                },
             })
             qdrant = FakeQdrantClient()
             embedder = FakeEmbedder()
@@ -161,6 +165,7 @@ class EmbeddingWorkerTest(unittest.TestCase):
             self.assertEqual(result["collection"], "video_segment_vectors")
             self.assertEqual(calls, [("/media/clip.mp4", 45)])
             self.assertEqual(embedder.image_paths, [extracted])
+            self.assertEqual(qdrant.points[0][1]["payload"]["scene_id"], "scene-0002")
 
     def test_worker_runner_dispatches_embedding_jobs(self):
         class StaticHandler:

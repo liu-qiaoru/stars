@@ -48,6 +48,11 @@ export const indexMediaOutputSchema = z.object({
   assets_created: nonNegativeIntegerSchema,
   vector_refs_created: nonNegativeIntegerSchema,
   collections: z.array(collectionSchema),
+  segment_strategy: z.enum(['fixed_30s', 'scene_detection']),
+  fallback: z.boolean(),
+  fallback_reason: z.string().min(1).optional(),
+  scenes_detected: nonNegativeIntegerSchema.optional(),
+  keyframes_selected: nonNegativeIntegerSchema.optional(),
 })
 
 export const embedImageInputSchema = z.object({

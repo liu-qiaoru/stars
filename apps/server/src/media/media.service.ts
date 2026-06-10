@@ -13,6 +13,7 @@ export class MediaService {
     }
 
     const assets = graph.assets
+      .filter((asset) => !this.isStaleAsset(asset.metadataJson))
       .slice(0, 50)
       .map((asset) => ({
         id: asset.id,
@@ -22,6 +23,7 @@ export class MediaService {
         end_time_seconds: asset.endTimeSeconds === null ? null : Number(asset.endTimeSeconds),
         cache_path: asset.path,
         text_content: null,
+        metadata_json: asset.metadataJson,
       }))
 
     return {
@@ -41,5 +43,9 @@ export class MediaService {
       assets_total: graph.assets.length,
       assets,
     }
+  }
+
+  private isStaleAsset(metadata: unknown) {
+    return typeof metadata === 'object' && metadata !== null && 'stale' in metadata && metadata.stale === true
   }
 }

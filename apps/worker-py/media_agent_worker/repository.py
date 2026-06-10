@@ -195,7 +195,7 @@ class PostgresMediaRepository:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash
+                SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash, metadata_json
                 FROM media_assets
                 WHERE file_id = %s
                   AND asset_type = %s
@@ -215,6 +215,16 @@ class PostgresMediaRepository:
             )
             previous = cursor.fetchone()
             if previous is not None:
+                cursor.execute(
+                    """
+                    UPDATE media_assets
+                    SET content_hash = %s,
+                        metadata_json = %s
+                    WHERE id = %s
+                    """,
+                    (asset.get("content_hash"), json.dumps(asset.get("metadata_json", {})), previous[0]),
+                )
+                self.connection.commit()
                 return {
                     "id": str(previous[0]),
                     "file_id": str(previous[1]),
@@ -224,15 +234,17 @@ class PostgresMediaRepository:
                     "end_time_seconds": float(previous[5]) if previous[5] is not None else None,
                     "frame_time_seconds": float(previous[6]) if previous[6] is not None else None,
                     "content_hash": previous[7],
+                    "metadata_json": asset.get("metadata_json", previous[8] or {}),
                 }
 
             asset_id = str(uuid.uuid4())
             cursor.execute(
                 """
                 INSERT INTO media_assets (
-                  id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash
+                  id, file_id, asset_type, path, start_time_seconds, end_time_seconds,
+                  frame_time_seconds, content_hash, metadata_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     asset_id,
@@ -243,6 +255,7 @@ class PostgresMediaRepository:
                     asset.get("end_time_seconds"),
                     asset.get("frame_time_seconds"),
                     asset.get("content_hash"),
+                    json.dumps(asset.get("metadata_json", {})),
                 ),
             )
         self.connection.commit()
@@ -252,7 +265,7 @@ class PostgresMediaRepository:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id
+                SELECT id, status
                 FROM vector_refs
                 WHERE collection_name = %s AND point_id = %s
                 """,
@@ -260,6 +273,18 @@ class PostgresMediaRepository:
             )
             previous = cursor.fetchone()
             if previous is not None:
+                if previous[1] == "stale":
+                    cursor.execute(
+                        """
+                        UPDATE vector_refs
+                        SET status = 'pending',
+                            updated_at = now()
+                        WHERE id = %s
+                        """,
+                        (previous[0],),
+                    )
+                    self.connection.commit()
+                    return "created"
                 return "skipped"
 
             cursor.execute(
@@ -298,7 +323,7 @@ class PostgresMediaRepository:
                   vr.asset_id, vr.file_id, vr.library_id, vr.collection_name, vr.point_id,
                   vr.model_name, vr.model_version, vr.vector_kind, vr.vector_dim, vr.distance,
                   vr.content_hash, vr.index_profile, ma.asset_type, mf.media_type,
-                  ma.start_time_seconds, ma.end_time_seconds, ma.frame_time_seconds
+                  ma.start_time_seconds, ma.end_time_seconds, ma.frame_time_seconds, ma.metadata_json
                 FROM vector_refs vr
                 JOIN media_assets ma ON ma.id = vr.asset_id
                 JOIN media_files mf ON mf.id = vr.file_id
@@ -330,6 +355,54 @@ class PostgresMediaRepository:
             "start_time_seconds": float(row[14]) if row[14] is not None else None,
             "end_time_seconds": float(row[15]) if row[15] is not None else None,
             "frame_time_seconds": float(row[16]) if row[16] is not None else None,
+            "metadata_json": row[17] or {},
+        }
+
+    def invalidate_video_index_assets(self, file_id, segment_strategy):
+        stale_metadata = json.dumps({
+            "stale": True,
+            "stale_reason": "video_reindex",
+        })
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id
+                FROM media_assets
+                WHERE file_id = %s
+                  AND asset_type IN ('video_segment', 'video_frame')
+                  AND metadata_json->>'segment_strategy' IS DISTINCT FROM %s
+                """,
+                (file_id, segment_strategy),
+            )
+            asset_ids = [row[0] for row in cursor.fetchall()]
+            if not asset_ids:
+                self.connection.commit()
+                return {"assets_invalidated": 0, "vector_refs_invalidated": 0}
+
+            cursor.execute(
+                """
+                UPDATE vector_refs
+                SET status = 'stale',
+                    updated_at = now()
+                WHERE asset_id = ANY(%s)
+                  AND status <> 'stale'
+                """,
+                (asset_ids,),
+            )
+            vector_refs_invalidated = cursor.rowcount
+            cursor.execute(
+                """
+                UPDATE media_assets
+                SET metadata_json = metadata_json || %s::jsonb
+                WHERE id = ANY(%s)
+                """,
+                (stale_metadata, asset_ids),
+            )
+            assets_invalidated = cursor.rowcount
+        self.connection.commit()
+        return {
+            "assets_invalidated": assets_invalidated,
+            "vector_refs_invalidated": vector_refs_invalidated,
         }
 
     def mark_vector_ref_indexed(self, point_id):

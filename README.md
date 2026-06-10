@@ -21,7 +21,7 @@ docs              架构、API、任务协议、向量索引和实施记录
 - pnpm 10 或更新版本
 - OrbStack、Docker Desktop，或其他兼容 Docker Compose 的本地容器运行时
 
-Python worker Phase 10 起需要安装 `apps/worker-py/requirements.txt` 中的 `torch`、`transformers` 和 `pillow`，用于 SigLIP embedding。
+Python worker 目标运行环境为 Python 3.12。Phase 10 起需要安装 `apps/worker-py/requirements.txt` 中的 `torch`、`transformers` 和 `pillow`，用于 SigLIP embedding；Phase 11 起需要 `scenedetect`，用于视频 scene detection。
 
 ## 初始化
 

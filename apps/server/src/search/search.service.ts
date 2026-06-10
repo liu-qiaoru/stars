@@ -118,6 +118,7 @@ export class SearchService {
           path: row.path,
           start_time_seconds: row.startTimeSeconds === null ? null : Number(row.startTimeSeconds),
           end_time_seconds: row.endTimeSeconds === null ? null : Number(row.endTimeSeconds),
+          scene_id: this.sceneId(row.metadataJson),
           score: point.score,
           reason: 'vector_match',
         },
@@ -127,5 +128,13 @@ export class SearchService {
 
   private scoreKindForDistance(distance: string) {
     return distance === 'Cosine' ? 'cosine_similarity' : distance.toLowerCase()
+  }
+
+  private sceneId(metadata: unknown) {
+    if (typeof metadata !== 'object' || metadata === null || !('scene_id' in metadata)) {
+      return null
+    }
+    const sceneId = metadata.scene_id
+    return typeof sceneId === 'string' ? sceneId : null
   }
 }

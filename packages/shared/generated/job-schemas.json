@@ -181,12 +181,36 @@
                 "text_chunk_vectors"
               ]
             }
+          },
+          "segment_strategy": {
+            "type": "string",
+            "enum": [
+              "fixed_30s",
+              "scene_detection"
+            ]
+          },
+          "fallback": {
+            "type": "boolean"
+          },
+          "fallback_reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scenes_detected": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "keyframes_selected": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "required": [
           "assets_created",
           "vector_refs_created",
-          "collections"
+          "collections",
+          "segment_strategy",
+          "fallback"
         ],
         "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"

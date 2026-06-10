@@ -1,4 +1,5 @@
 import hashlib
+import os
 import uuid
 
 
@@ -28,6 +29,10 @@ VECTOR_CONFIGS = {
     },
 }
 
+SCENE_MIN_SECONDS = 3.0
+SCENE_MAX_COUNT = 2000
+SCENE_DETECT_THRESHOLD = 27.0
+
 
 def deterministic_point_id(*, asset_id, collection_name, model_name, model_version, vector_kind, content_hash):
     joined = "|".join([asset_id, collection_name, model_name, model_version, vector_kind, content_hash])
@@ -54,14 +59,80 @@ def file_content_hash(path):
     return digest.hexdigest()
 
 
+def detect_scenes_pyscenedetect(path, *, threshold=SCENE_DETECT_THRESHOLD, min_scene_seconds=SCENE_MIN_SECONDS):
+    try:
+        from scenedetect import ContentDetector, detect
+    except ImportError as error:
+        raise RuntimeError("PySceneDetect is not installed. Install scenedetect to enable scene detection.") from error
+
+    detector = ContentDetector(threshold=threshold, min_scene_len=max(1, int(min_scene_seconds)))
+    scenes = detect(path, detector)
+    return [(start.get_seconds(), end.get_seconds()) for start, end in scenes]
+
+
+def merge_short_scenes(scenes, *, min_seconds=SCENE_MIN_SECONDS):
+    normalized = [(float(start), float(end)) for start, end in scenes if float(end) > float(start)]
+    if not normalized:
+        return []
+
+    merged = []
+    for start, end in normalized:
+        duration = end - start
+        if duration < min_seconds:
+            if merged:
+                previous_start, _previous_end = merged[-1]
+                merged[-1] = (previous_start, end)
+            elif len(normalized) > 1:
+                next_start, next_end = normalized[1]
+                merged.append((start, max(end, next_end)))
+            else:
+                merged.append((start, end))
+            continue
+        merged.append((start, end))
+
+    compacted = []
+    for start, end in merged:
+        if compacted and start < compacted[-1][1]:
+            previous_start, previous_end = compacted[-1]
+            compacted[-1] = (previous_start, max(previous_end, end))
+        else:
+            compacted.append((start, end))
+    return compacted
+
+
+def extra_keyframe_times(start, end):
+    duration = end - start
+    if duration <= 15.0:
+        return []
+    if duration <= 45.0:
+        return [start + duration / 3.0]
+    return [start + duration / 3.0, start + (duration * 2.0) / 3.0]
+
+
 class IndexMediaHandler:
-    def __init__(self, repository):
+    def __init__(
+        self,
+        repository,
+        *,
+        scene_detector=detect_scenes_pyscenedetect,
+        scene_min_seconds=None,
+        scene_max_count=None,
+    ):
         self.repository = repository
+        self.scene_detector = scene_detector
+        self.scene_min_seconds = float(scene_min_seconds or os.environ.get("SCENE_MIN_SECONDS", SCENE_MIN_SECONDS))
+        self.scene_max_count = int(scene_max_count or os.environ.get("SCENE_MAX_COUNT", SCENE_MAX_COUNT))
 
     def handle(self, job_input):
         file = self.repository.get_media_file(job_input["file_id"])
         media_type = file["media_type"]
         index_profile = job_input["index_profile"]
+        requested_strategy = job_input.get("segment_strategy", "fixed_30s")
+        actual_strategy = requested_strategy
+        fallback = False
+        fallback_reason = None
+        scenes_detected = 0
+        keyframes_selected = 0
         collections = []
         assets_created = 0
         vector_refs_created = 0
@@ -77,20 +148,18 @@ class IndexMediaHandler:
                 }
             ]
         elif media_type == "video":
-            asset_inputs = []
-            for start, end in fixed_30s_segments(file.get("duration_seconds")):
-                asset_inputs.append(
-                    {
-                        "file_id": file["id"],
-                        "asset_type": "video_segment",
-                        "start_time_seconds": start,
-                        "end_time_seconds": end,
-                        "content_hash": f"{file['id']}:segment:{start:g}:{end:g}",
-                        "collection_name": "video_segment_vectors",
-                    }
-                )
+            asset_inputs, actual_strategy, fallback, fallback_reason, scenes_detected, keyframes_selected = self._video_asset_inputs(
+                file,
+                requested_strategy,
+            )
         else:
             raise ValueError(f"Unsupported index media type: {media_type}")
+
+        if media_type == "video" and hasattr(self.repository, "invalidate_video_index_assets"):
+            invalidation_strategy = "scene_detection" if actual_strategy == "scene_detection" else (
+                "fixed_30s_fallback" if fallback else "fixed_30s"
+            )
+            self.repository.invalidate_video_index_assets(file["id"], invalidation_strategy)
 
         for asset_input in asset_inputs:
             collection_name = asset_input.pop("collection_name")
@@ -129,4 +198,85 @@ class IndexMediaHandler:
             "assets_created": assets_created,
             "vector_refs_created": vector_refs_created,
             "collections": collections,
+            "segment_strategy": actual_strategy,
+            "fallback": fallback,
+            **({"fallback_reason": fallback_reason} if fallback_reason else {}),
+            **({"scenes_detected": scenes_detected} if media_type == "video" else {}),
+            **({"keyframes_selected": keyframes_selected} if media_type == "video" else {}),
         }
+
+    def _video_asset_inputs(self, file, requested_strategy):
+        if requested_strategy != "scene_detection":
+            return self._fixed_30s_asset_inputs(file, "fixed_30s"), "fixed_30s", False, None, 0, 0
+
+        fallback_reason = None
+        try:
+            detected = self.scene_detector(file["path"])
+        except Exception as error:
+            fallback_reason = str(error)
+            detected = []
+
+        if fallback_reason is None and len(detected) > self.scene_max_count:
+            fallback_reason = f"Scene count {len(detected)} exceeds max {self.scene_max_count}"
+        scenes = [] if fallback_reason else merge_short_scenes(detected, min_seconds=self.scene_min_seconds)
+        if fallback_reason is None and not scenes:
+            fallback_reason = "PySceneDetect returned no usable scenes"
+
+        if fallback_reason:
+            return self._fixed_30s_asset_inputs(file, "fixed_30s_fallback"), "fixed_30s", True, fallback_reason, 0, 0
+
+        asset_inputs = []
+        keyframes_selected = 0
+        for index, (start, end) in enumerate(scenes, start=1):
+            scene_id = f"scene-{index:04d}"
+            midpoint = (start + end) / 2.0
+            asset_inputs.append({
+                "file_id": file["id"],
+                "asset_type": "video_segment",
+                "start_time_seconds": start,
+                "end_time_seconds": end,
+                "content_hash": f"{file['id']}:scene:{scene_id}:{start:g}:{end:g}",
+                "metadata_json": {
+                    "scene_id": scene_id,
+                    "keyframe_index": 0,
+                    "segment_strategy": "scene_detection",
+                    "representative_frame_time_seconds": midpoint,
+                },
+                "collection_name": "video_segment_vectors",
+            })
+            for keyframe_index, frame_time in enumerate(extra_keyframe_times(start, end), start=1):
+                if abs(frame_time - midpoint) < 0.001:
+                    continue
+                asset_inputs.append({
+                    "file_id": file["id"],
+                    "asset_type": "video_frame",
+                    "frame_time_seconds": frame_time,
+                    "content_hash": f"{file['id']}:scene:{scene_id}:keyframe:{keyframe_index}:{frame_time:g}",
+                    "metadata_json": {
+                        "scene_id": scene_id,
+                        "keyframe_index": keyframe_index,
+                        "segment_strategy": "scene_detection",
+                    },
+                    "collection_name": "video_frame_vectors",
+                })
+                keyframes_selected += 1
+
+        return asset_inputs, "scene_detection", False, None, len(scenes), keyframes_selected
+
+    def _fixed_30s_asset_inputs(self, file, segment_strategy):
+        asset_inputs = []
+        for start, end in fixed_30s_segments(file.get("duration_seconds")):
+            asset_inputs.append({
+                "file_id": file["id"],
+                "asset_type": "video_segment",
+                "start_time_seconds": start,
+                "end_time_seconds": end,
+                "content_hash": f"{file['id']}:segment:{start:g}:{end:g}",
+                "metadata_json": {
+                    "scene_id": None,
+                    "keyframe_index": 0,
+                    "segment_strategy": segment_strategy,
+                },
+                "collection_name": "video_segment_vectors",
+            })
+        return asset_inputs
