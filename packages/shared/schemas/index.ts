@@ -55,6 +55,32 @@ export const indexMediaOutputSchema = z.object({
   keyframes_selected: nonNegativeIntegerSchema.optional(),
 })
 
+export const transcribeAudioInputSchema = z.object({
+  file_id: uuidSchema,
+  path: z.string().min(1),
+  media_type: z.enum(['video', 'audio']),
+  model: z.string().min(1).default('base'),
+  language: z.string().min(1).default('auto'),
+})
+
+export const transcribeAudioOutputSchema = z.object({
+  chunks_created: nonNegativeIntegerSchema,
+  language: z.string().min(1),
+  duration_seconds: nonNegativeNumberSchema.optional(),
+})
+
+export const runOcrInputSchema = z.object({
+  asset_ids: z.array(uuidSchema).min(1),
+  engine: z.literal('paddleocr').default('paddleocr'),
+  language: z.string().min(1).default('ch'),
+})
+
+export const runOcrOutputSchema = z.object({
+  assets_processed: nonNegativeIntegerSchema,
+  text_written: nonNegativeIntegerSchema,
+  skipped_no_text: nonNegativeIntegerSchema,
+})
+
 export const embedImageInputSchema = z.object({
   asset_id: uuidSchema,
   path: z.string().min(1),
@@ -99,6 +125,8 @@ export const jobInputSchemas = {
   scan_library: scanLibraryInputSchema,
   probe_media: probeMediaInputSchema,
   index_media: indexMediaInputSchema,
+  transcribe_audio: transcribeAudioInputSchema,
+  run_ocr: runOcrInputSchema,
   embed_image: embedImageInputSchema,
   embed_video_frame: embedVideoFrameInputSchema,
   export_clip: exportClipInputSchema,
@@ -108,6 +136,8 @@ export const jobOutputSchemas = {
   scan_library: scanLibraryOutputSchema,
   probe_media: probeMediaOutputSchema,
   index_media: indexMediaOutputSchema,
+  transcribe_audio: transcribeAudioOutputSchema,
+  run_ocr: runOcrOutputSchema,
   embed_image: embeddingOutputSchema,
   embed_video_frame: embeddingOutputSchema,
   export_clip: exportClipOutputSchema,

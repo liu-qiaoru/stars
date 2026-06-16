@@ -1,4 +1,5 @@
 import json
+import os
 import struct
 import subprocess
 from pathlib import Path
@@ -82,11 +83,23 @@ class ProbeHandler:
 
         self.repository.update_probe_metadata(file_id, metadata)
 
-        if self.job_repository is not None:
+        if self.job_repository is not None and media_type in ("image", "video"):
             self.job_repository.create_job("index_media", {
                 "file_id": file_id,
                 "index_profile": "balanced",
                 "segment_strategy": "scene_detection" if media_type == "video" else "fixed_30s",
             })
+        if self.job_repository is not None and media_type in ("video", "audio"):
+            self.job_repository.create_job(
+                "transcribe_audio",
+                {
+                    "file_id": file_id,
+                    "path": path,
+                    "media_type": media_type,
+                    "model": os.environ.get("WHISPER_MODEL", "base"),
+                    "language": os.environ.get("WHISPER_LANGUAGE", "auto"),
+                },
+                timeout_seconds=14400,
+            )
 
         return metadata

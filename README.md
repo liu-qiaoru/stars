@@ -53,7 +53,17 @@ docker compose --env-file .env -f infra/docker-compose.yml --profile realtime up
 docker compose --env-file .env -f infra/docker-compose.yml up -d postgres qdrant
 ```
 
-### 2. 后端 API
+### 2. 数据库迁移
+
+首次启动或拉取到新的 migration 后，手动执行 Drizzle migration：
+
+```bash
+corepack pnpm --dir apps/server db:migrate
+```
+
+这条命令不会随 `dev` 自动执行；只有你运行它时才会检查并应用尚未执行的 migration。
+
+### 3. 后端 API
 
 ```bash
 pnpm --filter @local-media-agent/server dev
@@ -81,7 +91,9 @@ curl http://127.0.0.1:4000/health
 
 如果任一依赖不可用，接口会返回 HTTP 503，并在 `dependencies` 中标出失败项。
 
-### 3. 前端
+如果数据库 schema 缺失，后端启动时会提示先执行 `corepack pnpm --dir apps/server db:migrate`。
+
+### 4. 前端
 
 ```bash
 pnpm --filter @local-media-agent/web dev

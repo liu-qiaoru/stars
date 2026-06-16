@@ -79,8 +79,12 @@ class InMemoryJobRepository:
         self.job = None
         return job
 
-    def create_job(self, job_type, input_json):
-        self.created_jobs.append({"job_type": job_type, "input_json": input_json})
+    def create_job(self, job_type, input_json, timeout_seconds=None):
+        self.created_jobs.append({
+            "job_type": job_type,
+            "input_json": input_json,
+            "timeout_seconds": timeout_seconds,
+        })
 
     def heartbeat(self, job_id):
         pass
@@ -121,7 +125,7 @@ class ProbeAndIndexTest(unittest.TestCase):
         self.assertEqual(result["duration_seconds"], 65.5)
         self.assertEqual(repository.probes["file-1"]["codec"], "h264")
 
-    def test_probe_handler_creates_index_job_after_probing(self):
+    def test_probe_handler_creates_index_and_transcribe_jobs_for_video_after_probing(self):
         repository = FakeMediaRepository()
         repository.files["file-1"] = {"id": "file-1", "path": "/tmp/video.mp4", "media_type": "video"}
         job_repository = InMemoryJobRepository()
@@ -139,10 +143,42 @@ class ProbeAndIndexTest(unittest.TestCase):
 
         handler.handle({"file_id": "file-1", "path": "/tmp/video.mp4", "media_type": "video"})
 
-        self.assertEqual(len(job_repository.created_jobs), 1)
+        self.assertEqual(len(job_repository.created_jobs), 2)
         self.assertEqual(job_repository.created_jobs[0]["job_type"], "index_media")
         self.assertEqual(job_repository.created_jobs[0]["input_json"]["file_id"], "file-1")
         self.assertEqual(job_repository.created_jobs[0]["input_json"]["segment_strategy"], "scene_detection")
+        self.assertEqual(job_repository.created_jobs[1]["job_type"], "transcribe_audio")
+        self.assertEqual(job_repository.created_jobs[1]["input_json"], {
+            "file_id": "file-1",
+            "path": "/tmp/video.mp4",
+            "media_type": "video",
+            "model": "base",
+            "language": "auto",
+        })
+        self.assertEqual(job_repository.created_jobs[1]["timeout_seconds"], 14400)
+
+    def test_probe_handler_creates_only_transcribe_job_for_audio_after_probing(self):
+        repository = FakeMediaRepository()
+        repository.files["file-1"] = {"id": "file-1", "path": "/tmp/audio.mp3", "media_type": "audio"}
+        job_repository = InMemoryJobRepository()
+        handler = ProbeHandler(
+            repository,
+            job_repository=job_repository,
+            ffprobe_runner=lambda _path: {
+                "duration_seconds": 31.5,
+                "width": None,
+                "height": None,
+                "codec": "mp3",
+                "streams": 1,
+            },
+        )
+
+        handler.handle({"file_id": "file-1", "path": "/tmp/audio.mp3", "media_type": "audio"})
+
+        self.assertEqual(len(job_repository.created_jobs), 1)
+        self.assertEqual(job_repository.created_jobs[0]["job_type"], "transcribe_audio")
+        self.assertEqual(job_repository.created_jobs[0]["input_json"]["media_type"], "audio")
+        self.assertEqual(job_repository.created_jobs[0]["timeout_seconds"], 14400)
 
     def test_index_media_creates_30s_video_segments_and_pending_vector_refs_idempotently(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -191,6 +227,35 @@ class ProbeAndIndexTest(unittest.TestCase):
             self.assertEqual(vector_ref["model_version"], "siglip-base-patch16-224")
             self.assertEqual(vector_ref["vector_dim"], 768)
 
+    def test_index_media_creates_run_ocr_job_for_image_asset(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = str(Path(tmp_dir) / "poster.jpg")
+            Path(image_path).write_bytes(b"image")
+            repository = FakeMediaRepository()
+            repository.files["file-1"] = {
+                "id": "file-1",
+                "library_id": "library-1",
+                "path": image_path,
+                "media_type": "image",
+            }
+            job_repository = InMemoryJobRepository()
+            handler = IndexMediaHandler(repository, job_repository=job_repository)
+
+            handler.handle({
+                "file_id": "file-1",
+                "index_profile": "balanced",
+                "segment_strategy": "fixed_30s",
+            })
+
+            self.assertEqual(len(job_repository.created_jobs), 1)
+            self.assertEqual(job_repository.created_jobs[0]["job_type"], "run_ocr")
+            self.assertEqual(job_repository.created_jobs[0]["input_json"], {
+                "asset_ids": ["asset-1"],
+                "engine": "paddleocr",
+                "language": "ch",
+            })
+            self.assertEqual(job_repository.created_jobs[0]["timeout_seconds"], 7200)
+
     def test_index_media_scene_detection_creates_scene_segments_keyframes_and_metadata(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             video_path = str(Path(tmp_dir) / "video.mp4")
@@ -226,6 +291,42 @@ class ProbeAndIndexTest(unittest.TestCase):
             self.assertEqual(frame_assets[0]["metadata_json"]["scene_id"], "scene-0001")
             self.assertEqual(frame_assets[0]["metadata_json"]["keyframe_index"], 1)
             self.assertEqual(len(repository.vector_refs), 6)
+
+    def test_index_media_creates_run_ocr_job_for_scene_video_frame_assets(self):
+        repository = FakeMediaRepository()
+        repository.files["file-1"] = {
+            "id": "file-1",
+            "library_id": "library-1",
+            "path": "/tmp/video.mp4",
+            "media_type": "video",
+            "duration_seconds": 80.0,
+        }
+        job_repository = InMemoryJobRepository()
+        handler = IndexMediaHandler(
+            repository,
+            job_repository=job_repository,
+            scene_detector=lambda _path: [(0.0, 80.0)],
+        )
+
+        handler.handle({
+            "file_id": "file-1",
+            "index_profile": "balanced",
+            "segment_strategy": "scene_detection",
+        })
+
+        frame_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_frame"]
+        self.assertEqual(len(frame_assets), 2)
+        self.assertEqual(job_repository.created_jobs, [
+            {
+                "job_type": "run_ocr",
+                "input_json": {
+                    "asset_ids": [asset["id"] for asset in frame_assets],
+                    "engine": "paddleocr",
+                    "language": "ch",
+                },
+                "timeout_seconds": 7200,
+            },
+        ])
 
     def test_index_media_merges_short_scenes_before_creating_assets(self):
         repository = FakeMediaRepository()

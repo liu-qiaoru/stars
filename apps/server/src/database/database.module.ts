@@ -3,10 +3,11 @@ import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 import { ConfigModule } from '../config/config.module.js'
 import { SETTINGS, type Settings } from '../config/settings.js'
+import { DATABASE, PG_POOL } from './database.tokens.js'
 import * as schema from './schema.js'
+import { DatabaseSchemaGuardService } from './schema-guard.service.js'
 
-export const PG_POOL = Symbol('PG_POOL')
-export const DATABASE = Symbol('DATABASE')
+export { DATABASE, PG_POOL } from './database.tokens.js'
 
 @Module({
   imports: [ConfigModule],
@@ -21,6 +22,7 @@ export const DATABASE = Symbol('DATABASE')
       inject: [PG_POOL],
       useFactory: (pool: Pool) => drizzle(pool, { schema }),
     },
+    DatabaseSchemaGuardService,
   ],
   exports: [PG_POOL, DATABASE],
 })

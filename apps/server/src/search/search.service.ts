@@ -3,7 +3,11 @@ import type { QdrantClient, Schemas } from '@qdrant/js-client-rest'
 import { mediaTypes } from '@local-media-agent/shared/constants'
 import { z } from 'zod'
 import { DATABASE } from '../database/database.module.js'
-import { listSearchResultMetadata, type Database } from '../database/repositories.js'
+import {
+  listSearchResultMetadata,
+  listTextSearchResultMetadata,
+  type Database,
+} from '../database/repositories.js'
 import { QDRANT_CLIENT } from '../qdrant/qdrant.module.js'
 import { VECTOR_COLLECTIONS, type VectorCollectionName } from '../qdrant/vector-collections.js'
 import { SearchQueryVectorService } from './search-query-vector.service.js'
@@ -35,14 +39,14 @@ export class SearchService {
 
   async search(input: SearchRequest) {
     const request = this.parseRequest(input)
-    const requestedMediaTypes = request.media_types.length
+    const vectorMediaTypes = request.media_types.length
       ? request.media_types
       : supportedSearchCollections.map((entry) => entry.mediaType)
     const selectedCollections = supportedSearchCollections.filter((entry) =>
-      requestedMediaTypes.includes(entry.mediaType),
+      vectorMediaTypes.includes(entry.mediaType),
     )
 
-    const groups = await Promise.all(
+    const vectorGroups = await Promise.all(
       selectedCollections.map(async ({ collection }) => {
         const config = VECTOR_COLLECTIONS[collection]
         const points = await this.qdrantClient.search(collection, {
@@ -55,7 +59,7 @@ export class SearchService {
           with_vector: false,
         })
         const results = await this.hydrateResults(collection, points, {
-          mediaTypes: requestedMediaTypes,
+          mediaTypes: vectorMediaTypes,
           libraryIds: request.library_ids,
         })
 
@@ -66,11 +70,12 @@ export class SearchService {
         }
       }),
     )
+    const textGroup = await this.textSearchGroup(request)
 
     return {
       limit: request.limit,
       offset: request.offset,
-      groups,
+      groups: [...vectorGroups, ...(textGroup ? [textGroup] : [])],
     }
   }
 
@@ -128,6 +133,42 @@ export class SearchService {
 
   private scoreKindForDistance(distance: string) {
     return distance === 'Cosine' ? 'cosine_similarity' : distance.toLowerCase()
+  }
+
+  private async textSearchGroup(request: ParsedSearchRequest) {
+    const textMediaTypes = request.media_types.length
+      ? request.media_types.filter((mediaType) =>
+          mediaType === 'image' || mediaType === 'audio' || mediaType === 'video')
+      : ['image', 'audio', 'video']
+    if (textMediaTypes.length === 0) {
+      return undefined
+    }
+
+    const rows = await listTextSearchResultMetadata(this.db, {
+      query: request.query,
+      filters: {
+        mediaTypes: textMediaTypes,
+        libraryIds: request.library_ids,
+      },
+      limit: request.limit,
+      offset: request.offset,
+    })
+
+    return {
+      collection: 'text_search',
+      score_kind: 'ts_rank_cd',
+      results: rows.map((row) => ({
+        asset_id: row.assetId,
+        file_id: row.fileId,
+        media_type: row.mediaType,
+        path: row.path,
+        start_time_seconds: row.startTimeSeconds === null ? null : Number(row.startTimeSeconds),
+        end_time_seconds: row.endTimeSeconds === null ? null : Number(row.endTimeSeconds),
+        scene_id: this.sceneId(row.metadataJson),
+        score: Number(row.score),
+        reason: row.assetType === 'text_chunk' ? 'text_match' : 'ocr_match',
+      })),
+    }
   }
 
   private sceneId(metadata: unknown) {

@@ -143,10 +143,14 @@ Python worker 负责管线内部的 job 链式触发，区别于 TypeScript serv
 
 ```text
 scan_library 完成 → 为每个 created/updated file 创建 probe_media job
-probe_media 完成 → 为该 file 创建 index_media job（视频默认 segment_strategy='scene_detection'，图片为 image 路径）
+probe_media 完成 → 对视频创建 index_media job（segment_strategy='scene_detection'）+ transcribe_audio job；对音频只创建 transcribe_audio job；对图片创建 index_media job（image 路径）
 index_media 完成 → 创建 assets 和 pending vector_refs
+transcribe_audio 完成 → 创建 text_chunk assets（text_content + start/end），FTS tsvector 由生成列自动维护
 POST /jobs/embedding/queue-pending → 为 pending vector_refs 创建 embed_image / embed_video_frame jobs
 embedding job 完成 → Qdrant point 已写入，vector_ref.status = indexed
+index_media 完成 → 为 image / video_frame asset 创建 run_ocr job（asset 已存在，asset 粒度）
+POST /jobs/ocr/queue-pending → 按 library_id / file_id 扫描待 OCR asset，批量创建 run_ocr jobs
+run_ocr 完成 → OCR 文本写回被 OCR asset 的 text_content + metadata_json.ocr，FTS tsvector 自动维护
 ```
 
 `media_files.index_status` 状态流转：
@@ -384,10 +388,13 @@ Input：
 {
   "file_id": "uuid",
   "path": "/Volumes/Media/video.mp4",
-  "model": "faster-whisper",
+  "media_type": "video",
+  "model": "base",
   "language": "auto"
 }
 ```
+
+仅视频/音频适用。worker 用 FFmpeg 抽取音轨到临时文件，再用 faster-whisper 转写，按 15-30 秒窗口把 segments 累积切成 `text_chunk` assets（`asset_type='text_chunk'`，写入 `text_content`、`start_time_seconds`、`end_time_seconds`）。text chunk 不产生 vector_refs（Phase 12 FTS-only，文本 embedding 延后）。详见 `docs/implementation-plan.md` Phase 12。
 
 Result：
 
@@ -399,6 +406,13 @@ Result：
 }
 ```
 
+Python worker 可写字段：
+
+```text
+media_assets（asset_type='text_chunk'，写入 text_content / start_time_seconds / end_time_seconds）
+jobs.*
+```
+
 ### run_ocr
 
 Input：
@@ -406,17 +420,29 @@ Input：
 ```json
 {
   "asset_ids": ["uuid"],
-  "engine": "paddleocr"
+  "engine": "paddleocr",
+  "language": "ch"
 }
 ```
+
+`asset_ids` 为 image 或 video_frame asset（asset 粒度，一个 job 处理一批）。worker 对 image asset 直接读图；对 video_frame asset 用 FFmpeg 按 `frame_time_seconds` 抽帧后 OCR。OCR 文本写回**被 OCR 的原 asset 的 `text_content`**（不新建 ocr_chunk），并在 `metadata_json.ocr` 记录 engine / language / confidence / block_count。详见 `docs/implementation-plan.md` Phase 13。
 
 Result：
 
 ```json
 {
   "assets_processed": 1,
-  "text_blocks_created": 12
+  "text_written": 1,
+  "skipped_no_text": 0
 }
+```
+
+Python worker 可写字段：
+
+```text
+media_assets.text_content（写回被 OCR 的原 asset）
+media_assets.metadata_json（写 metadata_json.ocr）
+jobs.*
 ```
 
 ## Python Worker 写入边界

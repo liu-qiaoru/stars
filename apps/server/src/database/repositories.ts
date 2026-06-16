@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import {
@@ -71,6 +71,7 @@ export async function createMediaAsset(
         | 'endTimeSeconds'
         | 'frameTimeSeconds'
         | 'contentHash'
+        | 'textContent'
         | 'metadataJson'
       >
     >,
@@ -259,6 +260,51 @@ export async function listActiveEmbeddingJobs(db: Database) {
     .limit(500)
 }
 
+export async function listActiveOcrJobs(db: Database) {
+  return db
+    .select({
+      jobType: jobs.jobType,
+      inputJson: jobs.inputJson,
+    })
+    .from(jobs)
+    .where(and(eq(jobs.jobType, 'run_ocr'), inArray(jobs.status, ['queued', 'running'])))
+    .limit(500)
+}
+
+export async function listPendingOcrAssets(
+  db: Database,
+  input: { libraryId?: string; fileId?: string; limit?: number } = {},
+) {
+  const conditions = [
+    inArray(mediaAssets.assetType, ['image', 'video_frame']),
+    isNull(mediaFiles.deletedAt),
+    isNull(libraries.deletedAt),
+    or(isNull(mediaAssets.textContent), sql`NOT (${mediaAssets.metadataJson} ? 'ocr')`),
+  ]
+  if (input.libraryId) {
+    conditions.push(eq(mediaFiles.libraryId, input.libraryId))
+  }
+  if (input.fileId) {
+    conditions.push(eq(mediaFiles.id, input.fileId))
+  }
+
+  return db
+    .select({
+      assetId: mediaAssets.id,
+      fileId: mediaFiles.id,
+      libraryId: mediaFiles.libraryId,
+      assetType: mediaAssets.assetType,
+      path: mediaAssets.path,
+      frameTimeSeconds: mediaAssets.frameTimeSeconds,
+    })
+    .from(mediaAssets)
+    .innerJoin(mediaFiles, eq(mediaAssets.fileId, mediaFiles.id))
+    .innerJoin(libraries, eq(mediaFiles.libraryId, libraries.id))
+    .where(and(...conditions))
+    .orderBy(asc(mediaAssets.createdAt))
+    .limit(input.limit ?? 500)
+}
+
 export async function getFileWithAssetsAndVectors(db: Database, fileId: string) {
   const file = (await db.query.mediaFiles.findFirst({
     where: eq(mediaFiles.id, fileId),
@@ -340,6 +386,50 @@ export async function listSearchResultMetadata(
     .innerJoin(mediaFiles, eq(vectorRefs.fileId, mediaFiles.id))
     .innerJoin(libraries, eq(vectorRefs.libraryId, libraries.id))
     .where(and(...conditions))
+}
+
+export async function listTextSearchResultMetadata(
+  db: Database,
+  input: {
+    query: string
+    filters?: SearchMetadataFilters
+    limit: number
+    offset: number
+  },
+) {
+  const rank = sql<number>`ts_rank_cd(media_assets.text_tsv, plainto_tsquery('simple', ${input.query}))`
+  const conditions = [
+    inArray(mediaAssets.assetType, ['text_chunk', 'image', 'video_frame']),
+    sql`media_assets.text_tsv @@ plainto_tsquery('simple', ${input.query})`,
+    isNull(mediaFiles.deletedAt),
+    isNull(libraries.deletedAt),
+  ]
+  if (input.filters?.mediaTypes?.length) {
+    conditions.push(inArray(mediaFiles.mediaType, input.filters.mediaTypes))
+  }
+  if (input.filters?.libraryIds?.length) {
+    conditions.push(inArray(mediaFiles.libraryId, input.filters.libraryIds))
+  }
+
+  return db
+    .select({
+      assetId: mediaAssets.id,
+      assetType: mediaAssets.assetType,
+      fileId: mediaFiles.id,
+      mediaType: mediaFiles.mediaType,
+      path: mediaFiles.path,
+      startTimeSeconds: mediaAssets.startTimeSeconds,
+      endTimeSeconds: mediaAssets.endTimeSeconds,
+      metadataJson: mediaAssets.metadataJson,
+      score: rank,
+    })
+    .from(mediaAssets)
+    .innerJoin(mediaFiles, eq(mediaAssets.fileId, mediaFiles.id))
+    .innerJoin(libraries, eq(mediaFiles.libraryId, libraries.id))
+    .where(and(...conditions))
+    .orderBy(desc(rank), asc(mediaAssets.startTimeSeconds))
+    .limit(input.limit)
+    .offset(input.offset)
 }
 
 export async function listLibraries(db: Database) {

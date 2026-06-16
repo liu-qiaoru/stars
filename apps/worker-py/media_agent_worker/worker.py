@@ -9,6 +9,8 @@ class WorkerRunner:
         index_handler=None,
         embed_image_handler=None,
         embed_video_frame_handler=None,
+        transcribe_handler=None,
+        ocr_handler=None,
         export_handler=None,
     ):
         self.worker_id = worker_id
@@ -18,6 +20,8 @@ class WorkerRunner:
         self.index_handler = index_handler
         self.embed_image_handler = embed_image_handler
         self.embed_video_frame_handler = embed_video_frame_handler
+        self.transcribe_handler = transcribe_handler
+        self.ocr_handler = ocr_handler
         self.export_handler = export_handler
         self._shutdown_requested = False
 
@@ -44,6 +48,10 @@ class WorkerRunner:
                 result = self.embed_image_handler.handle(job["input_json"])
             elif job["job_type"] == "embed_video_frame" and self.embed_video_frame_handler is not None:
                 result = self.embed_video_frame_handler.handle(job["input_json"])
+            elif job["job_type"] == "transcribe_audio" and self.transcribe_handler is not None:
+                result = self.transcribe_handler.handle(job["input_json"])
+            elif job["job_type"] == "run_ocr" and self.ocr_handler is not None:
+                result = self.ocr_handler.handle(job["input_json"])
             elif job["job_type"] == "export_clip" and self.export_handler is not None:
                 result = self.export_handler.handle(job["input_json"])
             else:

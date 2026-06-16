@@ -23,6 +23,7 @@ export const pythonWorkerSchemaContract = {
     'startTimeSeconds',
     'endTimeSeconds',
     'contentHash',
+    'textContent',
   ],
   vectorRefs: [
     'id',

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
+    "db:migrate": "drizzle-kit migrate",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm test"

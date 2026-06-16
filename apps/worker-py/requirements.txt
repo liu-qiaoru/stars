@@ -3,3 +3,6 @@ pillow>=10,<12
 torch>=2.3,<3
 transformers>=4.44,<5
 scenedetect>=0.7,<1
+faster-whisper>=1.1,<2
+paddleocr>=3,<4
+paddlepaddle>=3,<4

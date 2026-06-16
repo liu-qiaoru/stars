@@ -2,6 +2,8 @@ export const jobTypes = [
   'scan_library',
   'probe_media',
   'index_media',
+  'transcribe_audio',
+  'run_ocr',
   'embed_image',
   'embed_video_frame',
   'export_clip',

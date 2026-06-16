@@ -42,14 +42,14 @@ class PostgresJobRepository:
             self.connection.commit()
             return {"id": str(job_id), "job_type": job_type, "input_json": input_json}
 
-    def create_job(self, job_type, input_json):
+    def create_job(self, job_type, input_json, timeout_seconds=None):
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO jobs (id, job_type, input_json, status)
-                VALUES (%s, %s, %s, 'queued')
+                INSERT INTO jobs (id, job_type, input_json, timeout_seconds, status)
+                VALUES (%s, %s, %s, COALESCE(%s, 3600), 'queued')
                 """,
-                (str(uuid.uuid4()), job_type, json.dumps(input_json)),
+                (str(uuid.uuid4()), job_type, json.dumps(input_json), timeout_seconds),
             )
         self.connection.commit()
 
@@ -195,7 +195,7 @@ class PostgresMediaRepository:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash, metadata_json
+                SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash, text_content, metadata_json
                 FROM media_assets
                 WHERE file_id = %s
                   AND asset_type = %s
@@ -215,16 +215,28 @@ class PostgresMediaRepository:
             )
             previous = cursor.fetchone()
             if previous is not None:
+                has_text_content = "text_content" in asset
+                metadata_patch = asset.get("metadata_json", {})
                 cursor.execute(
                     """
                     UPDATE media_assets
                     SET content_hash = %s,
-                        metadata_json = %s
+                        text_content = CASE WHEN %s THEN %s ELSE text_content END,
+                        metadata_json = COALESCE(metadata_json, '{}'::jsonb) || %s::jsonb
                     WHERE id = %s
                     """,
-                    (asset.get("content_hash"), json.dumps(asset.get("metadata_json", {})), previous[0]),
+                    (
+                        asset.get("content_hash"),
+                        has_text_content,
+                        asset.get("text_content"),
+                        json.dumps(metadata_patch),
+                        previous[0],
+                    ),
                 )
                 self.connection.commit()
+                previous_metadata = previous[9] or {}
+                if isinstance(previous_metadata, str):
+                    previous_metadata = json.loads(previous_metadata)
                 return {
                     "id": str(previous[0]),
                     "file_id": str(previous[1]),
@@ -234,7 +246,9 @@ class PostgresMediaRepository:
                     "end_time_seconds": float(previous[5]) if previous[5] is not None else None,
                     "frame_time_seconds": float(previous[6]) if previous[6] is not None else None,
                     "content_hash": previous[7],
-                    "metadata_json": asset.get("metadata_json", previous[8] or {}),
+                    "text_content": asset["text_content"] if has_text_content else previous[8],
+                    "metadata_json": {**previous_metadata, **metadata_patch},
+                    "_created": False,
                 }
 
             asset_id = str(uuid.uuid4())
@@ -242,9 +256,9 @@ class PostgresMediaRepository:
                 """
                 INSERT INTO media_assets (
                   id, file_id, asset_type, path, start_time_seconds, end_time_seconds,
-                  frame_time_seconds, content_hash, metadata_json
+                  frame_time_seconds, content_hash, text_content, metadata_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     asset_id,
@@ -255,11 +269,12 @@ class PostgresMediaRepository:
                     asset.get("end_time_seconds"),
                     asset.get("frame_time_seconds"),
                     asset.get("content_hash"),
+                    asset.get("text_content"),
                     json.dumps(asset.get("metadata_json", {})),
                 ),
             )
         self.connection.commit()
-        return {"id": asset_id, **asset}
+        return {"id": asset_id, **asset, "_created": True}
 
     def upsert_vector_ref(self, **vector_ref):
         with self.connection.cursor() as cursor:
@@ -414,6 +429,46 @@ class PostgresMediaRepository:
                 WHERE point_id = %s
                 """,
                 (point_id,),
+            )
+        self.connection.commit()
+
+    def get_media_asset_for_ocr(self, asset_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                  ma.id, ma.file_id, ma.asset_type, COALESCE(ma.path, mf.path) AS path,
+                  ma.frame_time_seconds, ma.metadata_json
+                FROM media_assets ma
+                JOIN media_files mf ON mf.id = ma.file_id
+                WHERE ma.id = %s
+                  AND ma.asset_type IN ('image', 'video_frame')
+                """,
+                (asset_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f"OCR asset not found: {asset_id}")
+        return {
+            "id": str(row[0]),
+            "file_id": str(row[1]),
+            "asset_type": row[2],
+            "path": row[3],
+            "frame_time_seconds": float(row[4]) if row[4] is not None else None,
+            "metadata_json": row[5] or {},
+        }
+
+    def update_asset_ocr_text(self, asset_id, *, text_content, ocr_metadata):
+        ocr_patch = json.dumps({"ocr": ocr_metadata})
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE media_assets
+                SET text_content = %s,
+                    metadata_json = metadata_json || %s::jsonb
+                WHERE id = %s
+                """,
+                (text_content, ocr_patch, asset_id),
             )
         self.connection.commit()
 

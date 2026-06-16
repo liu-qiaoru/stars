@@ -73,6 +73,8 @@ text_chunk_vectors
 
 - `media_assets.asset_type = audio_segment`
 
+> Phase 12 起：转写产出的 `text_chunk` assets 先只进 PostgreSQL FTS（`text_content` → `text_tsv` 生成列）。`audio_segment_vectors` 在 Phase 12 保持空 collection（启动时创建），等后续阶段接入 sentence-transformers 文本 embedding 后再填充，无需改 schema。
+
 ### text_chunk_vectors
 
 用途：
@@ -82,6 +84,10 @@ text_chunk_vectors
 典型来源：
 
 - `media_assets.asset_type = text_chunk`
+
+> Phase 12 同上：text_chunk 先走 FTS，`text_chunk_vectors` 保持空 collection，文本 embedding 延后。
+>
+> Phase 13 起：OCR 画面文字同样复用 Phase 12 的 `media_assets.text_content` → `text_tsv` 生成列 + GIN，**写回被 OCR 的 image/video_frame asset 本身的 `text_content`**（不新建 ocr_chunk 行，零新迁移）。`ocr_chunk` asset_type 预留给未来更细 bbox/text-block 粒度。FTS 查询放宽到 `text_chunk`/`image`/`video_frame` 任何有 `text_content` 的 asset；OCR text embedding 同 Phase 12 延后。
 
 ## Collection 配置
 

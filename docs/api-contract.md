@@ -218,6 +218,33 @@ Response：
 }
 ```
 
+## POST /jobs/ocr/queue-pending
+
+扫描待 OCR 的 `image` / `video_frame` asset（`text_content IS NULL` 或 `metadata_json` 无 `ocr` 标记），按 `library_id` / `file_id` 过滤后批量创建 `run_ocr` jobs。不强制全库执行。
+
+Request：
+
+```json
+{
+  "library_id": "uuid",
+  "file_id": "uuid",
+  "batch_size": 20,
+  "limit": 100
+}
+```
+
+`library_id` / `file_id` 可选（不传则全库扫描）；`batch_size` 为单个 `run_ocr` job 的 asset 数量上限；`limit` 为本次最多扫描的待 OCR asset 数量。
+
+Response：
+
+```json
+{
+  "scanned": 50,
+  "created": 3,
+  "skipped": 0
+}
+```
+
 ## POST /search
 
 搜索已索引的 media assets。
@@ -257,10 +284,40 @@ Response：
           "reason": "vector_match"
         }
       ]
+    },
+    {
+      "collection": "text_search",
+      "score_kind": "ts_rank_cd",
+      "results": [
+        {
+          "asset_id": "asset-uuid",
+          "file_id": "file-uuid",
+          "media_type": "audio",
+          "path": "/Volumes/Media/interview.mp3",
+          "start_time_seconds": 30.0,
+          "end_time_seconds": 55.0,
+          "scene_id": null,
+          "score": 0.16,
+          "reason": "text_match"
+        },
+        {
+          "asset_id": "ocr-asset-uuid",
+          "file_id": "image-file-uuid",
+          "media_type": "image",
+          "path": "/Volumes/Media/poster.png",
+          "start_time_seconds": null,
+          "end_time_seconds": null,
+          "scene_id": null,
+          "score": 0.21,
+          "reason": "ocr_match"
+        }
+      ]
     }
   ]
 }
 ```
+
+向量 group（`image_vectors` / `video_segment_vectors`，`reason='vector_match'`，`score_kind='cosine_similarity'`）来自 Qdrant。`text_search` group（`score_kind='ts_rank_cd'`）来自 `media_assets.text_tsv`（对 `text_content` 跑 `to_tsvector('simple', ...)` 的 PostgreSQL FTS）：`text_chunk` asset 命中为 `reason='text_match'`（transcript），`image`/`video_frame` asset 命中为 `reason='ocr_match'`（OCR 画面文字）。触发 media type 为 `image`/`audio`/`video`，受 `library_ids` 过滤。
 
 MVP 中不同 collection 的 `score` 不做全局可比承诺。前端应按 `groups` 分组展示，Phase 14 的 reranking 落地前不要把不同 collection 结果按原始 `score` 混排。
 

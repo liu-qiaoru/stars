@@ -10,9 +10,9 @@
 
 ## 当前进度
 
-- 当前阶段：Phase 11 已完成实现、单元/服务验证和真实 PySceneDetect + FFmpeg smoke 验证。
-- 最近更新：2026-06-09，安装 Python 3.12、PySceneDetect 和 FFmpeg，并完成真实 scene 检测/抽帧 smoke。
-- 下一步：用户确认后进入 Phase 12 语音转写与文本检索。
+- 当前阶段：Phase 13 已完成（run_ocr 独立 job、asset 粒度、写回 text_content、ocr_match reason、FTS 放宽）。
+- 最近更新：2026-06-15，完成 Phase 13 OCR 与画面文字检索实现，并用真实 PaddleOCR smoke 验证写回路径。
+- 下一步：等待确认后进入 Phase 14 Hybrid Retrieval 与 Reranking。
 
 ## Phase 1：Monorepo 与基础设施
 
@@ -255,31 +255,57 @@ Review：
 
 ## Phase 12：语音转写与文本检索
 
-- [ ] Python worker 接入 faster-whisper 或 whisper.cpp。
-- [ ] 添加 transcription job。
-- [ ] 将 transcript 切成 15 到 30 秒 chunks。
-- [ ] 将 transcript 写入 PostgreSQL。
-- [ ] 添加 PostgreSQL full-text search。
-- [ ] 可选生成 text embeddings。
+- Start：2026-06-15，目标是接入 faster-whisper 转写、按 15-30s 切 text_chunk、PostgreSQL FTS 让视频/音频讲话内容可搜索；text embeddings 延后。
+- 假设：本阶段沿用 Phase 10/11 直接实施方式，不新建分支；faster-whisper 作为可选运行依赖接入，单元测试注入 fake transcriber/ffprobe runner，不要求 CI 下载 Whisper 权重；数据库新增 `media_assets.text_content text` 列 + `text_tsv` 生成列 + GIN 索引 + `text_chunk` 唯一索引（迁移），不新增表；`audio_segment_vectors` / `text_chunk_vectors` 暂不写入（空 collection）。
+- 权衡：FTS-only 满足「搜索说过的话」，避免引入第二个 embedding 模型 + service（YAGNI）；`'simple'` tsvector 对中文按空白分词，召回弱于中文分词扩展，先保证链路通；faster-whisper CPU/INT8 默认，与 SigLIP（可 MPS）解耦，避免内存争抢；transcribe 与 index 并行（产出 asset 类型不同，无写入冲突）。
+- 验证计划：先写 shared `transcribe_audio` schema 测试、Python transcribe handler/chunk 切分/幂等测试、worker dispatch 测试、TS search FTS 集成测试（PGlite 含生成列 + GIN）；确认失败后实现。完成后运行 shared schema/type/test、server type/test、Python worker unittest、`git diff --check`，并用手动 fixture 音频 smoke 真实转写。
+
+- [x] `transcribe_audio` 注册进 `jobTypes` + shared Zod schema + 生成 JSON Schema。
+- [x] Python worker 接入 faster-whisper（默认 `base`，`WHISPER_MODEL` 可配）。
+- [x] `TranscribeHandler`：FFmpeg 抽音轨 → faster-whisper 转写 → 拿 segment timestamps。
+- [x] 按 15-30s 窗口把 segments 累积切成 `text_chunk` asset（`text_content` + `start/end_time_seconds`）。
+- [x] `ProbeHandler` 扩展：video/audio 创建 `transcribe_audio` job，video 同时创建 `index_media`，纯音频不创建 index_media。
+- [x] `WorkerRunner` 新增 `transcribe_audio` handler dispatch。
+- [x] Drizzle 迁移：新增 `media_assets.text_content text` 列（当前 schema 缺该列，但 API 契约已暴露）。
+- [x] Drizzle 迁移：新增 `media_assets.text_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(text_content,''))) STORED` + GIN 索引（用 `coalesce`，避免 NULL text_content 使生成列为 NULL）。
+- [x] Drizzle 迁移：新增 `text_chunk` 专用 partial 唯一索引 `UNIQUE (file_id, start_time_seconds, end_time_seconds) WHERE asset_type='text_chunk'`，保证并发 transcribe job 不插重复 chunk。
+- [x] `create_job` 扩展支持 `timeout_seconds` 参数（当前只插 id/job_type/input_json/status）；ProbeHandler 为 `transcribe_audio` 显式写 `14400`，避免长视频走默认 3600s。
+- [x] `POST /search` 增加 `text_search` group（tsvector 查询，`ts_rank_cd` 排序，`reason='text_match'`），受 `media_types` / `library_ids` 过滤。
+- [x] `text_search` 触发条件明确：无 `media_types`（默认）或 `media_types` 含 `audio`/`video` 时都要返回；不依赖 Qdrant collection，独立按 `text_content` FTS 查询，`media_types:['audio']` 不能因无 audio vector collection 而空返回。
+- [x] 同文件重跑 transcribe 幂等：顺序重跑靠应用层 upsert；并发靠 `text_chunk` 唯一索引兜底。
+- [x] 单元测试注入 fake transcriber；FTS 用 PGlite（生成列 + GIN）验证命中与排序。
+- [x] 小 fixture 音频手动 smoke 真实转写（非 CI）。
 
 Review：
 
-- Result：
-- Notes：
+- Result：Phase 12 已接入 `transcribe_audio` job、Python worker faster-whisper 转写、15-30s text chunk 切分、PostgreSQL FTS 文本检索和 `text_search` 搜索 group。`probe_media` 现在对视频创建 `index_media` + `transcribe_audio`，对音频只创建 `transcribe_audio`；`transcribe_audio` job 显式使用 14400s timeout。数据库新增 `media_assets.text_content`、`text_tsv` 生成列、GIN 索引和 text_chunk partial unique index；文本 embedding collection 仍保持空 collection，不写 vector_refs。
+- Notes：遵循红绿流程，先补 shared schema、Python worker/probe/dispatch、server FTS search 失败测试并确认红灯，再实现。自动验证通过：shared JSON Schema 生成、`tsc --noEmit`、Vitest 2 tests；server `tsc --noEmit`、Vitest 15 files / 36 tests；Python worker unittest 30 tests；web `check`（typecheck、Vitest 5 files / 8 tests、Next webpack build）；`git diff --check`。真实 smoke：安装 `faster-whisper` 1.2.1 到项目 `.venv`，用 `say` 生成 `/private/tmp/phase12-transcribe.aiff`，授权联网下载 faster-whisper tiny 权重后运行真实 `TranscribeHandler`，产出 1 个 `text_chunk`，`text_content` 为 `Red bicycle near the station.`。
 
 ## Phase 13：OCR 与画面文字检索
 
-- [ ] Python worker 接入 PaddleOCR 或 EasyOCR。
-- [ ] 对图片执行 OCR。
-- [ ] 对视频关键帧执行 OCR。
-- [ ] 将 OCR 文本写入 media assets。
-- [ ] 将 OCR 文本纳入 full-text search。
-- [ ] 在搜索结果中展示 OCR 命中原因。
+- Start：2026-06-15，目标是接入 PaddleOCR 识别图片/视频关键帧画面文字，写回原 asset 的 text_content 复用 Phase 12 FTS，区分 ocr_match 命中原因；text embeddings 延后。
+- 假设：本阶段沿用 Phase 10-12 直接实施方式，不新建分支；PaddleOCR 作为可选运行依赖接入，单元测试注入 fake ocrer，不要求 CI 下载 OCR 权重；数据库零新迁移（复用 Phase 12 的 text_content/text_tsv/GIN）；`ocr_chunk` asset_type 预留给未来细粒度 bbox/block，Phase 13 不使用。
+- 权衡：OCR 文本写回原 asset 而非新建 ocr_chunk，零迁移、复用 FTS、asset 行数不膨胀（代价：单 asset text_content 单份，细粒度 bbox 留给 ocr_chunk）；reason 区分 ocr_match/text_match 满足"展示命中原因"；OCR text embedding 延后同 Phase 12。
+- 验证计划：先写 shared `run_ocr` schema 测试、Python ocr handler/写回/幂等/抽帧测试、worker dispatch 测试、TS search FTS（ocr_match/text_match 区分）+ 协调入口测试（PGlite）；确认失败后实现。完成后运行 shared schema/type/test、server type/test、Python worker unittest、`git diff --check`，并用小 fixture 图片手动 smoke 真实 PaddleOCR。
+
+- [x] `run_ocr` 注册进 `jobTypes` + shared Zod schema + 生成 JSON Schema。
+- [x] Python worker 接入 PaddleOCR（默认 `OCR_ENGINE=paddleocr`，`OCR_LANGUAGE=ch`，`OCR_MIN_CONFIDENCE=0.5`）。
+- [x] `OcrHandler`：image asset 直接读图；video_frame asset 用 FFmpeg 按 `frame_time_seconds` 抽帧后 OCR。
+- [x] OCR 文本写回**被 OCR 的原 asset** 的 `text_content`；`metadata_json.ocr` 记录 engine/language/confidence/block_count。
+- [x] `IndexMediaHandler` 完成后为 image/video_frame asset 创建 `run_ocr` job（asset 粒度 `asset_ids`）。
+- [x] `WorkerRunner` 新增 `run_ocr` handler dispatch。
+- [x] `POST /jobs/ocr/queue-pending`：按 `library_id`/`file_id` 扫描未 OCR 的 image/video_frame asset，批量建 job（`OCR_BATCH_SIZE`，跳过已 OCR）。
+- [x] 放宽 `listTextSearchResultMetadata`：查 `text_chunk`/`image`/`video_frame` 的 `text_content`，返回 `asset_type`。
+- [x] `SearchService` 按 asset_type 映射 `reason`（text_chunk→`text_match`，image/video_frame→`ocr_match`）；`text_search` 触发 media type 扩到 image/audio/video。
+- [x] run_ocr job timeout `7200s`（复用 `create_job(timeout_seconds)`）。
+- [x] 同 asset 重跑 OCR 幂等（覆盖 text_content，不产生重复行）。
+- [x] 单元测试注入 fake ocrer；FTS 用 PGlite 验证 ocr_match/text_match 区分与命中。
+- [x] 小 fixture 图片手动 smoke 真实 PaddleOCR（非 CI）。
 
 Review：
 
-- Result：
-- Notes：
+- Result：Phase 13 已接入 `run_ocr` job、PaddleOCR worker handler、image/video_frame OCR 写回、索引完成后的自动 OCR job 创建、待 OCR asset 批量补队列 API，以及 `text_search` 对 image/audio/video 的 FTS 覆盖。OCR 不新增迁移，复用 Phase 12 的 `text_content`/`text_tsv`；image/video_frame 命中返回 `reason='ocr_match'`，text_chunk 命中继续返回 `reason='text_match'`。
+- Notes：遵循红绿流程，先补 shared schema、Python OCR handler/dispatch/index job、server FTS/queue-pending 失败测试并确认红灯，再实现。实现中修正真实 PaddleOCR 3.x 兼容性：`ocr(..., cls=False)` 已不被支持，适配为 `predict(..., use_textline_orientation=False)` 并规范化 `rec_texts`/`rec_scores`/`rec_polys` 输出。后续 review 修复问题：`upsert_media_asset` 重索引 UPDATE 改为保留未显式传入的 `text_content` 并 merge `metadata_json`，避免清空已写入 OCR；`run_ocr.engine` schema 收窄为 `paddleocr`，不再声明未实现的 EasyOCR；`POST /jobs/ocr/queue-pending` 接通 `limit` 与 `OCR_BATCH_SIZE`；PaddleOCR 默认缓存目录改为系统临时目录；`OcrHandler` 不再对 reader 已规范化 blocks 二次 normalize。自动验证通过：shared `tsc --noEmit`、Vitest 4 tests；server `tsc --noEmit`、Vitest 15 files / 40 tests；Python worker unittest 40 tests；web `check`（typecheck、Vitest 5 files / 8 tests、Next webpack build）；`git diff --check`。真实 smoke：安装 `paddleocr` 3.7.0 与 `paddlepaddle` 3.3.1 到项目 `.venv`，授权联网下载 PaddleOCR 官方模型后，用本地 PNG fixture 运行真实 `OcrHandler`，产出 `assets_processed=1`、`text_written=1`，并写入 `metadata_json.ocr`。
 
 ## Phase 14：Hybrid Retrieval 与 Reranking
 
@@ -354,6 +380,40 @@ Review：
 
 - Result：
 - Notes：
+
+## Bugfix：添加素材库时 `/libraries` 返回 500
+
+- Start：2026-06-10，目标是定位项目启动后前端添加素材库时 `POST /libraries` 返回 500 的根因，并判断是否与中文路径有关。
+- 假设：先不假定是中文路径问题；需要从服务端异常、请求体、路径处理、数据库约束和运行环境逐层确认。
+- 验证计划：复现 `POST /libraries`，读取服务端错误栈；用包含中文与不包含中文的路径分别测试；必要时补一个最小回归测试后再改代码。
+
+- [x] 复现 `POST /libraries` 500 并记录真实错误信息。
+- [x] 检查 `LibrariesController` / `LibrariesService` / repository 的路径处理与校验。
+- [x] 对比中文路径和 ASCII 路径的行为，确认路径是否为根因。
+- [x] 若需要修改，先补最小失败测试，再做单点修复。
+- [x] 运行相关验证并在本段 Review 记录结果。
+
+Review：
+
+- Result：定位到 500 根因不是中文路径，而是当前真实 PostgreSQL 数据库尚未执行 migration，`libraries` 表不存在。
+- Notes：`GET /health` 在 4001 调试副本返回 200，说明 PostgreSQL/Qdrant 可连接；`POST /libraries` 使用中文路径和 ASCII 路径均返回 500。服务端异常栈显示 Drizzle insert 失败，PostgreSQL 错误为 `42P01 relation "libraries" does not exist`。`README.md` 当前启动步骤只包含启动基础设施和后端，没有包含真实数据库 migration 步骤；健康检查也只验证连接，不验证 schema。
+
+## Bugfix：启动流程增加 migration 与 schema 检查
+
+- Start：2026-06-12，目标是在启动文档中明确手动执行 Drizzle migration，并让后端启动时检查关键业务表是否存在，避免缺表时等到 `/libraries` 才返回 500。
+- 假设：`db:migrate` 作为显式脚本提供，不塞进 `dev`，因此不会每次启动自动执行；schema 检查只验证关键表存在，不负责自动修复数据库。
+- 验证计划：先写 `DatabaseSchemaGuardService` 缺表失败测试；实现后运行 server typecheck、相关 Vitest 和 `git diff --check`。
+
+- [x] 添加缺少关键表时抛出清晰 migration 指引的测试。
+- [x] 实现后端启动 lifecycle schema guard。
+- [x] 添加 `db:migrate` 脚本。
+- [x] 更新 README 启动步骤，说明 migration 是手动步骤。
+- [x] 运行验证并记录 Review。
+
+Review：
+
+- Result：新增 `DatabaseSchemaGuardService`，后端启动时检查 `libraries`、`media_files`、`media_assets`、`vector_refs`、`jobs` 和 `agent_runs` 是否存在；缺表时抛出包含 `corepack pnpm --dir apps/server db:migrate` 的明确错误。新增 `apps/server` 的 `db:migrate` 脚本，并在 README 启动流程中把数据库迁移放在基础设施之后、后端 API 之前。随后修复 `drizzle.config.ts`，让 Drizzle CLI 也加载 `apps/server/.env` 或仓库根目录 `.env`，避免 migrate 使用 fallback 数据库地址。
+- Notes：遵循红绿流程，先新增 `tests/database/schema-guard.test.ts` 并观察缺实现失败，再补 service 和 module wiring。实现中发现并修复 `schema-guard.service` 与 `database.module` 之间的 token 循环依赖，将 `PG_POOL` / `DATABASE` 拆到 `database.tokens.ts`。用户执行 `db:migrate` 后发现 Drizzle CLI 未读取 `.env`，经验证 fallback 连接 `postgres://postgres:postgres@127.0.0.1:5432/local_media_agent` 会认证失败，而 `.env` 中 `media_agent` 连接可用。验证通过：`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，15 个 test files / 35 tests 通过；`git diff --check` 通过；修复 `.env` 加载后用只读命令确认 Drizzle config 解析到 `postgres://media_agent:media_agent_dev@127.0.0.1:5432/media_agent`。未自动执行真实数据库 migration，避免在未确认的情况下修改本机 PostgreSQL 状态。
 
 ## 工具链补充：Prettier 与 ESLint
 

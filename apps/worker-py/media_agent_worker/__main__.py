@@ -6,10 +6,12 @@ from .exporting import ExportClipHandler
 from .embedding_worker import EmbedImageHandler, EmbedVideoFrameHandler
 from .embeddings import SiglipEmbedder
 from .indexing import IndexMediaHandler
+from .ocr import OcrHandler
 from .probe import ProbeHandler
 from .qdrant import QdrantHttpClient
 from .repository import PostgresJobRepository, PostgresMediaRepository, connect_from_env
 from .scan import ScanHandler
+from .transcription import TranscribeHandler
 from .worker import WorkerRunner
 
 
@@ -20,9 +22,11 @@ def build_runner(*, worker_id, job_repository, media_repository, qdrant_client, 
         job_repository=job_repository,
         scan_handler=ScanHandler(media_repository, job_repository=job_repository),
         probe_handler=ProbeHandler(media_repository, job_repository=job_repository),
-        index_handler=IndexMediaHandler(media_repository),
+        index_handler=IndexMediaHandler(media_repository, job_repository=job_repository),
         embed_image_handler=EmbedImageHandler(media_repository, qdrant_client, shared_embedder),
         embed_video_frame_handler=EmbedVideoFrameHandler(media_repository, qdrant_client, shared_embedder),
+        transcribe_handler=TranscribeHandler(media_repository),
+        ocr_handler=OcrHandler(media_repository),
         export_handler=ExportClipHandler(media_repository),
     )
 

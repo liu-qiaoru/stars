@@ -22,7 +22,7 @@ export class MediaService {
           asset.startTimeSeconds === null ? null : Number(asset.startTimeSeconds),
         end_time_seconds: asset.endTimeSeconds === null ? null : Number(asset.endTimeSeconds),
         cache_path: asset.path,
-        text_content: null,
+        text_content: asset.textContent,
         metadata_json: asset.metadataJson,
       }))
 

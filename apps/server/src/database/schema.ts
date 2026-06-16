@@ -71,6 +71,7 @@ export const mediaAssets = pgTable(
     endTimeSeconds: numeric('end_time_seconds'),
     frameTimeSeconds: numeric('frame_time_seconds'),
     contentHash: text('content_hash'),
+    textContent: text('text_content'),
     metadataJson: jsonb('metadata_json').notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -216,6 +216,122 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
+    "transcribe_audio": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "video",
+              "audio"
+            ]
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "default": "base"
+          },
+          "language": {
+            "type": "string",
+            "minLength": 1,
+            "default": "auto"
+          }
+        },
+        "required": [
+          "file_id",
+          "path",
+          "media_type"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "chunks_created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "language": {
+            "type": "string",
+            "minLength": 1
+          },
+          "duration_seconds": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "chunks_created",
+          "language"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "run_ocr": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "asset_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1
+          },
+          "engine": {
+            "type": "string",
+            "const": "paddleocr",
+            "default": "paddleocr"
+          },
+          "language": {
+            "type": "string",
+            "minLength": 1,
+            "default": "ch"
+          }
+        },
+        "required": [
+          "asset_ids"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "assets_processed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text_written": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped_no_text": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "assets_processed",
+          "text_written",
+          "skipped_no_text"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
     "embed_image": {
       "input": {
         "type": "object",

@@ -1,4 +1,12 @@
+import { existsSync } from 'node:fs'
+import { loadEnvFile } from 'node:process'
 import { defineConfig } from 'drizzle-kit'
+
+const envFilePath = ['.env', '../../.env'].find((path) => existsSync(path))
+
+if (envFilePath) {
+  loadEnvFile(envFilePath)
+}
 
 export default defineConfig({
   dialect: 'postgresql',

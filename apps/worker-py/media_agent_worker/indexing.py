@@ -117,8 +117,10 @@ class IndexMediaHandler:
         scene_detector=detect_scenes_pyscenedetect,
         scene_min_seconds=None,
         scene_max_count=None,
+        job_repository=None,
     ):
         self.repository = repository
+        self.job_repository = job_repository
         self.scene_detector = scene_detector
         self.scene_min_seconds = float(scene_min_seconds or os.environ.get("SCENE_MIN_SECONDS", SCENE_MIN_SECONDS))
         self.scene_max_count = int(scene_max_count or os.environ.get("SCENE_MAX_COUNT", SCENE_MAX_COUNT))
@@ -136,6 +138,7 @@ class IndexMediaHandler:
         collections = []
         assets_created = 0
         vector_refs_created = 0
+        ocr_asset_ids = []
 
         if media_type == "image":
             asset_inputs = [
@@ -191,8 +194,21 @@ class IndexMediaHandler:
             if outcome == "created":
                 assets_created += 1
                 vector_refs_created += 1
+                if asset["asset_type"] in ("image", "video_frame"):
+                    ocr_asset_ids.append(asset["id"])
             if collection_name not in collections:
                 collections.append(collection_name)
+
+        if ocr_asset_ids and self.job_repository is not None:
+            self.job_repository.create_job(
+                "run_ocr",
+                {
+                    "asset_ids": ocr_asset_ids,
+                    "engine": os.environ.get("OCR_ENGINE", "paddleocr"),
+                    "language": os.environ.get("OCR_LANGUAGE", "ch"),
+                },
+                timeout_seconds=7200,
+            )
 
         return {
             "assets_created": assets_created,

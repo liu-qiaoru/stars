@@ -4,8 +4,10 @@ import {
   claimNextJob,
   getJob,
   heartbeatJob,
+  listActiveOcrJobs,
   listActiveEmbeddingJobs,
   listJobs,
+  listPendingOcrAssets,
   listPendingEmbeddingVectorRefs,
   markJobSucceeded,
   createJob,
@@ -86,6 +88,51 @@ export class JobsService {
 
     return {
       scanned: pendingRefs.length,
+      created,
+      skipped,
+    }
+  }
+
+  async queuePendingOcrJobs(input: { libraryId?: string; fileId?: string; batchSize?: number; limit?: number } = {}) {
+    const defaultBatchSize = Number.parseInt(process.env.OCR_BATCH_SIZE ?? '20', 10)
+    const batchSize = Math.max(1, input.batchSize ?? (Number.isFinite(defaultBatchSize) ? defaultBatchSize : 20))
+    const pendingAssets = await listPendingOcrAssets(this.db, {
+      libraryId: input.libraryId,
+      fileId: input.fileId,
+      limit: input.limit ?? 500,
+    })
+    const activeJobs = await listActiveOcrJobs(this.db)
+    const activeAssetIds = new Set(
+      activeJobs.flatMap((job) => {
+        const activeInput = job.inputJson as { asset_ids?: string[] }
+        return activeInput.asset_ids ?? []
+      }),
+    )
+    const queueableAssetIds = pendingAssets
+      .map((asset) => asset.assetId)
+      .filter((assetId) => !activeAssetIds.has(assetId))
+    const skipped = pendingAssets.length - queueableAssetIds.length
+    let created = 0
+
+    for (let index = 0; index < queueableAssetIds.length; index += batchSize) {
+      const assetIds = queueableAssetIds.slice(index, index + batchSize)
+      if (!assetIds.length) {
+        continue
+      }
+      await createJob(this.db, {
+        jobType: 'run_ocr',
+        timeoutSeconds: 7200,
+        inputJson: {
+          asset_ids: assetIds,
+          engine: 'paddleocr',
+          language: 'ch',
+        },
+      })
+      created += 1
+    }
+
+    return {
+      scanned: pendingAssets.length,
       created,
       skipped,
     }
