@@ -3,10 +3,7 @@ import { QdrantClient } from '@qdrant/js-client-rest'
 import { ConfigModule } from '../config/config.module.js'
 import { SETTINGS, type Settings } from '../config/settings.js'
 import { DATABASE, DatabaseModule } from '../database/database.module.js'
-import {
-  resetVectorRefsForCollection,
-  type Database,
-} from '../database/repositories.js'
+import { resetVectorRefsForCollection, type Database } from '../database/repositories.js'
 import { QdrantCollectionsService } from './qdrant-collections.service.js'
 
 export const QDRANT_CLIENT = Symbol('QDRANT_CLIENT')

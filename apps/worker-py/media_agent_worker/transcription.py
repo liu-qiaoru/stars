@@ -24,6 +24,8 @@ def _normalize_segment(segment):
 
 
 def chunk_transcript_segments(segments, *, min_seconds=CHUNK_MIN_SECONDS, max_seconds=CHUNK_MAX_SECONDS):
+    # Store transcript as searchable 15-30s text_chunk assets. That granularity is short enough for jumping
+    # to media time ranges, but long enough to keep PostgreSQL rows and FTS ranking manageable.
     normalized = [_normalize_segment(segment) for segment in segments]
     normalized = [segment for segment in normalized if segment["end"] > segment["start"] and segment["text"]]
     if not normalized:
@@ -61,6 +63,7 @@ def chunk_transcript_segments(segments, *, min_seconds=CHUNK_MIN_SECONDS, max_se
 
 
 def extract_audio_to_wav(source_path):
+    # faster-whisper expects audio input; FFmpeg normalizes any video/audio file into mono 16k WAV.
     fd, audio_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     command = [
@@ -83,6 +86,8 @@ def extract_audio_to_wav(source_path):
 
 
 class FasterWhisperTranscriber:
+    """Lazy faster-whisper wrapper so importing the worker does not load model weights."""
+
     def __init__(self, model_name=None, device=None):
         self.model_name = model_name or os.environ.get("WHISPER_MODEL", "base")
         self.device = device or os.environ.get("WHISPER_DEVICE", "cpu")
@@ -110,6 +115,8 @@ class FasterWhisperTranscriber:
 
 
 class TranscribeHandler:
+    """Turn a video/audio file into text_chunk media_assets for PostgreSQL FTS."""
+
     def __init__(self, repository, *, transcriber=None, audio_extractor=None):
         self.repository = repository
         self.transcriber = transcriber or FasterWhisperTranscriber()
@@ -133,6 +140,7 @@ class TranscribeHandler:
         chunks = chunk_transcript_segments(transcript["segments"])
         chunks_created = 0
         for chunk in chunks:
+            # text_chunk identity is file + time window; reruns overwrite the same chunk rather than duplicating transcript.
             asset_result = self.repository.upsert_media_asset(
                 file_id=file["id"],
                 asset_type="text_chunk",

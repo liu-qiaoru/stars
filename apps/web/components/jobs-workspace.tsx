@@ -2,6 +2,7 @@ import type { JobSummary } from '../lib/api-client'
 import { formatJobType, formatStatus } from '../lib/display-labels'
 
 export function JobsWorkspace({ jobs }: { jobs: JobSummary[] }) {
+  // Jobs 页面是 PostgreSQL-backed 队列的只读窗口；worker 进度、失败原因和完成状态都来自后端。
   return (
     <section className="panel">
       <p className="eyebrow">任务</p>

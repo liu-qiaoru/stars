@@ -11,6 +11,7 @@ export class ClipsService {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
   async exportClip(input: ExportClipRequest) {
+    // 后端只校验请求和媒体类型，然后创建 export_clip job；真正的 FFmpeg 调用在 Python worker。
     const parsed = exportClipInputSchema.safeParse(input)
     if (!parsed.success) {
       throw new BadRequestException(parsed.error.message)

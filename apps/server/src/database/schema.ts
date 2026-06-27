@@ -18,6 +18,8 @@ const timestamps = {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }
 
+// libraries/media_files/media_assets 是 PostgreSQL 事实来源。
+// 原始文件留在用户磁盘；数据库只保存路径、派生资产、文本/OCR/transcript 和索引状态。
 export const libraries = pgTable(
   'libraries',
   {
@@ -78,6 +80,8 @@ export const mediaAssets = pgTable(
   (table) => [index('media_assets_file_id_idx').on(table.fileId)],
 )
 
+// vector_refs 是 PostgreSQL 与 Qdrant 的桥。Qdrant point 只负责向量召回，
+// 命中后必须通过这里回表补齐 path、时间范围、软删除和 library 过滤。
 export const vectorRefs = pgTable(
   'vector_refs',
   {
@@ -111,6 +115,8 @@ export const vectorRefs = pgTable(
   ],
 )
 
+// jobs 是跨语言队列：NestJS 创建/查询任务，Python worker claim 并执行媒体重任务。
+// 不引入 Celery/BullMQ，是为了让本地 MVP 的任务状态和事实数据都留在 PostgreSQL。
 export const jobs = pgTable(
   'jobs',
   {
@@ -134,6 +140,8 @@ export const jobs = pgTable(
   (table) => [index('jobs_claim_idx').on(table.status, table.priority, table.createdAt)],
 )
 
+// agent_* 表保存一次 Agent 运行的 prompt、事件流和工具调用审计。
+// 有副作用的 tool 会先进入 waiting_for_confirmation，确认后再创建真正的 job。
 export const agentRuns = pgTable('agent_runs', {
   id: uuid('id').primaryKey().notNull(),
   status: text('status').notNull().default('running'),

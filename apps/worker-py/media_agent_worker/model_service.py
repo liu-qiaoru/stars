@@ -6,6 +6,7 @@ from .embeddings import SiglipEmbedder
 
 
 def handle_embed_text_request(embedder, payload):
+    # This endpoint is called synchronously by SearchService for query vectors.
     text = payload.get("text")
     if not isinstance(text, str) or not text:
         raise ValueError("text is required")
@@ -32,6 +33,7 @@ def handle_embed_image_request(embedder, payload):
 
 
 class ModelServiceHandler(BaseHTTPRequestHandler):
+    # Keep the HTTP surface tiny and localhost-only. No auth/cors is implemented because this is not an internet API.
     embedder = None
 
     def do_POST(self):

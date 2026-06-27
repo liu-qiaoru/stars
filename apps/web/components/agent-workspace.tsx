@@ -27,6 +27,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
     setStatusMessage('正在启动任务...')
     const created = await apiClient.createAgentRun({
       prompt: trimmedPrompt,
+      // 前端 MVP 默认不启用外部 VLM/LLM；服务端也会用 ALLOW_EXTERNAL_LLM 做最终守卫。
       allow_external_vlm: false,
     })
     setStatusMessage(created.message ?? `任务状态：${created.status}`)
@@ -35,6 +36,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
   }
 
   async function confirmToolCall(toolCallId: string) {
+    // 只确认服务端标记为 requires_confirmation 的 tool call；实际 job 创建发生在后端。
     if (!run) {
       return
     }

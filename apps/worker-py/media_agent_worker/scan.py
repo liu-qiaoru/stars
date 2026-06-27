@@ -21,6 +21,8 @@ def detect_media_type(path):
 
 
 class ScanHandler:
+    """Discover files under one library root and enqueue probe_media for changed files."""
+
     def __init__(self, repository, job_repository=None):
         self.repository = repository
         self.job_repository = job_repository
@@ -42,6 +44,8 @@ class ScanHandler:
             result["discovered"] += 1
             try:
                 stat = path.stat()
+                # The scanner is incremental: unchanged files are skipped, and only
+                # created/updated rows continue into probe_media jobs.
                 outcome, file_id = self.repository.upsert_media_file(
                     library_id=library_id,
                     root_path=str(root_path),
@@ -61,6 +65,7 @@ class ScanHandler:
                 result["failed"] += 1
 
         if self.job_repository is not None:
+            # Scanning only records cheap filesystem facts. Probe/index/transcribe are separate jobs so failures are isolated.
             for probe_input in files_to_probe:
                 self.job_repository.create_job("probe_media", probe_input)
 

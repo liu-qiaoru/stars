@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest'
 import { SearchWorkspace } from '../components/search-workspace'
 
 describe('SearchWorkspace', () => {
-  test('renders grouped vector results without flattening collection scores', () => {
+  test('renders hybrid results as the primary search list', () => {
     render(
       <SearchWorkspace
         libraries={[
@@ -13,6 +13,26 @@ describe('SearchWorkspace', () => {
         initialResults={{
           limit: 20,
           offset: 0,
+          results: [
+            {
+              asset_id: 'asset-2',
+              merged_asset_ids: ['asset-2', 'asset-3'],
+              file_id: 'file-2',
+              media_type: 'video',
+              path: '/media/launch.mp4',
+              start_time_seconds: 120,
+              end_time_seconds: 150,
+              scene_id: null,
+              score: 0.91,
+              score_kind: 'hybrid_score',
+              primary_reason: 'transcript_match',
+              reasons: ['vector_match', 'transcript_match'],
+              source_scores: {
+                video_segment_vectors: 0.82,
+                text_search: 0.5,
+              },
+            },
+          ],
           groups: [
             {
               collection: 'image_vectors',
@@ -51,10 +71,11 @@ describe('SearchWorkspace', () => {
       />,
     )
 
-    const imageGroup = screen.getByRole('region', { name: /图片向量/i })
-    const videoGroup = screen.getByRole('region', { name: /视频片段向量/i })
-    expect(within(imageGroup).getByText('/media/keynote.jpg')).toBeInTheDocument()
-    expect(within(videoGroup).getByText('2:00 – 2:30')).toBeInTheDocument()
+    const hybridRegion = screen.getByRole('region', { name: /混合结果/i })
+    expect(within(hybridRegion).getByText('/media/launch.mp4')).toBeInTheDocument()
+    expect(within(hybridRegion).getByText('2:00 – 2:30')).toBeInTheDocument()
+    expect(within(hybridRegion).getByText('转写命中')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '音频' })).toBeInTheDocument()
     expect(screen.getByText('主素材库')).toBeInTheDocument()
   })
 })

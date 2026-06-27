@@ -267,6 +267,29 @@ Response：
 {
   "limit": 20,
   "offset": 0,
+  "results": [
+    {
+      "asset_id": "75c1157b-21b7-4a90-8c2f-2aa4ae7c9331",
+      "merged_asset_ids": [
+        "75c1157b-21b7-4a90-8c2f-2aa4ae7c9331",
+        "asset-uuid"
+      ],
+      "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
+      "media_type": "video",
+      "path": "/Volumes/Media/video.mp4",
+      "start_time_seconds": 120.0,
+      "end_time_seconds": 150.0,
+      "scene_id": "scene-0007",
+      "score": 0.91,
+      "score_kind": "hybrid_score",
+      "primary_reason": "transcript_match",
+      "reasons": ["vector_match", "transcript_match"],
+      "source_scores": {
+        "video_segment_vectors": 0.82,
+        "text_search": 0.16
+      }
+    }
+  ],
   "groups": [
     {
       "collection": "video_segment_vectors",
@@ -298,7 +321,7 @@ Response：
           "end_time_seconds": 55.0,
           "scene_id": null,
           "score": 0.16,
-          "reason": "text_match"
+          "reason": "transcript_match"
         },
         {
           "asset_id": "ocr-asset-uuid",
@@ -317,9 +340,16 @@ Response：
 }
 ```
 
-向量 group（`image_vectors` / `video_segment_vectors`，`reason='vector_match'`，`score_kind='cosine_similarity'`）来自 Qdrant。`text_search` group（`score_kind='ts_rank_cd'`）来自 `media_assets.text_tsv`（对 `text_content` 跑 `to_tsvector('simple', ...)` 的 PostgreSQL FTS）：`text_chunk` asset 命中为 `reason='text_match'`（transcript），`image`/`video_frame` asset 命中为 `reason='ocr_match'`（OCR 画面文字）。触发 media type 为 `image`/`audio`/`video`，受 `library_ids` 过滤。
+`POST /search` 返回 `{ limit, offset, results, groups }`。`results` 是统一 hybrid retrieval + reranking 后的主结果列表，使用 `score_kind='hybrid_score'`；`groups` 保留为原始来源分组，用于兼容旧响应形状和调试召回质量。
 
-MVP 中不同 collection 的 `score` 不做全局可比承诺。前端应按 `groups` 分组展示，Phase 14 的 reranking 落地前不要把不同 collection 结果按原始 `score` 混排。
+向量 group（`image_vectors` / `video_segment_vectors`，`reason='vector_match'`，`score_kind='cosine_similarity'`）来自 Qdrant。`text_search` group（`score_kind='ts_rank_cd'`）来自 `media_assets.text_tsv`（对 `text_content` 跑 `to_tsvector('simple', ...)` 的 PostgreSQL FTS）：`text_chunk` asset 命中为 `reason='transcript_match'`（transcript），`image`/`video_frame` asset 命中为 `reason='ocr_match'`（OCR 画面文字）。触发 media type 为 `image`/`audio`/`video`，受 `library_ids` 过滤。
+
+- top-level result 使用 `primary_reason`、`reasons`、`source_scores` 和 `merged_asset_ids` 表达命中解释。跨 asset 合并时，`asset_id` 是代表命中的 asset，`merged_asset_ids` 总是包含代表 asset，长度至少为 1。
+- 转写命中使用 `transcript_match`，OCR 使用 `ocr_match`，向量使用 `vector_match`。`document_match` 预留给 document pipeline，Phase 14 不主动产生。
+- `source_scores` key 使用固定 source key：当前为 `image_vectors`、`video_segment_vectors`、`text_search`；后续新增向量来源时使用 Qdrant collection 名。同 source 多次命中时保留最大原始分数。`source_scores` 是原始来源分数，不能跨 source 直接比较。
+- `offset` 和 `limit` 作用于合并/rerank 后的 top-level `results`，不是单个来源 group。实现会先从各来源 overfetch，再合并、去重、rerank，最后分页。深分页下如果 overfetch 上限被截断且合并折叠较多，返回数量可能少于 `limit`，甚至为空。
+- image 和 future document 结果的 `start_time_seconds` / `end_time_seconds` 为 `null`；video/audio 片段返回秒级时间范围。
+- `library_ids`、`media_types` 和软删除过滤属于 metadata filters，但普通语义搜索结果不把 `metadata_filter` 当作默认 reason；只有未来 metadata-only 搜索才使用 `metadata_filter`。
 
 ## GET /media/{id}
 

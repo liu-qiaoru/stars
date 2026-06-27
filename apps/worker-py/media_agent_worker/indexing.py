@@ -5,6 +5,8 @@ import uuid
 
 POINT_NAMESPACE = uuid.UUID("f3f4e35a-688d-4f79-99e0-91f9480a5827")
 
+# Must stay aligned with apps/server/src/qdrant/vector-collections.ts.
+# Python writes Qdrant points; TypeScript reads collections and hydrates metadata.
 VECTOR_CONFIGS = {
     "image_vectors": {
         "vector_dim": 768,
@@ -35,6 +37,7 @@ SCENE_DETECT_THRESHOLD = 27.0
 
 
 def deterministic_point_id(*, asset_id, collection_name, model_name, model_version, vector_kind, content_hash):
+    # UUIDv5 makes Qdrant upserts idempotent across retries and across TS/Python implementations.
     joined = "|".join([asset_id, collection_name, model_name, model_version, vector_kind, content_hash])
     return str(uuid.uuid5(POINT_NAMESPACE, joined))
 
@@ -65,6 +68,8 @@ def detect_scenes_pyscenedetect(path, *, threshold=SCENE_DETECT_THRESHOLD, min_s
     except ImportError as error:
         raise RuntimeError("PySceneDetect is not installed. Install scenedetect to enable scene detection.") from error
 
+    # PySceneDetect returns timecode objects; the rest of the worker stores plain
+    # seconds so media_assets, vector payloads, and FFmpeg frame extraction agree.
     detector = ContentDetector(threshold=threshold, min_scene_len=max(1, int(min_scene_seconds)))
     scenes = detect(path, detector)
     return [(start.get_seconds(), end.get_seconds()) for start, end in scenes]
@@ -110,6 +115,11 @@ def extra_keyframe_times(start, end):
 
 
 class IndexMediaHandler:
+    """Create media_assets and pending vector_refs for image/video files.
+
+    The handler does not run the model. It prepares deterministic assets and refs; embedding jobs do the heavy work.
+    """
+
     def __init__(
         self,
         repository,
@@ -162,9 +172,12 @@ class IndexMediaHandler:
             invalidation_strategy = "scene_detection" if actual_strategy == "scene_detection" else (
                 "fixed_30s_fallback" if fallback else "fixed_30s"
             )
+            # Strategy changes can produce a different segment/frame graph. Mark
+            # only the old graph stale before upserting the new deterministic assets.
             self.repository.invalidate_video_index_assets(file["id"], invalidation_strategy)
 
         for asset_input in asset_inputs:
+            # Create/refresh the PostgreSQL asset first, then derive a stable Qdrant point id from that asset.
             collection_name = asset_input.pop("collection_name")
             config = VECTOR_CONFIGS[collection_name]
             asset = self.repository.upsert_media_asset(**asset_input)
@@ -200,6 +213,7 @@ class IndexMediaHandler:
                 collections.append(collection_name)
 
         if ocr_asset_ids and self.job_repository is not None:
+            # OCR is asset-granular: image assets and selected video frames can be processed independently.
             self.job_repository.create_job(
                 "run_ocr",
                 {
@@ -222,6 +236,7 @@ class IndexMediaHandler:
         }
 
     def _video_asset_inputs(self, file, requested_strategy):
+        # scene_detection is best-effort. Any detector failure or unusable output falls back to fixed 30s segments.
         if requested_strategy != "scene_detection":
             return self._fixed_30s_asset_inputs(file, "fixed_30s"), "fixed_30s", False, None, 0, 0
 
@@ -234,6 +249,8 @@ class IndexMediaHandler:
 
         if fallback_reason is None and len(detected) > self.scene_max_count:
             fallback_reason = f"Scene count {len(detected)} exceeds max {self.scene_max_count}"
+        # Keep scene_detection as a best-effort strategy: noisy/empty detector
+        # output falls back to deterministic 30s segments instead of failing the job.
         scenes = [] if fallback_reason else merge_short_scenes(detected, min_seconds=self.scene_min_seconds)
         if fallback_reason is None and not scenes:
             fallback_reason = "PySceneDetect returned no usable scenes"

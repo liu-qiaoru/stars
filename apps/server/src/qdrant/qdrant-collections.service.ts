@@ -48,6 +48,8 @@ export class QdrantCollectionsService implements OnApplicationBootstrap {
   }
 
   async ensureCollections() {
+    // 启动时确保 collection 维度与注册表一致。维度变化意味着旧 point 无法复用，
+    // 因此会重建 collection，并让 PostgreSQL vector_refs 回到 pending 等待 worker 重写。
     const created: string[] = []
     const existing: string[] = []
     const recreated: string[] = []
@@ -98,21 +100,22 @@ export class QdrantCollectionsService implements OnApplicationBootstrap {
     config: VectorCollectionConfig,
   ) {
     const createResponse = await this.fetcher(collectionUrl, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          vectors: {
-            size: config.vectorDim,
-            distance: config.distance,
-          },
-        }),
-      })
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        vectors: {
+          size: config.vectorDim,
+          distance: config.distance,
+        },
+      }),
+    })
     if (!createResponse.ok) {
       throw new Error(`Failed to create Qdrant collection ${name}: HTTP ${createResponse.status}`)
     }
   }
 
   private async createPayloadIndexes() {
+    // Qdrant payload index 是性能优化，不是事实过滤的唯一来源；Search hydration 仍会回 PostgreSQL 兜底。
     for (const [name] of Object.entries(this.collections) as [
       VectorCollectionName,
       VectorCollectionConfig,

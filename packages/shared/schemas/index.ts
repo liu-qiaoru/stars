@@ -8,6 +8,8 @@ const nonNegativeNumberSchema = z.number().min(0)
 const collectionSchema = z.enum(vectorCollectionNames)
 const indexProfileSchema = z.enum(indexProfiles)
 
+// 这里是跨语言 job 协议的事实来源：NestJS 创建 job，Python worker 读取生成的 JSON Schema 校验输入。
+// 新 job type 必须先在这里声明输入/输出，再生成 packages/shared/generated/job-schemas.json。
 export const jobTypeSchema = z.enum(jobTypes)
 
 export const scanLibraryInputSchema = z.object({
@@ -106,15 +108,17 @@ export const embeddingOutputSchema = z.object({
   model_version: z.string().min(1),
 })
 
-export const exportClipInputSchema = z.object({
-  file_id: uuidSchema,
-  start_time_seconds: nonNegativeNumberSchema,
-  end_time_seconds: positiveNumberSchema,
-  output_format: z.enum(['mp4', 'mov']).default('mp4'),
-}).refine((input) => input.end_time_seconds > input.start_time_seconds, {
-  message: 'end_time_seconds must be greater than start_time_seconds',
-  path: ['end_time_seconds'],
-})
+export const exportClipInputSchema = z
+  .object({
+    file_id: uuidSchema,
+    start_time_seconds: nonNegativeNumberSchema,
+    end_time_seconds: positiveNumberSchema,
+    output_format: z.enum(['mp4', 'mov']).default('mp4'),
+  })
+  .refine((input) => input.end_time_seconds > input.start_time_seconds, {
+    message: 'end_time_seconds must be greater than start_time_seconds',
+    path: ['end_time_seconds'],
+  })
 
 export const exportClipOutputSchema = z.object({
   export_path: z.string().min(1),
@@ -132,6 +136,7 @@ export const jobInputSchemas = {
   export_clip: exportClipInputSchema,
 } satisfies Record<z.infer<typeof jobTypeSchema>, z.ZodTypeAny>
 
+// 输出 schema 主要用于文档和测试一致性；worker 写 result_json，server/web 只按稳定字段展示。
 export const jobOutputSchemas = {
   scan_library: scanLibraryOutputSchema,
   probe_media: probeMediaOutputSchema,

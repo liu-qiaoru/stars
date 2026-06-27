@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/.media-agent/**",
+    "**/generated/**",
+    "apps/web/public/**"
+  ],
+  "env": {
+    "browser": true,
+    "node": true,
+    "vitest": true
+  },
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "rules": {
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ]
+  }
+}

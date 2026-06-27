@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": false,
+  "singleQuote": true,
+  "bracketSpacing": true,
+  "trailingComma": "all",
+  "arrowParens": "always",
+  "endOfLine": "lf",
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "node_modules/",
+    ".claude/",
+    ".next/",
+    "dist/",
+    "coverage/",
+    ".media-agent/",
+    "apps/server/drizzle/meta/",
+    "packages/shared/generated/",
+    "apps/web/public/",
+    "pnpm-lock.yaml"
+  ]
+}

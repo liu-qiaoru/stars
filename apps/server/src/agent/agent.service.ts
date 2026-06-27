@@ -40,11 +40,13 @@ export class AgentService {
   ) {}
 
   async createRun(input: z.input<typeof createRunSchema>) {
+    // Agent run 先持久化再调用模型，确保即使外部 LLM 失败也能在事件流中看到失败原因。
     const parsed = createRunSchema.parse(input)
     const run = await createAgentRun(this.db, { prompt: parsed.prompt })
     await this.addEvent(run.id, 'run_started', { prompt: parsed.prompt })
 
     if (!this.settings.allowExternalLlm) {
+      // 默认离线/本地优先：没有显式开启时不把 prompt 或检索结果发给外部模型。
       const summary = '外部大模型未启用；已记录任务，但不会调用云端模型。'
       await updateAgentRun(this.db, run.id, {
         status: 'succeeded',
@@ -76,9 +78,13 @@ export class AgentService {
         summary: result.summary,
         finishedAt: status === 'succeeded' ? new Date() : null,
       })
-      await this.addEvent(run.id, status === 'succeeded' ? 'run_succeeded' : 'user_confirmation_pending', {
-        summary: result.summary,
-      })
+      await this.addEvent(
+        run.id,
+        status === 'succeeded' ? 'run_succeeded' : 'user_confirmation_pending',
+        {
+          summary: result.summary,
+        },
+      )
       return { run_id: run.id, status }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -126,6 +132,7 @@ export class AgentService {
   }
 
   async confirmToolCall(runId: string, input: z.input<typeof confirmSchema>) {
+    // 剪辑导出、创建索引等副作用必须二次确认；LLM 只能提出建议，不能直接写本地队列。
     const parsed = confirmSchema.parse(input)
     const call = await getAgentToolCall(this.db, runId, parsed.tool_call_id)
     if (!call) {
@@ -146,11 +153,16 @@ export class AgentService {
       status: 'succeeded',
       finishedAt: new Date(),
     })
-    await this.addEvent(runId, 'tool_call_finished', {
-      tool_name: call.toolName,
-      job_id: job.id,
-      status: job.status,
-    }, parsed.tool_call_id)
+    await this.addEvent(
+      runId,
+      'tool_call_finished',
+      {
+        tool_name: call.toolName,
+        job_id: job.id,
+        status: job.status,
+      },
+      parsed.tool_call_id,
+    )
     await this.addEvent(runId, 'run_succeeded', { summary: '用户已确认副作用操作。' })
 
     return { job_id: job.id, status: job.status }
@@ -160,6 +172,7 @@ export class AgentService {
     runId: string,
     toolCalls: Array<{ toolCallId: string; toolName: string; input: unknown; output: unknown }>,
   ) {
+    // 这里把模型的 tool call 结果转成可审计事件。需要确认的 tool 只保存意图，不立即执行副作用。
     let hasPendingConfirmation = false
     for (const call of toolCalls) {
       await this.addEvent(runId, 'tool_call_started', { tool_name: call.toolName }, call.toolCallId)
@@ -218,7 +231,15 @@ export class AgentService {
   }
 
   private searchResultsFromOutput(output: unknown) {
+    // Phase 14 后 search_media 返回 top-level results；groups 分支仅保留给旧响应兼容。
     const value = output as {
+      results?: Array<{
+        file_id: string
+        asset_id: string
+        start_time_seconds: number | null
+        end_time_seconds: number | null
+        score: number
+      }>
       groups?: Array<{
         results?: Array<{
           file_id: string
@@ -228,6 +249,16 @@ export class AgentService {
           score: number
         }>
       }>
+    }
+    if (value.results) {
+      return value.results.map((result) => ({
+        file_id: result.file_id,
+        asset_id: result.asset_id,
+        start_time_seconds: result.start_time_seconds,
+        end_time_seconds: result.end_time_seconds,
+        score: result.score,
+        summary: 'Candidate from search_media',
+      }))
     }
     return (value.groups ?? []).flatMap((group) =>
       (group.results ?? []).map((result) => ({

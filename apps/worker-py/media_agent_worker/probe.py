@@ -6,6 +6,8 @@ from pathlib import Path
 
 
 def run_ffprobe(path):
+    # ffprobe is the source of truth for audio/video duration, streams and codec metadata.
+    # The worker stores only normalized fields in PostgreSQL so the TS API never shells out.
     completed = subprocess.run(
         [
             "ffprobe",
@@ -37,6 +39,8 @@ def run_ffprobe(path):
 
 
 def parse_image_dimensions(data):
+    # Keep image probing dependency-light: PNG/JPEG dimensions are enough for the metadata UI and tests.
+    # HEIC/WebP can be supported later through Pillow if needed.
     if data.startswith(b"\x89PNG\r\n\x1a\n") and data[12:16] == b"IHDR":
         width, height = struct.unpack(">II", data[16:24])
         return {"width": width, "height": height}
@@ -63,6 +67,8 @@ def parse_image_dimensions(data):
 
 
 class ProbeHandler:
+    """Populate media_files metadata, then fan out to the next jobs in the indexing pipeline."""
+
     def __init__(self, repository, job_repository=None, ffprobe_runner=run_ffprobe):
         self.repository = repository
         self.job_repository = job_repository
@@ -84,12 +90,14 @@ class ProbeHandler:
         self.repository.update_probe_metadata(file_id, metadata)
 
         if self.job_repository is not None and media_type in ("image", "video"):
+            # Visual assets go through index_media; audio files skip image/video indexing and rely on transcript FTS.
             self.job_repository.create_job("index_media", {
                 "file_id": file_id,
                 "index_profile": "balanced",
                 "segment_strategy": "scene_detection" if media_type == "video" else "fixed_30s",
             })
         if self.job_repository is not None and media_type in ("video", "audio"):
+            # Transcription is independent from visual indexing, so video can produce both jobs in parallel.
             self.job_repository.create_job(
                 "transcribe_audio",
                 {

@@ -146,9 +146,9 @@ Indexer 从文件创建 media assets：
 
 ### Retrieval
 
-Retrieval 组合 Qdrant 向量搜索、PostgreSQL metadata 过滤，以及后续的 PostgreSQL full-text search。Qdrant 只返回召回结果和轻量 payload，最终响应必须回 PostgreSQL 补齐事实数据。
+Retrieval 组合 Qdrant 向量搜索、PostgreSQL full-text search 和 PostgreSQL metadata 过滤。Qdrant 只返回召回结果和轻量 payload，最终响应必须回 PostgreSQL 补齐事实数据。
 
-MVP 不做跨 collection 全局排序。不同 collection 的 score 不保证可比，应按 collection 分组展示，直到 Phase 14 的 hybrid retrieval 和 reranking 落地。
+Phase 14 后，`POST /search` 先 overfetch 各来源候选，再合并同 asset 和相邻视频窗口，最后输出 top-level `results`（`score_kind='hybrid_score'`）。原始 `groups` 仍保留用于调试，不再作为 Search 页面的主排序依据。
 
 ### Agent Runtime
 

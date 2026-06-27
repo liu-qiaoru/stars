@@ -1,4 +1,10 @@
 class WorkerRunner:
+    """Small PostgreSQL-backed worker loop.
+
+    TypeScript owns job creation and schema definitions; Python owns expensive media/model work.
+    Each handler receives the job input JSON defined in packages/shared and returns result_json.
+    """
+
     def __init__(
         self,
         *,
@@ -37,6 +43,7 @@ class WorkerRunner:
             return False
 
         try:
+            # One heartbeat before work starts is enough for short jobs; long handlers can be split later if needed.
             self.job_repository.heartbeat(job["id"])
             if job["job_type"] == "scan_library" and self.scan_handler is not None:
                 result = self.scan_handler.handle(job["input_json"])

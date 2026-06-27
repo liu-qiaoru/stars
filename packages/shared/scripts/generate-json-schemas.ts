@@ -5,6 +5,8 @@ import { jobInputSchemas, jobOutputSchemas } from '../schemas/index.js'
 
 const outputPath = resolve('generated/job-schemas.json')
 
+// Python worker 不直接运行 TypeScript/Zod，因此把 job input/output schema 生成 JSON Schema。
+// $refStrategy:none 让生成物自包含，避免 Python 侧还要解析跨文件 $ref。
 const jobs = Object.fromEntries(
   Object.keys(jobInputSchemas).map((jobType) => [
     jobType,

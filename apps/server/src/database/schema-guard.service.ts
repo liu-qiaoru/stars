@@ -21,13 +21,14 @@ export class DatabaseSchemaGuardService implements OnApplicationBootstrap {
   constructor(@Inject(PG_POOL) private readonly pool: SchemaQueryClient) {}
 
   async onApplicationBootstrap() {
+    // 启动时尽早失败比在第一个 API 请求里报 obscure SQL 错误更友好。
+    // 这里只检查关键表是否存在，不尝试自动迁移，避免服务进程隐式修改数据库。
     const missingTables: string[] = []
 
     for (const tableName of REQUIRED_TABLES) {
-      const result = await this.pool.query(
-        'select to_regclass($1) as table_name',
-        [`public.${tableName}`],
-      )
+      const result = await this.pool.query('select to_regclass($1) as table_name', [
+        `public.${tableName}`,
+      ])
       if (!result.rows[0]?.table_name) {
         missingTables.push(tableName)
       }

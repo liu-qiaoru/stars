@@ -25,6 +25,7 @@ type InsertJob = typeof jobs.$inferInsert
 type InsertAgentRun = typeof agentRuns.$inferInsert
 type InsertAgentRunEvent = typeof agentRunEvents.$inferInsert
 type InsertAgentToolCall = typeof agentToolCalls.$inferInsert
+// 必须与 Python worker 的 point id 生成 namespace 保持一致，否则重索引会产生不同 Qdrant point。
 const POINT_NAMESPACE = 'f3f4e35a-688d-4f79-99e0-91f9480a5827'
 
 export async function createLibrary(db: Database, input: Pick<InsertLibrary, 'name' | 'rootPath'>) {
@@ -138,6 +139,8 @@ export async function createJob(
 }
 
 export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 100) {
+  // 这里扫描的是 PostgreSQL 中 pending 的 vector_refs，而不是 Qdrant。
+  // Python worker 负责真正读取文件、生成 embedding、写 Qdrant，并把 ref 标成 indexed。
   return db
     .select({
       vectorRefId: vectorRefs.id,
@@ -184,6 +187,8 @@ export async function resetVectorRefsForCollection(
     'collectionName' | 'modelName' | 'modelVersion' | 'vectorKind' | 'vectorDim' | 'distance'
   >,
 ) {
+  // Collection 维度或模型版本变化时，旧 Qdrant points 不再可信。
+  // 这里只重置 PostgreSQL refs 为 pending；实际重新写入仍交给 embedding job。
   const rows = await db
     .select()
     .from(vectorRefs)
@@ -275,6 +280,8 @@ export async function listPendingOcrAssets(
   db: Database,
   input: { libraryId?: string; fileId?: string; limit?: number } = {},
 ) {
+  // OCR 可以被自动补队列，也可以被手动补队列。用 text_content 和 metadata_json.ocr
+  // 双条件判断，兼容“有文本但没有 OCR metadata”的历史/异常数据。
   const conditions = [
     inArray(mediaAssets.assetType, ['image', 'video_frame']),
     isNull(mediaFiles.deletedAt),
@@ -356,6 +363,8 @@ export async function listSearchResultMetadata(
     return []
   }
 
+  // Qdrant 只返回 point id 和 score；最终 API 结果必须回 PostgreSQL 补齐事实字段。
+  // 软删除和 library/media type 过滤放在这里兜底，避免 Qdrant payload 漏同步导致脏结果。
   const conditions = [
     eq(vectorRefs.collectionName, collectionName),
     inArray(vectorRefs.pointId, pointIds),
@@ -397,6 +406,8 @@ export async function listTextSearchResultMetadata(
     offset: number
   },
 ) {
+  // FTS 复用 media_assets.text_content：text_chunk 表示 transcript，image/video_frame 表示 OCR。
+  // 使用 simple config 是当前 MVP 的可移植选择；中文分词优化留给后续阶段。
   const rank = sql<number>`ts_rank_cd(media_assets.text_tsv, plainto_tsquery('simple', ${input.query}))`
   const conditions = [
     inArray(mediaAssets.assetType, ['text_chunk', 'image', 'video_frame']),
@@ -517,6 +528,8 @@ export async function claimNextJob(db: Database, workerId: string, now = new Dat
 }
 
 export async function reclaimStaleJobs(db: Database, now = new Date()) {
+  // worker 可能崩溃或被用户停掉；heartbeat 超时后把 running job 放回 queued，
+  // 让同一个 PostgreSQL 队列可以被下一个 worker 继续处理。
   const runningJobs = await db.select().from(jobs).where(eq(jobs.status, 'running'))
   const staleIds = runningJobs
     .filter((job) => {
@@ -625,13 +638,8 @@ export async function createAgentRunEvent(
 
 export async function createAgentToolCall(
   db: Database,
-  input: Pick<
-    InsertAgentToolCall,
-    'runId' | 'toolCallId' | 'toolName' | 'status' | 'inputJson'
-  > &
-    Partial<
-      Pick<InsertAgentToolCall, 'outputJson' | 'errorMessage' | 'requiresConfirmation'>
-    >,
+  input: Pick<InsertAgentToolCall, 'runId' | 'toolCallId' | 'toolName' | 'status' | 'inputJson'> &
+    Partial<Pick<InsertAgentToolCall, 'outputJson' | 'errorMessage' | 'requiresConfirmation'>>,
 ) {
   const [row] = await db
     .insert(agentToolCalls)

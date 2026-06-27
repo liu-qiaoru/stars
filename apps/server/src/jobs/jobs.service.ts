@@ -60,11 +60,17 @@ export class JobsService {
   }
 
   async queuePendingEmbeddingJobs(limit = 100) {
+    // 只为没有 active job 的 pending ref 创建任务，避免重复 worker 同时写同一个 Qdrant point。
     const pendingRefs = await listPendingEmbeddingVectorRefs(this.db, limit)
     const activeJobs = await listActiveEmbeddingJobs(this.db)
     const activeKeys = new Set(
       activeJobs.map((job) => {
-        const input = job.inputJson as { asset_id?: string; collection?: string; model_name?: string; model_version?: string }
+        const input = job.inputJson as {
+          asset_id?: string
+          collection?: string
+          model_name?: string
+          model_version?: string
+        }
         return this.embeddingJobKey(input)
       }),
     )
@@ -93,9 +99,15 @@ export class JobsService {
     }
   }
 
-  async queuePendingOcrJobs(input: { libraryId?: string; fileId?: string; batchSize?: number; limit?: number } = {}) {
+  async queuePendingOcrJobs(
+    input: { libraryId?: string; fileId?: string; batchSize?: number; limit?: number } = {},
+  ) {
+    // OCR 以 asset batch 为单位创建 job，降低每个图片/关键帧一个 job 的队列噪音。
     const defaultBatchSize = Number.parseInt(process.env.OCR_BATCH_SIZE ?? '20', 10)
-    const batchSize = Math.max(1, input.batchSize ?? (Number.isFinite(defaultBatchSize) ? defaultBatchSize : 20))
+    const batchSize = Math.max(
+      1,
+      input.batchSize ?? (Number.isFinite(defaultBatchSize) ? defaultBatchSize : 20),
+    )
     const pendingAssets = await listPendingOcrAssets(this.db, {
       libraryId: input.libraryId,
       fileId: input.fileId,
@@ -138,7 +150,9 @@ export class JobsService {
     }
   }
 
-  private toEmbeddingJobInput(ref: Awaited<ReturnType<typeof listPendingEmbeddingVectorRefs>>[number]) {
+  private toEmbeddingJobInput(
+    ref: Awaited<ReturnType<typeof listPendingEmbeddingVectorRefs>>[number],
+  ) {
     if (ref.collectionName === 'image_vectors') {
       return {
         asset_id: ref.assetId,
@@ -162,6 +176,7 @@ export class JobsService {
   private representativeFrameTime(
     ref: Awaited<ReturnType<typeof listPendingEmbeddingVectorRefs>>[number],
   ) {
+    // video_segment 没有独立 frame asset 时，取 segment 中点作为代表帧时间。
     if (ref.frameTimeSeconds !== null) {
       return Number(ref.frameTimeSeconds)
     }

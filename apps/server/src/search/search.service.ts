@@ -10,6 +10,11 @@ import {
 } from '../database/repositories.js'
 import { QDRANT_CLIENT } from '../qdrant/qdrant.module.js'
 import { VECTOR_COLLECTIONS, type VectorCollectionName } from '../qdrant/vector-collections.js'
+import {
+  buildHybridResults,
+  type HybridCandidateInput,
+  type HybridReason,
+} from './search-hybrid.js'
 import { SearchQueryVectorService } from './search-query-vector.service.js'
 
 const supportedSearchCollections = [
@@ -17,6 +22,8 @@ const supportedSearchCollections = [
   { collection: 'video_segment_vectors', mediaType: 'video' },
 ] as const satisfies { collection: VectorCollectionName; mediaType: (typeof mediaTypes)[number] }[]
 
+// SearchService 负责把多个召回来源统一成一个响应：
+// Qdrant 做视觉向量召回，PostgreSQL FTS 做 transcript/OCR 文本召回，最终在内存里合并 rerank。
 const searchRequestSchema = z.object({
   query: z.string().min(1),
   media_types: z.array(z.enum(mediaTypes)).optional().default([]),
@@ -28,6 +35,12 @@ const searchRequestSchema = z.object({
 export type SearchRequest = z.input<typeof searchRequestSchema>
 type ParsedSearchRequest = z.output<typeof searchRequestSchema>
 type QdrantFilter = NonNullable<Schemas['SearchRequest']['filter']>
+type SearchResultItem = Awaited<ReturnType<SearchService['hydrateResults']>>[number]
+type SearchResultGroup = {
+  collection: string
+  score_kind: string
+  results: SearchResultItem[]
+}
 
 @Injectable()
 export class SearchService {
@@ -39,6 +52,7 @@ export class SearchService {
 
   async search(input: SearchRequest) {
     const request = this.parseRequest(input)
+    const sourceLimit = this.sourceLimit(request)
     const vectorMediaTypes = request.media_types.length
       ? request.media_types
       : supportedSearchCollections.map((entry) => entry.mediaType)
@@ -53,8 +67,8 @@ export class SearchService {
           // Search API 只读取 Qdrant；query embedding 由本地 model service 同步生成，批量媒体 embedding 仍走 worker job。
           vector: await this.queryVectorService.embedQuery(request.query, config.vectorDim),
           filter: this.buildFilter(request.library_ids),
-          limit: request.limit,
-          offset: request.offset,
+          limit: sourceLimit,
+          offset: 0,
           with_payload: false,
           with_vector: false,
         })
@@ -70,12 +84,18 @@ export class SearchService {
         }
       }),
     )
-    const textGroup = await this.textSearchGroup(request)
+    const textGroup = await this.textSearchGroup(request, { limit: sourceLimit, offset: 0 })
+    const groups = [...vectorGroups, ...(textGroup ? [textGroup] : [])]
 
+    // groups 保留原始来源，便于调试召回；results 是前端/Agent 默认消费的统一排序列表。
     return {
       limit: request.limit,
       offset: request.offset,
-      groups: [...vectorGroups, ...(textGroup ? [textGroup] : [])],
+      results: buildHybridResults(this.toHybridCandidates(groups), {
+        limit: request.limit,
+        offset: request.offset,
+      }),
+      groups,
     }
   }
 
@@ -93,6 +113,12 @@ export class SearchService {
       return undefined
     }
     return { must: [{ key: 'library_id', match: { any: libraryIds } }] }
+  }
+
+  private sourceLimit(request: ParsedSearchRequest) {
+    // 先 overfetch 再合并/分页，避免同 asset 或相邻视频窗口折叠后结果池过小。
+    // 300 是当前内存合并的保护上限，深分页的限制记录在 API contract 中。
+    return Math.min(300, Math.max(30, (request.offset + request.limit) * 3))
   }
 
   private async hydrateResults(
@@ -135,10 +161,14 @@ export class SearchService {
     return distance === 'Cosine' ? 'cosine_similarity' : distance.toLowerCase()
   }
 
-  private async textSearchGroup(request: ParsedSearchRequest) {
+  private async textSearchGroup(
+    request: ParsedSearchRequest,
+    pagination: { limit: number; offset: number },
+  ) {
     const textMediaTypes = request.media_types.length
-      ? request.media_types.filter((mediaType) =>
-          mediaType === 'image' || mediaType === 'audio' || mediaType === 'video')
+      ? request.media_types.filter(
+          (mediaType) => mediaType === 'image' || mediaType === 'audio' || mediaType === 'video',
+        )
       : ['image', 'audio', 'video']
     if (textMediaTypes.length === 0) {
       return undefined
@@ -150,25 +180,76 @@ export class SearchService {
         mediaTypes: textMediaTypes,
         libraryIds: request.library_ids,
       },
-      limit: request.limit,
-      offset: request.offset,
+      limit: pagination.limit,
+      offset: pagination.offset,
     })
 
     return {
       collection: 'text_search',
       score_kind: 'ts_rank_cd',
-      results: rows.map((row) => ({
-        asset_id: row.assetId,
-        file_id: row.fileId,
-        media_type: row.mediaType,
-        path: row.path,
-        start_time_seconds: row.startTimeSeconds === null ? null : Number(row.startTimeSeconds),
-        end_time_seconds: row.endTimeSeconds === null ? null : Number(row.endTimeSeconds),
-        scene_id: this.sceneId(row.metadataJson),
-        score: Number(row.score),
-        reason: row.assetType === 'text_chunk' ? 'text_match' : 'ocr_match',
-      })),
+      results: rows.flatMap((row) => {
+        const reason = this.textSearchReason(row.assetType, row.mediaType)
+        if (!reason) {
+          return []
+        }
+        return [
+          {
+            asset_id: row.assetId,
+            file_id: row.fileId,
+            media_type: row.mediaType,
+            path: row.path,
+            start_time_seconds: row.startTimeSeconds === null ? null : Number(row.startTimeSeconds),
+            end_time_seconds: row.endTimeSeconds === null ? null : Number(row.endTimeSeconds),
+            scene_id: this.sceneId(row.metadataJson),
+            score: Number(row.score),
+            reason,
+          },
+        ]
+      }),
     }
+  }
+
+  private textSearchReason(assetType: string, mediaType: string): HybridReason | undefined {
+    // 同一个 text_search source 里有 transcript 与 OCR 两种语义，必须按 asset/media type 区分给用户解释。
+    if (assetType === 'text_chunk' && (mediaType === 'audio' || mediaType === 'video')) {
+      return 'transcript_match'
+    }
+    if (assetType === 'image' || assetType === 'video_frame') {
+      return 'ocr_match'
+    }
+    return undefined
+  }
+
+  private toHybridCandidates(groups: SearchResultGroup[]): HybridCandidateInput[] {
+    // 统一候选是 reranker 的输入层：只保留合并和打分需要的字段，不把 group 展示结构泄漏进去。
+    return groups.flatMap((group) =>
+      group.results.flatMap((result) => {
+        const reason = this.hybridReason(result.reason)
+        if (!reason) {
+          return []
+        }
+        return [
+          {
+            asset_id: result.asset_id,
+            file_id: result.file_id,
+            media_type: result.media_type,
+            path: result.path,
+            start_time_seconds: result.start_time_seconds,
+            end_time_seconds: result.end_time_seconds,
+            scene_id: result.scene_id,
+            reasons: [reason],
+            source_scores: { [group.collection]: result.score },
+          },
+        ]
+      }),
+    )
+  }
+
+  private hybridReason(reason: string): HybridReason | undefined {
+    if (reason === 'vector_match' || reason === 'transcript_match' || reason === 'ocr_match') {
+      return reason
+    }
+    return undefined
   }
 
   private sceneId(metadata: unknown) {

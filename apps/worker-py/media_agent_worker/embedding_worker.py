@@ -6,6 +6,7 @@ from .embeddings import SiglipEmbedder
 
 
 def extract_video_frame(source_path, frame_time_seconds, runner=subprocess.run):
+    # Video segment embeddings use a representative frame. The temp frame is deleted by the caller after embedding.
     output = tempfile.NamedTemporaryFile(prefix="media-agent-frame-", suffix=".jpg", delete=False)
     output.close()
     command = [
@@ -31,12 +32,15 @@ def extract_video_frame(source_path, frame_time_seconds, runner=subprocess.run):
 
 
 class BaseEmbeddingHandler:
+    """Shared embedding write path for image and video-frame jobs."""
+
     def __init__(self, repository, qdrant_client, embedder=None):
         self.repository = repository
         self.qdrant_client = qdrant_client
         self.embedder = embedder or SiglipEmbedder()
 
     def _embed_and_write(self, *, job_input, image_path):
+        # Re-read vector_ref at execution time so retries use the current model version, point id and payload fields.
         vector_ref = self.repository.get_vector_ref_for_embedding(
             asset_id=job_input["asset_id"],
             collection_name=job_input["collection"],
@@ -51,6 +55,8 @@ class BaseEmbeddingHandler:
             )
 
         self.qdrant_client.upsert_point(
+            # Payload is intentionally redundant with PostgreSQL for cheap Qdrant filtering/debugging.
+            # Search still hydrates from PostgreSQL before returning user-visible metadata.
             vector_ref["collection_name"],
             {
                 "id": vector_ref["point_id"],

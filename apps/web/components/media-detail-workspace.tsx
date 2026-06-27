@@ -24,6 +24,7 @@ export function MediaDetailWorkspace({
   const [exportStatusByAssetId, setExportStatusByAssetId] = useState<Record<string, string>>({})
 
   async function exportAsset(asset: MediaDetail['assets'][number]) {
+    // Media Detail 只创建 export_clip job，不直接处理源视频；FFmpeg 在 Python worker 里执行。
     if (asset.start_time_seconds === null || asset.end_time_seconds === null) {
       return
     }

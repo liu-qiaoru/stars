@@ -30,13 +30,19 @@ export interface SearchRequest {
 
 export interface SearchResultItem {
   asset_id: string
+  merged_asset_ids?: string[]
   file_id: string
   media_type: MediaType
   path: string
   start_time_seconds: number | null
   end_time_seconds: number | null
+  scene_id?: string | null
   score: number
-  reason: 'vector_match' | string
+  score_kind?: string
+  primary_reason?: string
+  reason?: 'vector_match' | string
+  reasons?: string[]
+  source_scores?: Record<string, number>
 }
 
 export interface SearchResultGroup {
@@ -48,6 +54,8 @@ export interface SearchResultGroup {
 export interface SearchResponse {
   limit: number
   offset: number
+  // Phase 14 后 results 是主展示列表；groups 保留给旧响应兼容和召回调试。
+  results?: SearchResultItem[]
   groups: SearchResultGroup[]
 }
 
@@ -126,6 +134,7 @@ interface ApiClientOptions {
 }
 
 export function createApiClient(options: ApiClientOptions = {}) {
+  // 前端只通过这个薄 client 访问 NestJS API，页面组件不拼 URL，也不直接理解后端端口/env。
   const baseUrl = (
     options.baseUrl ??
     process.env.NEXT_PUBLIC_API_BASE_URL ??
@@ -134,6 +143,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
   const fetcher = options.fetcher ?? fetch
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    // 当前 MVP 的错误处理只抛状态码；需要用户可见错误时在具体 workspace 里转换为文案。
     const response = await fetcher(`${baseUrl}${path}`, {
       ...init,
       headers: {

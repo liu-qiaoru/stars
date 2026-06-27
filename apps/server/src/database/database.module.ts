@@ -9,6 +9,8 @@ import { DatabaseSchemaGuardService } from './schema-guard.service.js'
 
 export { DATABASE, PG_POOL } from './database.tokens.js'
 
+// DatabaseModule 同时暴露原始 pg Pool 和 Drizzle database。
+// Pool 用于低层 schema guard 等原生 SQL，Drizzle 用于大多数业务查询和 PGlite 测试复用。
 @Module({
   imports: [ConfigModule],
   providers: [

@@ -27,6 +27,7 @@ def _normalize_block(block):
 
 
 def _normalize_paddle_result(result):
+    # PaddleOCR 2.x and 3.x expose different result shapes; normalize both to {text, confidence, bbox}.
     if not result:
         return []
     if len(result) == 1 and isinstance(result[0], dict) and "rec_texts" in result[0]:
@@ -47,6 +48,8 @@ def _normalize_paddle_result(result):
 
 
 class PaddleOcrReader:
+    """Lazy PaddleOCR wrapper with a temp cache default suitable for local/dev machines."""
+
     def __init__(self, *, language=None):
         self.language = language or os.environ.get("OCR_LANGUAGE", "ch")
         self._ocr = None
@@ -76,6 +79,8 @@ class PaddleOcrReader:
 
 
 class OcrHandler:
+    """Write OCR text back to image/video_frame assets so the existing FTS path can find screen text."""
+
     def __init__(
         self,
         repository,
@@ -139,6 +144,7 @@ class OcrHandler:
         }
 
     def _image_path_for_asset(self, asset):
+        # Images can be read directly; video_frame assets store a frame time and need a temporary FFmpeg extraction.
         asset_type = asset["asset_type"]
         if asset_type == "image":
             return asset["path"], None

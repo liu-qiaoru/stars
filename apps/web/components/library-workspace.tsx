@@ -6,6 +6,7 @@ import { createApiClient } from '../lib/api-client'
 
 export function LibraryWorkspace({ libraries }: { libraries: LibrarySummary[] }) {
   async function createLibrary(formData: FormData) {
+    // 注册 library 只保存本地根路径；真实扫描要用户点击“扫描”后创建 scan_library job。
     const name = String(formData.get('name') ?? '').trim()
     const rootPath = String(formData.get('root_path') ?? '').trim()
     if (!name || !rootPath) {
@@ -52,6 +53,7 @@ export function LibraryWorkspace({ libraries }: { libraries: LibrarySummary[] })
                 type="button"
                 onClick={async () => {
                   try {
+                    // scan_library 是后台任务，按钮只负责触发；进度在 Jobs 页面查看。
                     await createApiClient().scanLibrary(library.id)
                   } catch {
                     /* scan 触发失败静默处理，避免未捕获 Promise rejection */

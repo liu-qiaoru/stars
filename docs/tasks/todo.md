@@ -10,9 +10,47 @@
 
 ## 当前进度
 
-- 当前阶段：Phase 13 已完成（run_ocr 独立 job、asset 粒度、写回 text_content、ocr_match reason、FTS 放宽）。
-- 最近更新：2026-06-15，完成 Phase 13 OCR 与画面文字检索实现，并用真实 PaddleOCR smoke 验证写回路径。
-- 下一步：等待确认后进入 Phase 14 Hybrid Retrieval 与 Reranking。
+- 当前阶段：Phase 14 已完成（Hybrid Retrieval、reranking、top-level `results`、`groups` 兼容路径、agent/web 消费迁移）。
+- 最近更新：2026-06-27，完成“关键路径注释补强”，帮助不熟悉项目的人理解 server、worker、shared schema 和 web 工作台的职责边界与关键逻辑。
+- 下一步：等待确认后进入 Phase 15 外部多模态模型验证。
+
+## 代码可读性：关键路径注释补强
+
+- Start：2026-06-27。目标是按“关键路径注释”策略补充文件级职责说明和关键方法/关键逻辑注释，让新维护者能沿着 server → PostgreSQL/Qdrant → Python worker → Web/Agent 的主链路读懂项目。
+- 假设：不做“每个文件都必须有头注释”的机械覆盖；不解释显而易见的 CRUD、React JSX 布局或简单 getter/setter；注释优先解释职责边界、跨语言协议、幂等/失败处理、外部工具调用、数据库查询语义和非显然排序/合并规则。
+- 权衡：关键路径注释比全文件头注释噪音更少，维护成本更低；代价是一些边缘页面或测试文件不会被刻意补注释。若后续 onboarding 仍觉得困难，再单独补 `docs/code-walkthrough.md` 或扩大到全文件头注释。
+- 验证计划：先按模块审查并补注释；完成后运行 `rg` 抽查核心文件注释覆盖，运行 `corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`、`corepack pnpm --filter @local-media-agent/web exec tsc --noEmit`、`corepack pnpm --filter @local-media-agent/shared exec tsc --noEmit`、Python worker unittest，以及 `git diff --check`。注释不应改变运行行为。
+
+- [x] Server 入口/配置/依赖边界：补 `app.module.ts`、`settings.ts`、`database.module.ts`、`schema.ts`、`repositories.ts`、`schema-guard.service.ts` 的职责说明和关键查询/守卫注释。
+- [x] Server 检索链路：补 `search.service.ts`、`search-hybrid.ts`、`search-query-vector.service.ts`、`qdrant/vector-collections.ts`、`qdrant-collections.service.ts` 的召回、过滤、回表、合并、rerank 和 Qdrant 边界注释。
+- [x] Server job/media/clip 链路：补 `jobs.service.ts`、`jobs.controller.ts`、`media.service.ts`、`clips.service.ts` 中 job claim、状态回收、媒体详情和导出 job 边界注释。
+- [x] Server Agent 链路：补 `agent.service.ts`、`agent.tools.ts`、`agent-model.runner.ts` 的 tool 调用、脱敏、确认型副作用和外部 LLM 边界注释。
+- [x] Python worker 主链路：补 `worker.py`、`repository.py`、`scan.py`、`probe.py`、`indexing.py`、`embedding_worker.py`、`transcription.py`、`ocr.py`、`exporting.py`、`model_service.py`、`qdrant.py`、`embeddings.py` 的模块职责、跨语言字段约定、幂等和外部工具调用注释。
+- [x] Shared schema：补 `packages/shared/schemas/index.ts` 和 `packages/shared/scripts/generate-json-schemas.ts` 的 schema 权威、生成物和 TS/Python 契约注释。
+- [x] Web 工作台：补 `search-workspace.tsx`、`agent-workspace.tsx`、`media-detail-workspace.tsx`、`library-workspace.tsx`、`jobs-workspace.tsx`、`api-client.ts` 的数据来源、API 边界和关键 UI 状态注释。
+- [x] 检查注释质量：删除逐行复述代码的注释，保留解释“为什么/边界/排查入口”的注释。
+- [x] 运行 TypeScript/Python 验证和 `git diff --check`，并在本段 Review 记录结果。
+
+Review：
+
+- Result：已按关键路径策略补充注释，覆盖 NestJS 模块组合、配置解析、Drizzle/PostgreSQL schema、repository 查询、Qdrant collection、Search hybrid rerank、Job 队列、Agent tool 脱敏/确认、Python worker scan/probe/index/embed/transcribe/OCR/export/model service、shared job schema 生成，以及 Web Search/Agent/Media/Library/Jobs 工作台的数据边界。
+- Notes：注释重点解释职责边界、跨语言字段约定、幂等、失败处理、外部工具调用、数据库事实来源、Qdrant 回表和 hybrid score 合并语义，没有做全文件头注释或逐行复述。验证通过：`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/web exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/shared exec tsc --noEmit`；`PYTHONPATH=apps/worker-py .venv/bin/python -m unittest discover apps/worker-py/tests`（40 tests）；`git diff --check`。
+
+## 文档任务：项目工具清单
+
+- Start：2026-06-24，目标是新增一份项目工具清单文档，说明当前项目用到的主要工具、职责边界，以及它们在本项目中的具体使用方式。
+- 假设：只记录当前仓库代码、依赖、配置和既有文档中已经落地或明确接入的工具；不把未来规划工具写成已落地能力。
+- 验证计划：通过 `package.json`、`requirements.txt`、`infra/docker-compose.yml`、README、架构文档和关键源码交叉核对；文档完成后用文本检查确认覆盖前端、后端、共享协议、Python worker、基础设施、模型/媒体处理、Agent、测试和格式化工具。
+
+- [x] 确认计划后创建 `docs/tools.md`。
+- [x] 按工具分类整理“是什么作用”和“当前项目怎么用”。
+- [x] 标明尚未作为核心路径使用或仅可选的工具边界，例如 Redis、外部 LLM 和文本向量 collection。
+- [x] 更新本任务 Review，记录新增文档路径和验证结果。
+
+Review：
+
+- Result：新增 `docs/tools.md`，按工程与包管理、前端、后端 API、数据库与向量检索、Python worker、模型检索、共享协议、基础设施、测试和格式化工具分类，说明每个工具的作用和当前项目使用方式。
+- Notes：已用 `rg` 检查 `docs/tools.md` 覆盖 Node.js、pnpm、Next.js、NestJS、PostgreSQL、Qdrant、FFmpeg、ffprobe、SigLIP、faster-whisper、PaddleOCR、Redis、外部 LLM 边界、文本向量 collection、Vitest、oxlint 和 oxfmt 等关键项。`git diff -- docs/tools.md docs/tasks/todo.md docs/tasks/lessons.md` 已检查；其中 `docs/tasks/todo.md` 底部 Oxlint/Oxfmt 任务记录和 `docs/tasks/lessons.md` 中部分 2026-06-16 lessons 属于本次开始前已有未提交内容，本次未回滚。
 
 ## Phase 1：Monorepo 与基础设施
 
@@ -309,17 +347,42 @@ Review：
 
 ## Phase 14：Hybrid Retrieval 与 Reranking
 
-- [ ] 合并 Qdrant vector results。
-- [ ] 合并 PostgreSQL FTS results。
-- [ ] 应用 metadata filters。
-- [ ] 合并相邻视频命中。
-- [ ] 添加基础 reranking 规则。
-- [ ] 返回命中原因。
+- Start：2026-06-27。目标是把当前按 `groups` 分开的 Qdrant 向量召回和 PostgreSQL FTS 召回，升级为统一候选池、去重/合并后返回 top-level `results`，并保留 `groups` 作为调试和兼容字段。
+- 假设：本阶段不新增外部 VLM、不新增文本 embedding collection 写入、不新增复杂 metadata query DSL；metadata filters 先指现有 `library_ids`、`media_types`、软删除过滤和 PostgreSQL 事实补齐过滤。`metadata_filter` 不作为普通语义命中原因，只有未来 metadata-only 搜索才可作为 primary reason。
+- API 决策：`POST /search` 响应新增 top-level `results`，每条结果使用 `score_kind='hybrid_score'`、`primary_reason`、`reasons`、`source_scores` 和 `merged_asset_ids`；`groups` 暂时保留原始来源分组，兼容旧响应形状并便于调试，但 reason 命名同步迁移。转写命中原因从 `text_match` 迁移为 `transcript_match`；OCR 继续用 `ocr_match`；向量继续用 `vector_match`；`document_match` 只预留给后续 document pipeline。
+- 权衡：新增 `results` 比直接替换 `groups` 更稳，避免一次性破坏 web、agent 和调试路径；迁移到 `transcript_match` 会产生 API 行为变化，但命中解释更清晰，避免 `text_match` 同时指 transcript、OCR 和文档正文。
+- 验证计划：先补 server 搜索单测，覆盖向量+FTS 合并、同 asset 多原因、跨 asset 相邻视频片段合并、media/library 过滤一致性、audio FTS、`text_match` 不再出现在 `results` 或 `groups`、低分单来源不被抬成满分、overfetch 后再分页；再补 agent sanitize 和 web Search 页面测试。实现后运行 server typecheck/test、web check、必要的 shared typecheck/test 和 `git diff --check`。
+
+- [x] 更新 `docs/api-contract.md`，标明当前 `POST /search` 返回 top-level `results` 并保留 `groups` 字段。
+- [x] 在 server 搜索测试中新增红灯用例：同一 asset 同时被 vector 和 FTS 命中时，只返回一条 top-level result，`reasons` 同时包含两个来源。
+- [x] 在 server 搜索测试中新增红灯用例：相邻视频命中按同一 `file_id` 和相近时间窗口合并，跨 asset 合并时使用代表 `asset_id` 并返回 `merged_asset_ids`。
+- [x] 在 server 搜索测试中新增红灯用例：`media_types` 和 `library_ids` 过滤在 vector、FTS、合并后结果中语义一致；软删除过滤沿用 PostgreSQL metadata 补齐路径。
+- [x] 在 server 搜索测试中新增红灯用例：audio/video 转写命中返回 `transcript_match`，OCR 命中返回 `ocr_match`，`document_match` 不在 Phase 14 主动产生。
+- [x] 在 server 搜索测试中新增红灯用例：`groups` 结构保持兼容，且 reason 命名与 top-level `results` 一致。
+- [x] 在 server 搜索测试中新增红灯用例：各来源从 offset 0 overfetch，合并/rerank 后再应用 request `offset` / `limit`。
+- [x] 在 server 搜索测试中新增红灯用例：单来源低原始分数不会因归一化被抬到满分，也不会排到合理的多信号候选前面。
+- [x] 在 server 搜索测试中新增红灯用例：同 source 多次命中合并时 `source_scores[sourceKey]` 取最大原始分数。
+- [x] 在 server 搜索测试中新增红灯用例：`primary_reason` 使用加权归一化贡献，而不是 raw source score。
+- [x] 抽出 SearchService 内部候选结构：统一表示 `asset_id`、`file_id`、时间范围、来源分数、来源原因和原始 collection。
+- [x] 将 Qdrant `image_vectors` / `video_segment_vectors` 结果转成统一候选，并保留原始 `source_scores`。
+- [x] 将 PostgreSQL FTS `text_search` 结果转成统一候选，并按 asset 来源映射 `transcript_match` / `ocr_match`。
+- [x] 在统一候选池中按 asset/time identity 合并重复命中，累积 `reasons` 和 `source_scores`。
+- [x] 对同一视频内相邻或重叠时间窗口做合并，合并后保留最强 primary reason、最高/合成分数和覆盖后的 start/end。
+- [x] 添加基础 reranking：cosine 使用 raw clamp，FTS 使用 `rank / (rank + 1)` 饱和映射，再按 multi-signal bonus、FTS/向量权重和去重后时间窗口排序，输出 `hybrid_score`。
+- [x] 固定 source key 命名：向量来源用 collection 名（如 `image_vectors`、`video_segment_vectors`），FTS 来源用 `text_search`；`source_scores` 保留原始来源分数，不做跨来源展示比较。
+- [x] `POST /search` 返回 `{ limit, offset, results, groups }`；前端和 agent 默认消费 `results`，`groups` 仅作兼容/调试。
+- [x] 更新 Agent `search_media` 工具的输出清洗和 summary 抽取逻辑，避免继续只读 `groups`。
+- [x] 更新 Search 页面类型、筛选项和结果展示，支持 image/video/audio，并展示 primary reason / reasons；document filter 等 document pipeline 落地后再补。
+- [x] 更新 README 或相关文档中 “Phase 14 之前按 group 展示” 的说明，改为 Phase 14 后以 top-level `results` 为主。
+- [x] 运行 `corepack pnpm --filter @local-media-agent/server check`。
+- [x] 运行 `corepack pnpm --filter @local-media-agent/web check`。
+- [x] 运行必要的 shared 验证：`corepack pnpm --filter @local-media-agent/shared exec tsc --noEmit` 和 `corepack pnpm --filter @local-media-agent/shared exec vitest run`。
+- [x] 运行 `git diff --check`，并在本段 Review 记录结果。
 
 Review：
 
-- Result：
-- Notes：
+- Result：Phase 14 已实现 hybrid retrieval 与 reranking。`POST /search` 现在返回 top-level `results`，同时保留原始来源 `groups`；SearchService 会从 Qdrant 和 PostgreSQL FTS overfetch，转成统一候选，合并同 asset 和相邻视频窗口，输出 `hybrid_score`、`primary_reason`、`reasons`、`source_scores` 和 `merged_asset_ids`。Agent `search_media` 改为优先消费 `results` 并清洗 path；Web Search 页面改为展示混合结果，支持 image/video/audio 筛选和命中原因展示。
+- Notes：验证通过：`corepack pnpm --filter @local-media-agent/server check`（16 个 test files / 46 tests）；`corepack pnpm --filter @local-media-agent/web check`（5 个 test files / 8 tests + Next build）；`corepack pnpm --filter @local-media-agent/shared exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/shared exec vitest run`（1 个 test file / 4 tests）；`git diff --check`。当前 `.gitignore` 的 `*.test.ts` 会让多数 server 测试在普通 `git status` 中不可见；本阶段保留既有 ignore 策略，提交时需要显式处理这些测试文件。额外尝试 `corepack pnpm format:check` 时仅剩 `apps/web/next-env.d.ts` 这个 Next 生成文件不符合 Oxfmt，但该文件已恢复为无 diff 状态，未纳入 Phase 14 改动。
 
 ## Phase 15：外部多模态模型验证
 
@@ -431,3 +494,25 @@ Review：
 
 - Result：添加根目录 `prettier.config.mjs`、`.prettierignore` 和 `eslint.config.mjs`；根 `package.json` 新增 `lint`、`format` 和 `format:check` scripts，并安装 `eslint`、`@eslint/js`、`typescript-eslint`、`globals`、`eslint-config-prettier` 和 `prettier` devDependencies。按新 Prettier 配置格式化现有代码/配置文件，并删除 `apps/server/src/database/repositories.ts` 中被 lint 发现的无用 `lt` import。
 - Notes：验证通过：`corepack pnpm format:check`；`corepack pnpm lint`；`git diff --check`；`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，10 个 test files / 21 个 tests 通过；`corepack pnpm --filter @local-media-agent/web check`，包含 typecheck、3 个 test files / 4 个 tests 和 Next build；`corepack pnpm --filter @local-media-agent/shared exec node --import tsx scripts/generate-json-schemas.ts`、`tsc --noEmit` 和 Vitest 3 个 tests 通过。`corepack pnpm check` 仍因当前 shell 没有裸 `pnpm` shim 且根脚本内部调用 `pnpm --recursive check` 而失败；该限制与此前 Phase 记录一致，本次未扩大范围重写既有 package check scripts。
+
+## 工具链迁移：Oxlint 与 Oxfmt
+
+- Start：2026-06-16，目标是在 monorepo 根目录直接用 `oxlint` 和 `oxfmt` 替换 ESLint 与 Prettier，让默认 `lint` / `format` / `format:check` 使用 Oxc 工具链。
+- 假设：本阶段只处理 JavaScript/TypeScript/JSON/YAML/CSS 等现有 Prettier/ESLint 覆盖的前端与 Node 代码，不处理 Python worker；不引入 Vite+，因为当前项目已经有 Next.js、NestJS 和 pnpm workspace，单独替换 lint/format 工具影响面更小。
+- 权衡：项目当前没有上线负担，也没有外部团队或 CI 依赖旧格式输出，因此不保留 ESLint/Prettier 过渡脚本，避免迁移后继续维护两套工具链。`tsc --noEmit` 仍保留为类型检查事实来源，`oxlint` 不替代 TypeScript 编译检查。
+- 验证计划：安装官方包并生成配置后，运行 `oxlint` 与 `oxfmt --check`；若 `oxfmt --check` 失败，先运行 `oxfmt` 并审查 diff，只接受纯格式化变更；最后运行 TypeScript、Vitest、Next build 和 `git diff --check`。
+
+- [x] 安装 `oxlint` 和 `oxfmt` 到根目录 devDependencies，并更新 lockfile。
+- [x] 使用迁移工具或手工创建 `.oxlintrc.json`，迁移现有 `eslint.config.mjs` 的 ignore、browser/node/vitest 环境和 `_` 前缀 unused-vars 约定。
+- [x] 创建 `.oxfmtrc.jsonc`，迁移 `prettier.config.mjs` 中的 `printWidth: 100`、`tabWidth: 2`、`useTabs: false`、`semi: false`、`singleQuote: true`、`bracketSpacing: true`、`trailingComma: "all"` 和 `arrowParens: "always"`。
+- [x] 将根目录 `lint` 改为 `oxlint`，新增 `lint:fix`；将 `format` 改为 `oxfmt`，将 `format:check` 改为 `oxfmt --check`。
+- [x] 删除 `eslint.config.mjs`、`prettier.config.mjs` 和 ESLint/Prettier 相关 devDependencies。
+- [x] 运行 `corepack pnpm lint` 和 `corepack pnpm format:check` 验证 Oxc 工具链。
+- [x] 若 `oxfmt` 产生格式化 diff，审查 diff 后只接受纯格式化变更；若出现语义风险，停下重新评估是否继续保留 Prettier。
+- [x] 运行 `corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`、`corepack pnpm --filter @local-media-agent/server exec vitest run`、`corepack pnpm --filter @local-media-agent/shared exec node --import tsx scripts/generate-json-schemas.ts`、`corepack pnpm --filter @local-media-agent/shared exec tsc --noEmit`、`corepack pnpm --filter @local-media-agent/shared exec vitest run` 和 `corepack pnpm --filter @local-media-agent/web check`。
+- [x] 运行 `git diff --check`，并在本段 Review 记录结果和格式化差异。
+
+Review：
+
+- Result：根目录工具链已直接替换为 Oxc：新增 `.oxlintrc.json` 和 `.oxfmtrc.jsonc`，`package.json` 的 `lint` / `format` / `format:check` 切换为 `oxlint` / `oxfmt`，新增 `lint:fix`；移除 `eslint.config.mjs`、`prettier.config.mjs`、`.prettierignore` 以及 ESLint/Prettier 相关 devDependencies，保留 `tsc --noEmit` 作为类型检查入口。
+- Notes：安装时沿用当前 `node_modules` 已使用的 pnpm store（`/Users/zhihu/Library/pnpm/store/v10`），避免重装整个依赖树。`corepack pnpm lint` 通过；首次 `corepack pnpm format:check` 报 17 个 JS/TS/JSON 文件格式差异，运行 `corepack pnpm format` 后复查通过，差异为 `oxfmt` 的换行/链式调用格式化；已关闭 `sortPackageJson`，避免 package 字段排序噪音。验证通过：`corepack pnpm --filter @local-media-agent/shared exec node --import tsx scripts/generate-json-schemas.ts`；`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，15 个 test files / 40 tests 通过；`corepack pnpm --filter @local-media-agent/shared exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/shared exec vitest run`，1 个 test file / 4 tests 通过；`corepack pnpm --filter @local-media-agent/web check`，包含 5 个 test files / 8 tests 和 Next webpack build；`git diff --check` 通过。

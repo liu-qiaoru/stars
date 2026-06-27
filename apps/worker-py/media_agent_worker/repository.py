@@ -5,11 +5,17 @@ from pathlib import Path
 
 
 class PostgresJobRepository:
+    """Thin SQL adapter for the shared jobs table.
+
+    This worker intentionally has no ORM model of its own; Drizzle/Zod in TypeScript remain the schema authority.
+    """
+
     def __init__(self, connection):
         self.connection = connection
 
     def claim_next_job(self, worker_id):
         with self.connection.cursor() as cursor:
+            # SKIP LOCKED lets multiple local worker processes share one PostgreSQL queue safely.
             cursor.execute(
                 """
                 SELECT id, job_type, input_json
@@ -94,12 +100,17 @@ class PostgresJobRepository:
 
 
 class PostgresMediaRepository:
+    """Media/job handlers use this adapter to update PostgreSQL facts without owning schema definitions."""
+
     def __init__(self, connection):
         self.connection = connection
 
     def upsert_media_file(self, *, library_id, root_path, path, media_type, size_bytes, mtime_ms):
         relative_path = str(Path(path).relative_to(root_path))
         with self.connection.cursor() as cursor:
+            # A file's identity inside one library is its absolute path. Size/mtime
+            # are the cheap change detector for the default scan mode; full content
+            # hashing is intentionally left out of the hot scan path.
             cursor.execute(
                 """
                 SELECT id, size_bytes, mtime_ms
@@ -193,6 +204,8 @@ class PostgresMediaRepository:
 
     def upsert_media_asset(self, **asset):
         with self.connection.cursor() as cursor:
+            # Asset identity is semantic, not just UUID based: file + asset type + path/time window.
+            # This makes scan/index/transcribe/OCR reruns idempotent across worker restarts.
             cursor.execute(
                 """
                 SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash, text_content, metadata_json
@@ -217,6 +230,9 @@ class PostgresMediaRepository:
             if previous is not None:
                 has_text_content = "text_content" in asset
                 metadata_patch = asset.get("metadata_json", {})
+                # Re-indexing updates only fields owned by the current job. OCR and
+                # transcription can add text/metadata later, so absent text_content
+                # must preserve the existing value and metadata is patched, not reset.
                 cursor.execute(
                     """
                     UPDATE media_assets
@@ -278,6 +294,7 @@ class PostgresMediaRepository:
 
     def upsert_vector_ref(self, **vector_ref):
         with self.connection.cursor() as cursor:
+            # vector_refs are created before embedding; the embedding job later writes Qdrant and marks them indexed.
             cursor.execute(
                 """
                 SELECT id, status
@@ -374,6 +391,8 @@ class PostgresMediaRepository:
         }
 
     def invalidate_video_index_assets(self, file_id, segment_strategy):
+        # Changing segmentation strategy can leave old video_segment/video_frame rows around.
+        # Mark them stale instead of deleting so existing references remain auditable and safe to ignore in reads.
         stale_metadata = json.dumps({
             "stale": True,
             "stale_reason": "video_reindex",
@@ -459,6 +478,7 @@ class PostgresMediaRepository:
         }
 
     def update_asset_ocr_text(self, asset_id, *, text_content, ocr_metadata):
+        # OCR writes text back to the original image/video_frame asset so FTS can use the same text_tsv column.
         ocr_patch = json.dumps({"ocr": ocr_metadata})
         with self.connection.cursor() as cursor:
             cursor.execute(
@@ -474,6 +494,7 @@ class PostgresMediaRepository:
 
 
 def connect_from_env():
+    # Runtime worker entrypoint: tests usually inject fake repositories instead of opening a real PostgreSQL connection.
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")

@@ -10,6 +10,8 @@ import { MediaModule } from './media/media.module.js'
 import { QdrantModule } from './qdrant/qdrant.module.js'
 import { SearchModule } from './search/search.module.js'
 
+// AppModule 是 NestJS 的组合根：这里只声明模块依赖，不放业务逻辑。
+// 新人排查请求链路时，一般从对应 module/controller/service 进入；跨模块共享能力通过 provider 注入。
 @Module({
   imports: [
     ConfigModule,

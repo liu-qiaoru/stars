@@ -8,6 +8,7 @@ DEFAULT_SIGLIP_VECTOR_DIM = 768
 
 
 def normalize_vector(vector):
+    # Qdrant cosine distance expects normalized vectors for stable score semantics across image/text embeddings.
     norm = math.sqrt(sum(value * value for value in vector))
     if norm == 0:
         raise ValueError("Embedding vector has zero norm")
@@ -15,6 +16,7 @@ def normalize_vector(vector):
 
 
 def select_torch_device(requested=None, torch_module=None):
+    # Default auto uses GPU/MPS when available, but explicit SIGLIP_DEVICE must fail loudly if unavailable.
     requested = requested or os.environ.get("SIGLIP_DEVICE", "auto")
     if requested == "cpu":
         return "cpu"
@@ -42,6 +44,8 @@ def select_torch_device(requested=None, torch_module=None):
 
 
 class SiglipEmbedder:
+    """Local SigLIP wrapper shared by batch embedding jobs and the localhost model service."""
+
     def __init__(
         self,
         *,
@@ -94,6 +98,7 @@ class SiglipEmbedder:
         return self._finalize(features[0])
 
     def _finalize(self, tensor):
+        # Dimension mismatches usually mean TS/Python model registry drift; fail before writing a bad Qdrant point.
         vector = tensor.detach().float().cpu().tolist()
         actual_dim = len(vector)
         if self.expected_vector_dim is not None and actual_dim != self.expected_vector_dim:

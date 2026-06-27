@@ -5,6 +5,8 @@ export const TEXT_EMBEDDING_MODEL_NAME = 'sentence-transformers'
 export const TEXT_EMBEDDING_MODEL_VERSION = 'all-MiniLM-L6-v2'
 export const TEXT_EMBEDDING_VECTOR_DIM = 384
 
+// 这是 Qdrant collection 的注册表，也是 TS server 与 Python worker 对齐模型版本/维度的来源。
+// Phase 14 只读取 image_vectors 与 video_segment_vectors；文本向量 collection 先预留，不写入。
 export const VECTOR_COLLECTIONS = {
   image_vectors: {
     modality: 'image',

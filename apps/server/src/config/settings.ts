@@ -18,6 +18,8 @@ type Env = Record<string, string | undefined>
 
 export const SETTINGS = Symbol('SETTINGS')
 
+// Settings 是运行时配置的唯一解析入口。这里把 env 的字符串形态转成强类型，
+// 避免各个 service 自己读取 process.env 造成默认值、校验规则和测试行为分散。
 const settingsSchema = z.object({
   SERVER_HOST: z.string().default('127.0.0.1'),
   SERVER_PORT: z
@@ -36,7 +38,10 @@ const settingsSchema = z.object({
     }),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   QDRANT_URL: z.string().url('QDRANT_URL must be a valid URL'),
-  MODEL_SERVICE_URL: z.string().url('MODEL_SERVICE_URL must be a valid URL').default('http://127.0.0.1:4020'),
+  MODEL_SERVICE_URL: z
+    .string()
+    .url('MODEL_SERVICE_URL must be a valid URL')
+    .default('http://127.0.0.1:4020'),
   MODEL_SERVICE_TIMEOUT_MS: z
     .string()
     .default('10000')

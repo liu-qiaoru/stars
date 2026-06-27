@@ -7,6 +7,7 @@ import { createApiClient } from '../lib/api-client'
 import {
   formatCollection,
   formatMediaType,
+  formatReason,
   formatScoreKind,
   formatTimeRange,
 } from '../lib/display-labels'
@@ -18,20 +19,20 @@ interface SearchWorkspaceProps {
   initialResults: SearchResponse
 }
 
-const mediaFilters = ['image', 'video'] as const
+const mediaFilters = ['image', 'video', 'audio'] as const
 
 export function SearchWorkspace({ libraries, initialQuery, initialResults }: SearchWorkspaceProps) {
   const [query, setQuery] = useState(initialQuery)
   const [activeMedia, setActiveMedia] = useState<(typeof mediaFilters)[number][]>([
     'image',
     'video',
+    'audio',
   ])
   const [results, setResults] = useState(initialResults)
   const [isLoading, setIsLoading] = useState(false)
-  const totalResults = useMemo(
-    () => results.groups.reduce((sum, group) => sum + group.results.length, 0),
-    [results.groups],
-  )
+  // 新 API 优先展示 top-level hybrid results；旧 groups 响应仍可通过 visibleResults fallback 渲染。
+  const primaryResults = useMemo(() => visibleResults(results), [results])
+  const totalResults = useMemo(() => primaryResults.length, [primaryResults])
 
   async function submitSearch(formData: FormData) {
     const nextQuery = String(formData.get('query') ?? '').trim()
@@ -104,37 +105,65 @@ export function SearchWorkspace({ libraries, initialQuery, initialResults }: Sea
       </section>
 
       <div className="space-y-8">
-        {results.groups.map((group) => (
-          <section
-            key={group.collection}
-            aria-label={formatCollection(group.collection)}
-            className="space-y-3"
-          >
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h2 className="section-title">{formatCollection(group.collection)}</h2>
-                <p className="muted">{formatScoreKind(group.score_kind)}</p>
-              </div>
-              <span className="result-count">{group.results.length} 条结果</span>
+        <section aria-label="混合结果" className="space-y-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="section-title">混合结果</h2>
+              <p className="muted">{formatScoreKind('hybrid_score')}</p>
             </div>
-            {group.results.length ? (
-              <div className="masonry-grid">
-                {group.results.map((item, index) => (
-                  <SearchCard
-                    key={`${group.collection}-${item.asset_id}`}
-                    item={item}
-                    index={index}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="empty-panel">该分组暂无已索引结果。</div>
-            )}
-          </section>
-        ))}
+            <span className="result-count">{primaryResults.length} 条结果</span>
+          </div>
+          {primaryResults.length ? (
+            <div className="masonry-grid">
+              {primaryResults.map((item, index) => (
+                <SearchCard key={`${item.asset_id}-${index}`} item={item} index={index} />
+              ))}
+            </div>
+          ) : (
+            <div className="empty-panel">暂无已索引结果。</div>
+          )}
+        </section>
+        {results.results === undefined
+          ? results.groups.map((group) => (
+              <section
+                key={group.collection}
+                aria-label={formatCollection(group.collection)}
+                className="space-y-3"
+              >
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h2 className="section-title">{formatCollection(group.collection)}</h2>
+                    <p className="muted">{formatScoreKind(group.score_kind)}</p>
+                  </div>
+                  <span className="result-count">{group.results.length} 条结果</span>
+                </div>
+                {group.results.length ? (
+                  <div className="masonry-grid">
+                    {group.results.map((item, index) => (
+                      <SearchCard
+                        key={`${group.collection}-${item.asset_id}`}
+                        item={item}
+                        index={index}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-panel">该分组暂无已索引结果。</div>
+                )}
+              </section>
+            ))
+          : null}
       </div>
     </div>
   )
+}
+
+function visibleResults(results: SearchResponse): SearchResultItem[] {
+  // 兼容 Phase 13 旧响应：没有 results 时 flatten groups，避免旧后端让 Search 页空白。
+  if (results.results) {
+    return results.results
+  }
+  return results.groups.flatMap((group) => group.results)
 }
 
 function SearchCard({ item, index }: { item: SearchResultItem; index: number }) {
@@ -142,6 +171,7 @@ function SearchCard({ item, index }: { item: SearchResultItem; index: number }) 
     item.start_time_seconds === null || item.end_time_seconds === null
       ? null
       : formatTimeRange(item.start_time_seconds, item.end_time_seconds)
+  const reason = item.primary_reason ?? item.reason
   return (
     <article className="pin-card">
       <MediaThumbnail
@@ -151,6 +181,7 @@ function SearchCard({ item, index }: { item: SearchResultItem; index: number }) 
       />
       <div className="pin-overlay top-3 left-3">{formatMediaType(item.media_type)}</div>
       <div className="pin-overlay bottom-3 left-3">{item.score.toFixed(2)}</div>
+      {reason ? <div className="pin-overlay top-3 right-3">{formatReason(reason)}</div> : null}
       <div className="pin-meta">
         <p className="truncate font-bold">{item.path}</p>
         {timeRange ? <p className="text-xs">{timeRange}</p> : null}

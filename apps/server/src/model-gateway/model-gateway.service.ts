@@ -26,9 +26,14 @@ export class ModelGatewayService {
 
     const parsed = embeddingResponseSchema.safeParse(await response.json())
     if (!parsed.success) {
-      throw new BadGatewayException(`Model service returned invalid embedding: ${parsed.error.message}`)
+      throw new BadGatewayException(
+        `Model service returned invalid embedding: ${parsed.error.message}`,
+      )
     }
-    if (parsed.data.vector_dim !== expectedVectorDim || parsed.data.vector.length !== expectedVectorDim) {
+    if (
+      parsed.data.vector_dim !== expectedVectorDim ||
+      parsed.data.vector.length !== expectedVectorDim
+    ) {
       throw new BadGatewayException(
         `Model service returned vector_dim=${parsed.data.vector_dim}, expected ${expectedVectorDim}`,
       )

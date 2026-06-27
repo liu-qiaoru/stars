@@ -14,6 +14,7 @@ export class AnthropicAgentModelRunner implements AgentModelRunner {
     }
 
     const anthropic = createAnthropic({ apiKey: this.settings.anthropicApiKey })
+    // Vercel AI SDK 只负责模型调用和 tool loop；持久化、权限和确认逻辑在 AgentService 中完成。
     const result = await generateText({
       model: anthropic(input.model),
       system:

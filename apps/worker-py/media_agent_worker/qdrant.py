@@ -4,6 +4,11 @@ import urllib.request
 
 
 class QdrantHttpClient:
+    """Minimal Qdrant writer used by Python embedding jobs.
+
+    TypeScript manages collection creation; Python only upserts points after model inference succeeds.
+    """
+
     def __init__(self, base_url=None):
         self.base_url = (base_url or os.environ.get("QDRANT_URL") or "http://127.0.0.1:6333").rstrip("/")
 

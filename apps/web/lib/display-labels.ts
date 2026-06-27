@@ -15,6 +15,14 @@ const collectionLabels: Record<string, string> = {
 
 const scoreKindLabels: Record<string, string> = {
   cosine_similarity: '余弦相似度',
+  hybrid_score: '混合排序分',
+  ts_rank_cd: '全文检索分',
+}
+
+const reasonLabels: Record<string, string> = {
+  vector_match: '视觉命中',
+  transcript_match: '转写命中',
+  ocr_match: 'OCR 命中',
 }
 
 const jobTypeLabels: Record<string, string> = {
@@ -49,6 +57,10 @@ export function formatCollection(collection: string) {
 
 export function formatScoreKind(scoreKind: string) {
   return scoreKindLabels[scoreKind] ?? scoreKind
+}
+
+export function formatReason(reason: string) {
+  return reasonLabels[reason] ?? reason
 }
 
 export function formatJobType(jobType: string) {

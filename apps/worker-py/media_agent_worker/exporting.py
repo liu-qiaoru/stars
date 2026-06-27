@@ -7,6 +7,8 @@ def _format_time_for_path(value):
 
 
 class ExportClipHandler:
+    """Run FFmpeg for confirmed export_clip jobs."""
+
     def __init__(self, repository, *, ffmpeg_runner=None, exports_root=None):
         self.repository = repository
         self.ffmpeg_runner = ffmpeg_runner or self._run_ffmpeg
