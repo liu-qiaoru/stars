@@ -12,6 +12,15 @@ export interface Settings {
   agentModel: string
   agentMaxSteps: number
   agentToolTimeoutMs: number
+  jobCoordinatorEnabled: boolean
+  jobCoordinatorIntervalMs: number
+  jobCoordinatorEmbeddingLimit: number
+  jobCoordinatorOcrLimit: number
+  queryExpansionProvider: 'none' | 'deepseek'
+  queryExpansionTimeoutMs: number
+  deepseekBaseUrl: string
+  deepseekApiKey?: string
+  deepseekModel: string
 }
 
 type Env = Record<string, string | undefined>
@@ -90,6 +99,70 @@ const settingsSchema = z.object({
       }
       return timeout
     }),
+  JOB_COORDINATOR_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  JOB_COORDINATOR_INTERVAL_MS: z
+    .string()
+    .default('5000')
+    .transform((value, context) => {
+      const interval = Number(value)
+      if (!Number.isInteger(interval) || interval < 1000 || interval > 3600000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'JOB_COORDINATOR_INTERVAL_MS must be between 1000 and 3600000',
+        })
+        return z.NEVER
+      }
+      return interval
+    }),
+  JOB_COORDINATOR_EMBEDDING_LIMIT: z
+    .string()
+    .default('100')
+    .transform((value, context) => {
+      const limit = Number(value)
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'JOB_COORDINATOR_EMBEDDING_LIMIT must be between 1 and 10000',
+        })
+        return z.NEVER
+      }
+      return limit
+    }),
+  JOB_COORDINATOR_OCR_LIMIT: z
+    .string()
+    .default('500')
+    .transform((value, context) => {
+      const limit = Number(value)
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'JOB_COORDINATOR_OCR_LIMIT must be between 1 and 10000',
+        })
+        return z.NEVER
+      }
+      return limit
+    }),
+  QUERY_EXPANSION_PROVIDER: z.enum(['none', 'deepseek']).default('none'),
+  QUERY_EXPANSION_TIMEOUT_MS: z
+    .string()
+    .default('10000')
+    .transform((value, context) => {
+      const timeout = Number(value)
+      if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 120000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'QUERY_EXPANSION_TIMEOUT_MS must be between 1000 and 120000',
+        })
+        return z.NEVER
+      }
+      return timeout
+    }),
+  DEEPSEEK_BASE_URL: z.string().url('DEEPSEEK_BASE_URL must be a valid URL').default('https://api.deepseek.com'),
+  DEEPSEEK_API_KEY: z.string().min(1).optional(),
+  DEEPSEEK_MODEL: z.string().min(1).default('deepseek-v4-flash'),
 })
 
 export function createSettings(env: Env = process.env): Settings {
@@ -107,5 +180,14 @@ export function createSettings(env: Env = process.env): Settings {
     agentModel: parsed.AGENT_MODEL,
     agentMaxSteps: parsed.AGENT_MAX_STEPS,
     agentToolTimeoutMs: parsed.AGENT_TOOL_TIMEOUT_MS,
+    jobCoordinatorEnabled: parsed.JOB_COORDINATOR_ENABLED,
+    jobCoordinatorIntervalMs: parsed.JOB_COORDINATOR_INTERVAL_MS,
+    jobCoordinatorEmbeddingLimit: parsed.JOB_COORDINATOR_EMBEDDING_LIMIT,
+    jobCoordinatorOcrLimit: parsed.JOB_COORDINATOR_OCR_LIMIT,
+    queryExpansionProvider: parsed.QUERY_EXPANSION_PROVIDER,
+    queryExpansionTimeoutMs: parsed.QUERY_EXPANSION_TIMEOUT_MS,
+    deepseekBaseUrl: parsed.DEEPSEEK_BASE_URL,
+    deepseekApiKey: parsed.DEEPSEEK_API_KEY,
+    deepseekModel: parsed.DEEPSEEK_MODEL,
   }
 }

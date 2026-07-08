@@ -15,9 +15,17 @@ export interface JobSummary {
   job_type: string
   status: string
   progress: number
+  file_paths: string[]
   error_message: string | null
   created_at: string
   updated_at: string
+}
+
+export interface JobListResponse {
+  items: JobSummary[]
+  total: number
+  limit: number
+  offset: number
 }
 
 export interface SearchRequest {
@@ -40,6 +48,7 @@ export interface SearchResultItem {
   score: number
   score_kind?: string
   primary_reason?: string
+  confidence?: 'high' | 'low'
   reason?: 'vector_match' | string
   reasons?: string[]
   source_scores?: Record<string, number>
@@ -157,6 +166,17 @@ export function createApiClient(options: ApiClientOptions = {}) {
     return (await response.json()) as T
   }
 
+  function withQuery(path: string, input: Record<string, number | undefined>) {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(input)) {
+      if (value !== undefined) {
+        params.set(key, String(value))
+      }
+    }
+    const query = params.toString()
+    return query ? `${path}?${query}` : path
+  }
+
   return {
     getHealth: () => request<HealthResponse>('/health', { method: 'GET' }),
     listLibraries: () => request<{ items: LibrarySummary[] }>('/libraries', { method: 'GET' }),
@@ -164,7 +184,15 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<LibrarySummary>('/libraries', { method: 'POST', body: JSON.stringify(input) }),
     scanLibrary: (id: string) =>
       request<{ job_id: string; status: string }>(`/libraries/${id}/scan`, { method: 'POST' }),
-    listJobs: () => request<{ items: JobSummary[] }>('/jobs', { method: 'GET' }),
+    listJobs: (input: { limit?: number; offset?: number } = {}) =>
+      request<JobListResponse>(withQuery('/jobs', input), { method: 'GET' }),
+    mediaContentUrl: (id: string, input: { startTimeSeconds?: number | null } = {}) => {
+      const fragment =
+        input.startTimeSeconds === null || input.startTimeSeconds === undefined
+          ? ''
+          : `#t=${Math.max(0, input.startTimeSeconds)}`
+      return `${baseUrl}/media/${id}/content${fragment}`
+    },
     searchMedia: (input: SearchRequest) =>
       request<SearchResponse>('/search', { method: 'POST', body: JSON.stringify(input) }),
     getMedia: (id: string) =>

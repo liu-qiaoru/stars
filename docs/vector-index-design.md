@@ -249,7 +249,7 @@ document_chunk
 1. 每个 scene 选一个代表帧，取 scene 中点。
 2. 代表帧写入 video_segment asset（vector_kind='representative_frame_embedding'）→ video_segment_vectors。
 3. 代表帧只进 video_segment_vectors，不重复进 video_frame_vectors。
-4. scene 另生成 0-2 个关键帧（video_frame asset，vector_kind='frame_embedding'）→ video_frame_vectors；数量按 scene 时长（≤15s 不加；15-45s 加 1；>45s 加 2），与代表帧不重复。
+4. scene 另按 `KEYFRAME_DENSITY` 生成关键帧（video_frame asset，vector_kind='frame_embedding'）→ video_frame_vectors；默认 `dense` 下短 scene 也会补帧，中长 scene 按时长增加，单 scene 最多 10 个额外关键帧，与代表帧不重复。
 5. scene 代表帧 asset 与其关键帧 asset 在 media_assets.metadata_json 中共享同一 scene_id（不新增 DB 列）；固定切片 scene_id 为 null。
 ```
 
@@ -381,7 +381,7 @@ vector_collections
 1. 从 PostgreSQL 读取 media_asset。
 2. 读取对应缓存或源文件片段。
 3. `index_media` 创建 pending `vector_refs`，不直接写入 Qdrant。
-4. TypeScript server 的显式协调入口扫描 pending `vector_refs`，创建 embedding jobs。
+4. TypeScript server 的 `JobsCoordinatorService` 自动扫描 pending `vector_refs`，创建 embedding jobs；显式协调入口保留为补漏/恢复手段。
 5. Python worker 执行 embedding job，生成 SigLIP embedding 并校验 vector_dim。
 6. Python worker upsert point 到 Qdrant。
 7. Python worker 将对应 `vector_refs.status` 更新为 `indexed`。

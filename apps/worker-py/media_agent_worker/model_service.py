@@ -3,6 +3,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .embeddings import SiglipEmbedder
+from .env import load_project_env
 
 
 def handle_embed_text_request(embedder, payload):
@@ -75,6 +76,7 @@ def run_model_service(host="127.0.0.1", port=4020, embedder=None):
 
 
 def main():
+    load_project_env()
     run_model_service(
         host=os.environ.get("MODEL_SERVICE_HOST", "127.0.0.1"),
         port=int(os.environ.get("MODEL_SERVICE_PORT", "4020")),

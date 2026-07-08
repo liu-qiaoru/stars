@@ -203,6 +203,14 @@
           "keyframes_selected": {
             "type": "integer",
             "minimum": 0
+          },
+          "keyframe_density": {
+            "type": "string",
+            "enum": [
+              "light",
+              "balanced",
+              "dense"
+            ]
           }
         },
         "required": [

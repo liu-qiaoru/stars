@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import {
@@ -144,6 +144,7 @@ export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 
   return db
     .select({
       vectorRefId: vectorRefs.id,
+      vectorRefUpdatedAt: vectorRefs.updatedAt,
       assetId: vectorRefs.assetId,
       fileId: vectorRefs.fileId,
       libraryId: vectorRefs.libraryId,
@@ -249,7 +250,23 @@ function deterministicPointId(input: {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-export async function listActiveEmbeddingJobs(db: Database) {
+export async function listAttemptedEmbeddingJobs(db: Database) {
+  return db
+    .select({
+      jobType: jobs.jobType,
+      inputJson: jobs.inputJson,
+      createdAt: jobs.createdAt,
+    })
+    .from(jobs)
+    .where(
+      and(
+        inArray(jobs.jobType, ['embed_image', 'embed_video_frame']),
+        inArray(jobs.status, ['queued', 'running', 'failed', 'succeeded']),
+      ),
+    )
+}
+
+export async function listAttemptedOcrJobs(db: Database) {
   return db
     .select({
       jobType: jobs.jobType,
@@ -257,23 +274,8 @@ export async function listActiveEmbeddingJobs(db: Database) {
     })
     .from(jobs)
     .where(
-      and(
-        inArray(jobs.jobType, ['embed_image', 'embed_video_frame']),
-        inArray(jobs.status, ['queued', 'running']),
-      ),
+      and(eq(jobs.jobType, 'run_ocr'), inArray(jobs.status, ['queued', 'running', 'failed', 'succeeded'])),
     )
-    .limit(500)
-}
-
-export async function listActiveOcrJobs(db: Database) {
-  return db
-    .select({
-      jobType: jobs.jobType,
-      inputJson: jobs.inputJson,
-    })
-    .from(jobs)
-    .where(and(eq(jobs.jobType, 'run_ocr'), inArray(jobs.status, ['queued', 'running'])))
-    .limit(500)
 }
 
 export async function listPendingOcrAssets(
@@ -388,6 +390,7 @@ export async function listSearchResultMetadata(
       path: mediaFiles.path,
       startTimeSeconds: mediaAssets.startTimeSeconds,
       endTimeSeconds: mediaAssets.endTimeSeconds,
+      frameTimeSeconds: mediaAssets.frameTimeSeconds,
       metadataJson: mediaAssets.metadataJson,
     })
     .from(vectorRefs)
@@ -489,13 +492,123 @@ export async function updateLibraryStatus(
   return row
 }
 
-export async function listJobs(db: Database) {
-  return db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(50)
+export async function listJobs(
+  db: Database,
+  input: { limit?: number; offset?: number } = {},
+) {
+  const limit = Math.min(Math.max(input.limit ?? 100, 1), 500)
+  const offset = Math.max(input.offset ?? 0, 0)
+  const [rows, totalRows] = await Promise.all([
+    db.select().from(jobs).orderBy(desc(jobs.createdAt)).limit(limit).offset(offset),
+    db.select({ total: count() }).from(jobs),
+  ])
+  const total = Number(totalRows[0]?.total ?? 0)
+
+  return { rows, total, limit, offset }
+}
+
+export async function resolveJobFilePaths(
+  db: Database,
+  rows: Array<{ id: string; inputJson: unknown }>,
+) {
+  const pathsByJobId = new Map<string, Set<string>>()
+  const fileIdsByJobId = new Map<string, string[]>()
+  const assetIdsByJobId = new Map<string, string[]>()
+  const allFileIds = new Set<string>()
+  const allAssetIds = new Set<string>()
+
+  for (const row of rows) {
+    const input = recordValue(row.inputJson)
+    const paths = new Set<string>()
+
+    for (const key of ['path', 'frame_path', 'root_path', 'export_path']) {
+      const value = input[key]
+      if (typeof value === 'string' && value.length > 0) {
+        paths.add(value)
+      }
+    }
+
+    const fileIds: string[] = []
+    if (typeof input.file_id === 'string' && input.file_id.length > 0) {
+      fileIds.push(input.file_id)
+      allFileIds.add(input.file_id)
+    }
+
+    const assetIds: string[] = []
+    if (typeof input.asset_id === 'string' && input.asset_id.length > 0) {
+      assetIds.push(input.asset_id)
+      allAssetIds.add(input.asset_id)
+    }
+    if (Array.isArray(input.asset_ids)) {
+      for (const assetId of input.asset_ids) {
+        if (typeof assetId === 'string' && assetId.length > 0) {
+          assetIds.push(assetId)
+          allAssetIds.add(assetId)
+        }
+      }
+    }
+
+    pathsByJobId.set(row.id, paths)
+    fileIdsByJobId.set(row.id, fileIds)
+    assetIdsByJobId.set(row.id, assetIds)
+  }
+
+  const filePathById = new Map<string, string>()
+  if (allFileIds.size > 0) {
+    const fileRows = await db
+      .select({ id: mediaFiles.id, path: mediaFiles.path })
+      .from(mediaFiles)
+      .where(inArray(mediaFiles.id, [...allFileIds]))
+    for (const file of fileRows) {
+      filePathById.set(file.id, file.path)
+    }
+  }
+
+  const assetFilePathById = new Map<string, string>()
+  if (allAssetIds.size > 0) {
+    const assetRows = await db
+      .select({ assetId: mediaAssets.id, filePath: mediaFiles.path })
+      .from(mediaAssets)
+      .innerJoin(mediaFiles, eq(mediaAssets.fileId, mediaFiles.id))
+      .where(inArray(mediaAssets.id, [...allAssetIds]))
+    for (const asset of assetRows) {
+      assetFilePathById.set(asset.assetId, asset.filePath)
+    }
+  }
+
+  const result = new Map<string, string[]>()
+  for (const row of rows) {
+    const paths = pathsByJobId.get(row.id) ?? new Set<string>()
+
+    for (const fileId of fileIdsByJobId.get(row.id) ?? []) {
+      const path = filePathById.get(fileId)
+      if (path) {
+        paths.add(path)
+      }
+    }
+    for (const assetId of assetIdsByJobId.get(row.id) ?? []) {
+      const path = assetFilePathById.get(assetId)
+      if (path) {
+        paths.add(path)
+      }
+    }
+
+    result.set(row.id, [...paths])
+  }
+
+  return result
 }
 
 export async function getJob(db: Database, id: string) {
   const [row] = await db.select().from(jobs).where(eq(jobs.id, id)).limit(1)
   return row
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return {}
 }
 
 export async function claimNextJob(db: Database, workerId: string, now = new Date()) {

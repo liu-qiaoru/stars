@@ -22,6 +22,47 @@ describe("createSettings", () => {
       agentModel: "disabled",
       agentMaxSteps: 4,
       agentToolTimeoutMs: 10000,
+      jobCoordinatorEnabled: true,
+      jobCoordinatorIntervalMs: 5000,
+      jobCoordinatorEmbeddingLimit: 100,
+      jobCoordinatorOcrLimit: 500,
+      queryExpansionProvider: "none",
+      queryExpansionTimeoutMs: 10000,
+      deepseekBaseUrl: "https://api.deepseek.com",
+      deepseekApiKey: undefined,
+      deepseekModel: "deepseek-v4-flash",
+    });
+  });
+
+  test("读取 DeepSeek query expansion 配置并默认关闭", () => {
+    expect(
+      createSettings({
+        DATABASE_URL: "postgres://user:pass@localhost:5432/media_agent_test",
+        QDRANT_URL: "http://localhost:6333",
+      }),
+    ).toMatchObject({
+      queryExpansionProvider: "none",
+      queryExpansionTimeoutMs: 10000,
+      deepseekBaseUrl: "https://api.deepseek.com",
+      deepseekModel: "deepseek-v4-flash",
+    });
+
+    expect(
+      createSettings({
+        DATABASE_URL: "postgres://user:pass@localhost:5432/media_agent_test",
+        QDRANT_URL: "http://localhost:6333",
+        QUERY_EXPANSION_PROVIDER: "deepseek",
+        QUERY_EXPANSION_TIMEOUT_MS: "2500",
+        DEEPSEEK_BASE_URL: "https://api.deepseek.com",
+        DEEPSEEK_API_KEY: "test-key",
+        DEEPSEEK_MODEL: "deepseek-v4-flash",
+      }),
+    ).toMatchObject({
+      queryExpansionProvider: "deepseek",
+      queryExpansionTimeoutMs: 2500,
+      deepseekBaseUrl: "https://api.deepseek.com",
+      deepseekApiKey: "test-key",
+      deepseekModel: "deepseek-v4-flash",
     });
   });
 

@@ -17,6 +17,7 @@ export interface HybridSearchResult extends HybridCandidateInput {
   score: number
   score_kind: 'hybrid_score'
   primary_reason: HybridReason
+  confidence: 'high' | 'low'
 }
 
 interface MergeCandidate extends HybridCandidateInput {
@@ -28,6 +29,7 @@ const ADJACENT_VIDEO_WINDOW_SECONDS = 5
 const VECTOR_SOURCE_WEIGHT = 0.55
 const TEXT_SOURCE_WEIGHT = 0.45
 const MULTI_SIGNAL_BONUS = 0.08
+const MIN_VECTOR_ONLY_RAW_SCORE = 0.05
 const REASON_TIE_BREAK_ORDER: HybridReason[] = ['transcript_match', 'ocr_match', 'vector_match']
 
 // Hybrid reranker 是纯函数，方便用单测固定合并和打分语义。
@@ -150,6 +152,7 @@ function rankCandidate(candidate: MergeCandidate): HybridSearchResult {
     score,
     score_kind: 'hybrid_score',
     primary_reason: primaryReason,
+    confidence: confidenceForCandidate(candidate),
   }
 }
 
@@ -275,6 +278,22 @@ function compareRankedResults(left: HybridSearchResult, right: HybridSearchResul
   return (
     (left.start_time_seconds ?? Number.MAX_SAFE_INTEGER) -
     (right.start_time_seconds ?? Number.MAX_SAFE_INTEGER)
+  )
+}
+
+function confidenceForCandidate(candidate: HybridCandidateInput): HybridSearchResult['confidence'] {
+  if (candidate.reasons.some((reason) => reason !== 'vector_match')) {
+    return 'high'
+  }
+  return strongestRawVectorScore(candidate.source_scores) >= MIN_VECTOR_ONLY_RAW_SCORE ? 'high' : 'low'
+}
+
+function strongestRawVectorScore(sourceScores: Record<string, number>) {
+  return Math.max(
+    0,
+    ...Object.entries(sourceScores)
+      .filter(([sourceKey]) => sourceKey !== 'text_search')
+      .map(([, score]) => score),
   )
 }
 

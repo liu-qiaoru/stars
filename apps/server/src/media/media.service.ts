@@ -1,6 +1,10 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { DATABASE } from '../database/database.module.js'
-import { getFileWithAssetsAndVectors, type Database } from '../database/repositories.js'
+import {
+  getFileWithAssetsAndVectors,
+  getMediaFile,
+  type Database,
+} from '../database/repositories.js'
 
 @Injectable()
 export class MediaService {
@@ -46,6 +50,19 @@ export class MediaService {
     }
   }
 
+  async getMediaContent(id: string) {
+    const file = await getMediaFile(this.db, id)
+    if (!file) {
+      throw new NotFoundException('Media file not found')
+    }
+
+    return {
+      path: file.path,
+      media_type: file.mediaType,
+      content_type: contentTypeForPath(file.path, file.mediaType),
+    }
+  }
+
   private isStaleAsset(metadata: unknown) {
     // 重索引不会物理删除旧 asset，而是用 metadata_json.stale 标记，便于回溯和安全迁移。
     return (
@@ -55,4 +72,43 @@ export class MediaService {
       metadata.stale === true
     )
   }
+}
+
+function contentTypeForPath(path: string, mediaType: string) {
+  const extension = path.split('.').pop()?.toLowerCase()
+  if (extension) {
+    const byExtension = contentTypesByExtension[extension]
+    if (byExtension) {
+      return byExtension
+    }
+  }
+
+  if (mediaType === 'image') {
+    return 'image/jpeg'
+  }
+  if (mediaType === 'video') {
+    return 'video/mp4'
+  }
+  if (mediaType === 'audio') {
+    return 'audio/mpeg'
+  }
+  return 'application/octet-stream'
+}
+
+const contentTypesByExtension: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  m4v: 'video/x-m4v',
+  webm: 'video/webm',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
 }

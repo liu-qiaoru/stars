@@ -14,7 +14,7 @@ describe('AppShell', () => {
     expect(within(nav).getByRole('link', { name: /素材库/i })).toHaveAttribute('href', '/libraries')
     expect(within(nav).getByRole('link', { name: /搜索/i })).toHaveAttribute('href', '/search')
     expect(within(nav).getByRole('link', { name: /任务/i })).toHaveAttribute('href', '/jobs')
-    expect(within(nav).getByRole('link', { name: /媒体/i })).toHaveAttribute('href', '/media/demo')
+    expect(within(nav).queryByRole('link', { name: /媒体/i })).not.toBeInTheDocument()
     expect(within(nav).getByRole('link', { name: /助手/i })).toHaveAttribute('href', '/agent')
     expect(screen.getByText('当前页面')).toBeInTheDocument()
   })

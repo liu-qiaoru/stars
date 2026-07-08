@@ -1,8 +1,8 @@
-import { BadRequestException } from "@nestjs/common";
+import { BadRequestException, Logger } from "@nestjs/common";
 import { sql } from "drizzle-orm";
 import { Test } from "@nestjs/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { SETTINGS } from "../../src/config/settings.js";
+import { SETTINGS, type Settings } from "../../src/config/settings.js";
 import { DATABASE, PG_POOL } from "../../src/database/database.module.js";
 import { createLibrary, createMediaAsset, createMediaFile, createVectorRef } from "../../src/database/repositories.js";
 import { ModelGatewayService } from "../../src/model-gateway/model-gateway.service.js";
@@ -17,7 +17,7 @@ let service: SearchService;
 let db: Awaited<ReturnType<typeof createTestDatabase>>["db"];
 const search = vi.fn();
 const embedText = vi.fn();
-const testSettings = {
+const testSettings: Settings = {
   serverHost: "127.0.0.1",
   serverPort: 4000,
   databaseUrl: "postgres://user:pass@localhost:5432/media_agent_test",
@@ -28,7 +28,17 @@ const testSettings = {
   agentModel: "disabled",
   agentMaxSteps: 4,
   agentToolTimeoutMs: 10000,
+  jobCoordinatorEnabled: true,
+  jobCoordinatorIntervalMs: 5000,
+  jobCoordinatorEmbeddingLimit: 100,
+  jobCoordinatorOcrLimit: 500,
+  queryExpansionProvider: "none",
+  queryExpansionTimeoutMs: 10000,
+  deepseekBaseUrl: "https://api.deepseek.com",
+  deepseekApiKey: undefined,
+  deepseekModel: "deepseek-v4-flash",
 };
+let currentSettings: Settings = testSettings;
 
 beforeEach(async () => {
   const testDb = await createTestDatabase();
@@ -37,6 +47,7 @@ beforeEach(async () => {
   search.mockReset();
   embedText.mockReset();
   embedText.mockResolvedValue(Array.from({ length: 768 }, (_, index) => index / 768));
+  currentSettings = testSettings;
 
   const moduleRef = await Test.createTestingModule({
     imports: [SearchModule],
@@ -46,7 +57,7 @@ beforeEach(async () => {
     .overrideProvider(PG_POOL)
     .useValue(null)
     .overrideProvider(SETTINGS)
-    .useValue(testSettings)
+    .useValue(currentSettings)
     .overrideProvider(QDRANT_CLIENT)
     .useValue({ search })
     .overrideProvider(ModelGatewayService)
@@ -60,6 +71,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await closeModule?.();
   await closeDb?.();
+  vi.restoreAllMocks();
 });
 
 describe("search service", () => {
@@ -206,6 +218,11 @@ describe("search service", () => {
           ],
         },
         {
+          collection: "video_frame_vectors",
+          score_kind: "cosine_similarity",
+          results: [],
+        },
+        {
           collection: "text_search",
           score_kind: "ts_rank_cd",
           results: [],
@@ -269,6 +286,260 @@ describe("search service", () => {
     expect(search).not.toHaveBeenCalled();
   });
 
+  test("does not expand user queries with an internal dictionary", async () => {
+    const library = await createLibrary(db, { name: "Scenes", rootPath: "/video" });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/video/query-match.mp4",
+      relativePath: "query-match.mp4",
+      mediaType: "video",
+      sizeBytes: 100,
+      mtimeMs: 1710000000000,
+    });
+    const asset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "video_segment",
+      startTimeSeconds: "10",
+      endTimeSeconds: "20",
+    });
+    const pointId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    await createVectorRef(db, {
+      assetId: asset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: "video_segment_vectors",
+      pointId,
+      modelName: "mock",
+      modelVersion: "phase5",
+      vectorKind: "representative_frame_embedding",
+      vectorDim: 512,
+      distance: "Cosine",
+      contentHash: "query-hash",
+      indexProfile: "balanced",
+      status: "indexed",
+    });
+    const query = "用户输入的原始短语";
+    embedText.mockResolvedValue([1, ...Array.from({ length: 767 }, () => 0)]);
+    search.mockImplementation(async (collectionName: string) => {
+      if (collectionName === "video_segment_vectors") {
+        return [{ id: pointId, score: 0.72 }];
+      }
+      return [];
+    });
+    const logSpy = vi.spyOn(Logger.prototype, "log").mockImplementation(() => undefined);
+
+    const result = await service.search({ query, media_types: ["video"], limit: 10 });
+
+    expect(embedText).toHaveBeenCalledTimes(1);
+    expect(embedText).toHaveBeenCalledWith(query, 768);
+    expect(logSpy).toHaveBeenCalledWith('provider=none api_key=unset query_expansion=disabled');
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        asset_id: asset.id,
+        source_scores: { video_segment_vectors: 0.72 },
+      }),
+    ]);
+  });
+
+  test("expands vector queries through configured DeepSeek provider without hardcoded aliases", async () => {
+    currentSettings = {
+      ...testSettings,
+      queryExpansionProvider: "deepseek",
+      deepseekApiKey: "test-key",
+    };
+    await closeModule();
+    const moduleRef = await Test.createTestingModule({
+      imports: [SearchModule],
+    })
+      .overrideProvider(DATABASE)
+      .useValue(db)
+      .overrideProvider(PG_POOL)
+      .useValue(null)
+      .overrideProvider(SETTINGS)
+      .useValue(currentSettings)
+      .overrideProvider(QDRANT_CLIENT)
+      .useValue({ search })
+      .overrideProvider(ModelGatewayService)
+      .useValue({ embedText })
+      .compile();
+    service = moduleRef.get(SearchService);
+    closeModule = () => moduleRef.close();
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  variants: [
+                    { text: "架子鼓", weight: 1 },
+                    { text: "drum kit", weight: 0.9 },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const library = await createLibrary(db, { name: "Stage", rootPath: "/stage" });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/stage/drums.mp4",
+      relativePath: "drums.mp4",
+      mediaType: "video",
+      sizeBytes: 100,
+      mtimeMs: 1710000000000,
+    });
+    const asset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "video_segment",
+      startTimeSeconds: "0",
+      endTimeSeconds: "10",
+    });
+    const pointId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    await createVectorRef(db, {
+      assetId: asset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: "video_segment_vectors",
+      pointId,
+      modelName: "mock",
+      modelVersion: "phase5",
+      vectorKind: "representative_frame_embedding",
+      vectorDim: 512,
+      distance: "Cosine",
+      contentHash: "drums-hash",
+      indexProfile: "balanced",
+      status: "indexed",
+    });
+    embedText.mockImplementation(async (text: string) => {
+      if (text === "drum kit") {
+        return [2, ...Array.from({ length: 767 }, () => 0)];
+      }
+      return [1, ...Array.from({ length: 767 }, () => 0)];
+    });
+    search.mockImplementation(async (collectionName: string, request: { vector?: number[] }) => {
+      if (collectionName === "video_segment_vectors" && request.vector?.[0] === 2) {
+        return [{ id: pointId, score: 0.8 }];
+      }
+      return [];
+    });
+    const logSpy = vi.spyOn(Logger.prototype, "log").mockImplementation(() => undefined);
+
+    const result = await service.search({ query: "架子鼓", media_types: ["video"], limit: 10 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.deepseek.com/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ authorization: "Bearer test-key" }),
+      }),
+    );
+    expect(embedText).toHaveBeenCalledWith("架子鼓", 768);
+    expect(embedText).toHaveBeenCalledWith("drum kit", 768);
+    expect(result.results[0]).toMatchObject({ asset_id: asset.id });
+    expect(result.results[0]?.source_scores.video_segment_vectors).toBeCloseTo(0.72, 5);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('provider=deepseek variants="架子鼓"@1.00 original, "drum kit"@0.90 deepseek'),
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'collection=video_segment_vectors variant="drum kit" source=deepseek weight=0.90 raw_hits=1 top_raw_score=0.8 top_weighted_score=0.7200000000000001',
+      ),
+    );
+
+    fetchMock.mockRestore();
+  });
+
+  test("searches video frame vectors and merges frame hits with nearby segments", async () => {
+    const library = await createLibrary(db, { name: "Video", rootPath: "/video" });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/video/scene.mp4",
+      relativePath: "scene.mp4",
+      mediaType: "video",
+      sizeBytes: 100,
+      mtimeMs: 1710000000000,
+    });
+    const segmentAsset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "video_segment",
+      startTimeSeconds: "10",
+      endTimeSeconds: "20",
+    });
+    const frameAsset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "video_frame",
+      frameTimeSeconds: "12",
+    });
+    const segmentPointId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const framePointId = "99999999-9999-4999-8999-999999999999";
+    await createVectorRef(db, {
+      assetId: segmentAsset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: "video_segment_vectors",
+      pointId: segmentPointId,
+      modelName: "mock",
+      modelVersion: "phase5",
+      vectorKind: "representative_frame_embedding",
+      vectorDim: 512,
+      distance: "Cosine",
+      contentHash: "segment-hash",
+      indexProfile: "balanced",
+      status: "indexed",
+    });
+    await createVectorRef(db, {
+      assetId: frameAsset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: "video_frame_vectors",
+      pointId: framePointId,
+      modelName: "mock",
+      modelVersion: "phase5",
+      vectorKind: "frame_embedding",
+      vectorDim: 512,
+      distance: "Cosine",
+      contentHash: "frame-hash",
+      indexProfile: "balanced",
+      status: "indexed",
+    });
+    search.mockImplementation(async (collectionName: string) => {
+      if (collectionName === "video_segment_vectors") {
+        return [{ id: segmentPointId, score: 0.58 }];
+      }
+      if (collectionName === "video_frame_vectors") {
+        return [{ id: framePointId, score: 0.81 }];
+      }
+      return [];
+    });
+
+    const result = await service.search({ query: "beach", media_types: ["video"], limit: 10 });
+
+    expect(search).toHaveBeenCalledWith("video_frame_vectors", expect.any(Object));
+    expect(result.groups.map((group) => group.collection)).toEqual([
+      "video_segment_vectors",
+      "video_frame_vectors",
+      "text_search",
+    ]);
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        asset_id: frameAsset.id,
+        merged_asset_ids: [segmentAsset.id, frameAsset.id],
+        start_time_seconds: 10,
+        end_time_seconds: 20,
+        source_scores: {
+          video_segment_vectors: 0.58,
+          video_frame_vectors: 0.81,
+        },
+      }),
+    ]);
+  });
+
   test("audio-only search returns transcript matches from PostgreSQL FTS", async () => {
     const library = await createLibrary(db, { name: "Interviews", rootPath: "/audio" });
     const file = await createMediaFile(db, {
@@ -314,6 +585,7 @@ describe("search service", () => {
           score: expect.any(Number),
           score_kind: "hybrid_score",
           primary_reason: "transcript_match",
+          confidence: "high",
           reasons: ["transcript_match"],
           source_scores: { text_search: expect.any(Number) },
         },
@@ -404,6 +676,7 @@ describe("search service", () => {
         score: expect.any(Number),
         score_kind: "hybrid_score",
         primary_reason: "ocr_match",
+        confidence: "high",
         reasons: ["ocr_match"],
         source_scores: { text_search: expect.any(Number) },
       },

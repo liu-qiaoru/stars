@@ -1,4 +1,5 @@
 import hashlib
+import math
 import os
 import uuid
 
@@ -34,6 +35,8 @@ VECTOR_CONFIGS = {
 SCENE_MIN_SECONDS = 3.0
 SCENE_MAX_COUNT = 2000
 SCENE_DETECT_THRESHOLD = 27.0
+KEYFRAME_DENSITIES = {"light", "balanced", "dense"}
+KEYFRAME_DENSITY = "dense"
 
 
 def deterministic_point_id(*, asset_id, collection_name, model_name, model_version, vector_kind, content_hash):
@@ -105,13 +108,49 @@ def merge_short_scenes(scenes, *, min_seconds=SCENE_MIN_SECONDS):
     return compacted
 
 
-def extra_keyframe_times(start, end):
+def extra_keyframe_times(start, end, density=KEYFRAME_DENSITY):
     duration = end - start
+    if density == "dense":
+        if duration <= 8.0:
+            return distributed_keyframe_times(start, end, 1)
+        if duration <= 30.0:
+            return distributed_keyframe_times(start, end, 2)
+        if duration <= 90.0:
+            return distributed_keyframe_times(start, end, min(6, max(3, math.ceil(duration / 12.0))))
+        return distributed_keyframe_times(start, end, min(10, max(6, math.ceil(duration / 15.0))))
+    if density == "balanced":
+        if duration <= 8.0:
+            return distributed_keyframe_times(start, end, 1)
+        if duration <= 30.0:
+            return distributed_keyframe_times(start, end, 2)
+        if duration <= 90.0:
+            return distributed_keyframe_times(start, end, min(4, max(2, math.ceil(duration / 18.0))))
+        return distributed_keyframe_times(start, end, min(6, max(4, math.ceil(duration / 24.0))))
     if duration <= 15.0:
         return []
     if duration <= 45.0:
         return [start + duration / 3.0]
     return [start + duration / 3.0, start + (duration * 2.0) / 3.0]
+
+
+def distributed_keyframe_times(start, end, count):
+    if count <= 0:
+        return []
+    duration = end - start
+    candidate_count = count + 1
+    fractions = [
+        (index + 1) / (candidate_count + 1)
+        for index in range(candidate_count)
+    ]
+    selected = [fraction for fraction in fractions if abs(fraction - 0.5) > 0.001][:count]
+    return [start + duration * fraction for fraction in selected]
+
+
+def normalize_keyframe_density(value):
+    density = (value or KEYFRAME_DENSITY).strip().lower()
+    if density not in KEYFRAME_DENSITIES:
+        return KEYFRAME_DENSITY
+    return density
 
 
 class IndexMediaHandler:
@@ -127,6 +166,7 @@ class IndexMediaHandler:
         scene_detector=detect_scenes_pyscenedetect,
         scene_min_seconds=None,
         scene_max_count=None,
+        keyframe_density=None,
         job_repository=None,
     ):
         self.repository = repository
@@ -134,6 +174,7 @@ class IndexMediaHandler:
         self.scene_detector = scene_detector
         self.scene_min_seconds = float(scene_min_seconds or os.environ.get("SCENE_MIN_SECONDS", SCENE_MIN_SECONDS))
         self.scene_max_count = int(scene_max_count or os.environ.get("SCENE_MAX_COUNT", SCENE_MAX_COUNT))
+        self.keyframe_density = normalize_keyframe_density(keyframe_density or os.environ.get("KEYFRAME_DENSITY"))
 
     def handle(self, job_input):
         file = self.repository.get_media_file(job_input["file_id"])
@@ -174,7 +215,7 @@ class IndexMediaHandler:
             )
             # Strategy changes can produce a different segment/frame graph. Mark
             # only the old graph stale before upserting the new deterministic assets.
-            self.repository.invalidate_video_index_assets(file["id"], invalidation_strategy)
+            self.repository.invalidate_video_index_assets(file["id"], invalidation_strategy, self.keyframe_density)
 
         for asset_input in asset_inputs:
             # Create/refresh the PostgreSQL asset first, then derive a stable Qdrant point id from that asset.
@@ -233,6 +274,7 @@ class IndexMediaHandler:
             **({"fallback_reason": fallback_reason} if fallback_reason else {}),
             **({"scenes_detected": scenes_detected} if media_type == "video" else {}),
             **({"keyframes_selected": keyframes_selected} if media_type == "video" else {}),
+            **({"keyframe_density": self.keyframe_density} if media_type == "video" else {}),
         }
 
     def _video_asset_inputs(self, file, requested_strategy):
@@ -273,11 +315,12 @@ class IndexMediaHandler:
                     "scene_id": scene_id,
                     "keyframe_index": 0,
                     "segment_strategy": "scene_detection",
+                    "keyframe_density": self.keyframe_density,
                     "representative_frame_time_seconds": midpoint,
                 },
                 "collection_name": "video_segment_vectors",
             })
-            for keyframe_index, frame_time in enumerate(extra_keyframe_times(start, end), start=1):
+            for keyframe_index, frame_time in enumerate(extra_keyframe_times(start, end, self.keyframe_density), start=1):
                 if abs(frame_time - midpoint) < 0.001:
                     continue
                 asset_inputs.append({
@@ -289,6 +332,7 @@ class IndexMediaHandler:
                         "scene_id": scene_id,
                         "keyframe_index": keyframe_index,
                         "segment_strategy": "scene_detection",
+                        "keyframe_density": self.keyframe_density,
                     },
                     "collection_name": "video_frame_vectors",
                 })
@@ -309,6 +353,7 @@ class IndexMediaHandler:
                     "scene_id": None,
                     "keyframe_index": 0,
                     "segment_strategy": segment_strategy,
+                    "keyframe_density": self.keyframe_density,
                 },
                 "collection_name": "video_segment_vectors",
             })

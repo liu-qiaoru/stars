@@ -56,6 +56,35 @@ describe("typed API client", () => {
     );
   });
 
+  test("requests jobs with pagination query parameters", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ items: [], total: 160, limit: 500, offset: 0 }), {
+        status: 200,
+      }),
+    );
+    const client = createApiClient({ baseUrl: "http://api.local", fetcher: fetchMock });
+
+    await expect(client.listJobs({ limit: 500, offset: 0 })).resolves.toMatchObject({
+      total: 160,
+      limit: 500,
+      offset: 0,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://api.local/jobs?limit=500&offset=0",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  test("builds media content URLs for previews", () => {
+    const client = createApiClient({ baseUrl: "http://api.local", fetcher: fetchMock });
+
+    expect(client.mediaContentUrl("file-1")).toBe("http://api.local/media/file-1/content");
+    expect(client.mediaContentUrl("file-1", { startTimeSeconds: 12.5 })).toBe(
+      "http://api.local/media/file-1/content#t=12.5",
+    );
+  });
+
   test("posts clip export requests with time range", async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ job_id: "job-1", status: "queued" }), { status: 200 }));
     const client = createApiClient({ baseUrl: "http://api.local", fetcher: fetchMock });

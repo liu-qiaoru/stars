@@ -239,7 +239,7 @@ describe("agent API", () => {
         }),
       ]),
     });
-    await expect(jobsController.listJobs()).resolves.toEqual({ items: [] });
+    await expect(jobsController.listJobs()).resolves.toMatchObject({ items: [], total: 0 });
 
     const confirmed = await agentController.confirmToolCall(created.run_id, { tool_call_id: "export-1" });
 

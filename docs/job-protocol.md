@@ -146,12 +146,16 @@ scan_library 完成 → 为每个 created/updated file 创建 probe_media job
 probe_media 完成 → 对视频创建 index_media job（segment_strategy='scene_detection'）+ transcribe_audio job；对音频只创建 transcribe_audio job；对图片创建 index_media job（image 路径）
 index_media 完成 → 创建 assets 和 pending vector_refs
 transcribe_audio 完成 → 创建 text_chunk assets（text_content + start/end），FTS tsvector 由生成列自动维护
-POST /jobs/embedding/queue-pending → 为 pending vector_refs 创建 embed_image / embed_video_frame jobs
+JobsCoordinatorService 自动扫描 pending vector_refs → 创建 embed_image / embed_video_frame jobs
+POST /jobs/embedding/queue-pending → 手动补漏，同样为 pending vector_refs 创建 embed_image / embed_video_frame jobs
 embedding job 完成 → Qdrant point 已写入，vector_ref.status = indexed
 index_media 完成 → 为 image / video_frame asset 创建 run_ocr job（asset 已存在，asset 粒度）
-POST /jobs/ocr/queue-pending → 按 library_id / file_id 扫描待 OCR asset，批量创建 run_ocr jobs
+JobsCoordinatorService 自动扫描待 OCR asset → 批量创建 run_ocr jobs
+POST /jobs/ocr/queue-pending → 手动补漏，按 library_id / file_id 扫描待 OCR asset，批量创建 run_ocr jobs
 run_ocr 完成 → OCR 文本写回被 OCR asset 的 text_content + metadata_json.ocr，FTS tsvector 自动维护
 ```
+
+OCR 补队列会把同一 asset 上已有的 `run_ocr` 尝试记录（queued/running/succeeded/failed）视为已覆盖，避免 OCR 失败或无文本结果时被 coordinator 无限创建新 job。重新 OCR 需要显式重置/force 入口。
 
 `media_files.index_status` 状态流转：
 
@@ -249,7 +253,7 @@ Input：
 `segment_strategy` 取值：
 
 - `fixed_30s`：固定 30 秒切片（Phase 5/10 默认）。
-- `scene_detection`：Phase 11。用 PySceneDetect 检测 scene 边界替代固定切片。每个 scene 生成 1 个代表帧（中点）`video_segment` asset → `video_segment_vectors`，并按 scene 时长生成 0-2 个关键帧 `video_frame` asset → `video_frame_vectors`（关键帧与代表帧不重复）。scene 短于 `SCENE_MIN_SECONDS`（默认 3s）时并入相邻 scene。PySceneDetect 抛错、检测到 0 个 scene 或 scene 数超过上限（默认 2000）时回退 `fixed_30s`。详见 `docs/implementation-plan.md` Phase 11。
+- `scene_detection`：Phase 11。用 PySceneDetect 检测 scene 边界替代固定切片。每个 scene 生成 1 个代表帧（中点）`video_segment` asset → `video_segment_vectors`，并按 `KEYFRAME_DENSITY` 生成额外关键帧 `video_frame` asset → `video_frame_vectors`（关键帧与代表帧不重复）。默认 `KEYFRAME_DENSITY=dense`：短 scene 也会补额外关键帧，中长 scene 按时长增加，单 scene 最多 10 个额外关键帧；可切到 `balanced` / `light` 控制成本。scene 短于 `SCENE_MIN_SECONDS`（默认 3s）时并入相邻 scene。PySceneDetect 抛错、检测到 0 个 scene 或 scene 数超过上限（默认 2000）时回退 `fixed_30s`。详见 `docs/implementation-plan.md` Phase 11。
 
 仅视频受 `segment_strategy` 影响；图片固定走 `image_vectors` 单 asset 路径。
 
@@ -280,8 +284,8 @@ jobs.*
 ```text
 1. TypeScript server 创建 index_media job。
 2. Python worker 执行 index_media，按 segment_strategy 创建 assets（图片为 image；视频为 video_segment + video_frame）和 pending vector_refs。重索引/策略切换时先失效该 file 下旧 video_segment/video_frame assets 及 vector_refs。
-3. TypeScript server 的索引协调入口扫描 pending vector_refs。
-4. 协调任务按 collection 和 asset_type 创建 embed_image 或 embed_video_frame jobs。
+3. TypeScript server 的 `JobsCoordinatorService` 定期扫描 pending vector_refs。
+4. 协调任务按 collection 和 asset_type 创建 embed_image 或 embed_video_frame jobs。`POST /jobs/embedding/queue-pending` 保留为手动补漏入口。
 ```
 
 推荐该解耦方式，避免 index_media 同时承担资产生成、真实模型推理和下游任务编排。

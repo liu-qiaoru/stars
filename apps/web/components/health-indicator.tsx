@@ -6,8 +6,8 @@ import { createApiClient } from '../lib/api-client'
 type HealthStatus = 'checking' | 'ok' | 'error'
 
 const statusConfig: Record<HealthStatus, { dot: string; label: string }> = {
-  checking: { dot: 'bg-[var(--ash)]', label: '检查中' },
-  ok: { dot: 'bg-emerald-500', label: '已连接' },
+  checking: { dot: 'bg-[var(--mute)]', label: '检查中' },
+  ok: { dot: 'bg-[var(--link)]', label: '已连接' },
   error: { dot: 'bg-[var(--error)]', label: '未连接' },
 }
 

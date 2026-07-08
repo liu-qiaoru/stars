@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
 import type { QdrantClient, Schemas } from '@qdrant/js-client-rest'
 import { mediaTypes } from '@local-media-agent/shared/constants'
 import { z } from 'zod'
@@ -10,6 +10,7 @@ import {
 } from '../database/repositories.js'
 import { QDRANT_CLIENT } from '../qdrant/qdrant.module.js'
 import { VECTOR_COLLECTIONS, type VectorCollectionName } from '../qdrant/vector-collections.js'
+import { QueryExpansionService, type QueryVariant } from './query-expansion.service.js'
 import {
   buildHybridResults,
   type HybridCandidateInput,
@@ -20,6 +21,7 @@ import { SearchQueryVectorService } from './search-query-vector.service.js'
 const supportedSearchCollections = [
   { collection: 'image_vectors', mediaType: 'image' },
   { collection: 'video_segment_vectors', mediaType: 'video' },
+  { collection: 'video_frame_vectors', mediaType: 'video' },
 ] as const satisfies { collection: VectorCollectionName; mediaType: (typeof mediaTypes)[number] }[]
 
 // SearchService 负责把多个召回来源统一成一个响应：
@@ -44,10 +46,13 @@ type SearchResultGroup = {
 
 @Injectable()
 export class SearchService {
+  private readonly logger = new Logger(SearchService.name)
+
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(QDRANT_CLIENT) private readonly qdrantClient: Pick<QdrantClient, 'search'>,
     @Inject(SearchQueryVectorService) private readonly queryVectorService: SearchQueryVectorService,
+    @Inject(QueryExpansionService) private readonly queryExpansionService: QueryExpansionService,
   ) {}
 
   async search(input: SearchRequest) {
@@ -55,22 +60,34 @@ export class SearchService {
     const sourceLimit = this.sourceLimit(request)
     const vectorMediaTypes = request.media_types.length
       ? request.media_types
-      : supportedSearchCollections.map((entry) => entry.mediaType)
+      : [...new Set(supportedSearchCollections.map((entry) => entry.mediaType))]
     const selectedCollections = supportedSearchCollections.filter((entry) =>
       vectorMediaTypes.includes(entry.mediaType),
     )
+    const queryVectorCache = new Map<string, Promise<number[]>>()
+    const embedQuery = (query: string, vectorDim: number) => {
+      const key = `${vectorDim}:${query}`
+      const cached = queryVectorCache.get(key)
+      if (cached) {
+        return cached
+      }
+      const promise = this.queryVectorService.embedQuery(query, vectorDim)
+      queryVectorCache.set(key, promise)
+      return promise
+    }
+    const queryVariants = selectedCollections.length
+      ? await this.queryExpansionService.expand(request.query)
+      : []
 
     const vectorGroups = await Promise.all(
       selectedCollections.map(async ({ collection }) => {
         const config = VECTOR_COLLECTIONS[collection]
-        const points = await this.qdrantClient.search(collection, {
-          // Search API 只读取 Qdrant；query embedding 由本地 model service 同步生成，批量媒体 embedding 仍走 worker job。
-          vector: await this.queryVectorService.embedQuery(request.query, config.vectorDim),
-          filter: this.buildFilter(request.library_ids),
+        const points = await this.searchCollection(collection, {
+          queryVariants,
+          vectorDim: config.vectorDim,
+          libraryIds: request.library_ids,
           limit: sourceLimit,
-          offset: 0,
-          with_payload: false,
-          with_vector: false,
+          embedQuery,
         })
         const results = await this.hydrateResults(collection, points, {
           mediaTypes: vectorMediaTypes,
@@ -115,6 +132,56 @@ export class SearchService {
     return { must: [{ key: 'library_id', match: { any: libraryIds } }] }
   }
 
+  private async searchCollection(
+    collection: VectorCollectionName,
+    input: {
+      queryVariants: QueryVariant[]
+      vectorDim: number
+      libraryIds: string[]
+      limit: number
+      embedQuery: (query: string, vectorDim: number) => Promise<number[]>
+    },
+  ) {
+    const byPointId = new Map<string, Schemas['ScoredPoint']>()
+    for (const variant of input.queryVariants) {
+      const points = await this.qdrantClient.search(collection, {
+        // Search API 只读取 Qdrant；query embedding 由本地 model service 同步生成，批量媒体 embedding 仍走 worker job。
+        vector: await input.embedQuery(variant.text, input.vectorDim),
+        filter: this.buildFilter(input.libraryIds),
+        limit: input.limit,
+        offset: 0,
+        with_payload: false,
+        with_vector: false,
+      })
+      const shouldLogExpansionDiagnostics =
+        input.queryVariants.length > 1 || variant.source !== 'original'
+      if (shouldLogExpansionDiagnostics) {
+        const topRawScore = Math.max(0, ...points.map((point) => point.score))
+        this.logger.log(
+          `collection=${collection} variant="${variant.text}" source=${variant.source} weight=${variant.weight.toFixed(
+            2,
+          )} raw_hits=${points.length} top_raw_score=${topRawScore} top_weighted_score=${
+            topRawScore * variant.weight
+          }`,
+        )
+      }
+      for (const point of points) {
+        if (typeof point.id !== 'string') {
+          continue
+        }
+        const weightedScore = point.score * variant.weight
+        const existing = byPointId.get(point.id)
+        if (!existing || weightedScore > existing.score) {
+          byPointId.set(point.id, { ...point, score: weightedScore })
+        }
+      }
+    }
+
+    return [...byPointId.values()]
+      .sort((left, right) => right.score - left.score)
+      .slice(0, input.limit)
+  }
+
   private sourceLimit(request: ParsedSearchRequest) {
     // 先 overfetch 再合并/分页，避免同 asset 或相邻视频窗口折叠后结果池过小。
     // 300 是当前内存合并的保护上限，深分页的限制记录在 API contract 中。
@@ -141,14 +208,20 @@ export class SearchService {
       if (!row) {
         return []
       }
+      const frameTimeSeconds =
+        row.frameTimeSeconds === null ? null : Number(row.frameTimeSeconds)
+      const startTimeSeconds =
+        row.startTimeSeconds === null ? frameTimeSeconds : Number(row.startTimeSeconds)
+      const endTimeSeconds =
+        row.endTimeSeconds === null ? frameTimeSeconds : Number(row.endTimeSeconds)
       return [
         {
           asset_id: row.assetId,
           file_id: row.fileId,
           media_type: row.mediaType,
           path: row.path,
-          start_time_seconds: row.startTimeSeconds === null ? null : Number(row.startTimeSeconds),
-          end_time_seconds: row.endTimeSeconds === null ? null : Number(row.endTimeSeconds),
+          start_time_seconds: startTimeSeconds,
+          end_time_seconds: endTimeSeconds,
           scene_id: this.sceneId(row.metadataJson),
           score: point.score,
           reason: 'vector_match',

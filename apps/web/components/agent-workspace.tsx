@@ -53,7 +53,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
   return (
     <section className="panel max-w-3xl">
       <div className="flex items-center gap-3">
-        <span className="grid size-12 place-items-center rounded-full bg-[var(--surface-card)]">
+        <span className="grid size-11 place-items-center rounded-lg border border-[var(--hairline)] bg-[var(--canvas-soft)]">
           <Bot aria-hidden="true" size={22} />
         </span>
         <div>
@@ -74,7 +74,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
           启动任务
         </button>
       </form>
-      <div className="mt-6 rounded-[16px] bg-[var(--surface-card)] p-4">
+      <div className="mt-6 rounded-lg border border-[var(--hairline)] bg-[var(--canvas-soft)] p-4">
         <p className="text-sm font-bold">外部大模型</p>
         <p className="muted">{statusMessage}</p>
       </div>

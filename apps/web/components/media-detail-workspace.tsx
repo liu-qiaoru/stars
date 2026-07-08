@@ -47,7 +47,7 @@ export function MediaDetailWorkspace({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_360px]">
-      <section className="pin-card-large">
+      <section className="overflow-hidden rounded-xl bg-[var(--canvas)] shadow-[var(--shadow-4)]">
         <MediaThumbnail index={1} label={media.path} className="aspect-video" />
       </section>
       <aside className="panel">

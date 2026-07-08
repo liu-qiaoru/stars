@@ -11,6 +11,7 @@ const mediaTypeLabels: Record<MediaType, string> = {
 const collectionLabels: Record<string, string> = {
   image_vectors: '图片向量',
   video_segment_vectors: '视频片段向量',
+  video_frame_vectors: '视频帧向量',
 }
 
 const scoreKindLabels: Record<string, string> = {
@@ -61,6 +62,10 @@ export function formatScoreKind(scoreKind: string) {
 
 export function formatReason(reason: string) {
   return reasonLabels[reason] ?? reason
+}
+
+export function formatConfidence(confidence: string) {
+  return confidence === 'low' ? '相关性较弱' : '高相关'
 }
 
 export function formatJobType(jobType: string) {

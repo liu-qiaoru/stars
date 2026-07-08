@@ -1,8 +1,10 @@
 import { Test } from "@nestjs/testing";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SETTINGS } from "../../src/config/settings.js";
 import { DATABASE, PG_POOL } from "../../src/database/database.module.js";
 import { createJob, createLibrary, createMediaAsset, createMediaFile, createVectorRef } from "../../src/database/repositories.js";
+import { jobs, vectorRefs } from "../../src/database/schema.js";
 import { JobsController } from "../../src/jobs/jobs.controller.js";
 import { JobsModule } from "../../src/jobs/jobs.module.js";
 import { JobsService } from "../../src/jobs/jobs.service.js";
@@ -114,6 +116,107 @@ describe("jobs service", () => {
     });
   });
 
+  test("jobs list 支持分页并返回总数，不把页面固定截断为 50 条", async () => {
+    for (let index = 0; index < 60; index += 1) {
+      await createJob(db, {
+        jobType: "scan_library",
+        inputJson: {
+          library_id: `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+          root_path: `/media/${index}`,
+          scan_mode: "mtime_size",
+        },
+      });
+    }
+
+    await expect(service.listJobs({ limit: 100, offset: 0 })).resolves.toMatchObject({
+      total: 60,
+      limit: 100,
+      offset: 0,
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          input: expect.objectContaining({ root_path: "/media/59" }),
+        }),
+        expect.objectContaining({
+          input: expect.objectContaining({ root_path: "/media/0" }),
+        }),
+      ]),
+    });
+
+    await expect(service.listJobs({ limit: 25, offset: 25 })).resolves.toMatchObject({
+      total: 60,
+      limit: 25,
+      offset: 25,
+      items: expect.any(Array),
+    });
+  });
+
+  test("jobs list 返回任务所属文件路径", async () => {
+    const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/media/clip.mp4",
+      relativePath: "clip.mp4",
+      mediaType: "video",
+      sizeBytes: 20,
+      mtimeMs: 2,
+    });
+    const imageFile = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/media/poster.png",
+      relativePath: "poster.png",
+      mediaType: "image",
+      sizeBytes: 10,
+      mtimeMs: 1,
+    });
+    const imageAsset = await createMediaAsset(db, {
+      fileId: imageFile.id,
+      assetType: "image",
+      path: "/media/poster.png",
+    });
+
+    await createJob(db, {
+      jobType: "index_media",
+      inputJson: {
+        file_id: file.id,
+        index_profile: "balanced",
+        segment_strategy: "fixed_30s",
+      },
+    });
+    await createJob(db, {
+      jobType: "run_ocr",
+      inputJson: {
+        asset_ids: [imageAsset.id],
+        engine: "paddleocr",
+        language: "ch",
+      },
+    });
+    await createJob(db, {
+      jobType: "probe_media",
+      inputJson: {
+        file_id: file.id,
+        path: "/media/clip.mp4",
+        media_type: "video",
+      },
+    });
+
+    await expect(service.listJobs({ limit: 10, offset: 0 })).resolves.toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          job_type: "index_media",
+          file_paths: ["/media/clip.mp4"],
+        }),
+        expect.objectContaining({
+          job_type: "run_ocr",
+          file_paths: ["/media/poster.png"],
+        }),
+        expect.objectContaining({
+          job_type: "probe_media",
+          file_paths: ["/media/clip.mp4"],
+        }),
+      ]),
+    });
+  });
+
   test("将 pending image 和 video segment vector_refs 转成 embedding jobs", async () => {
     const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
     const imageFile = await createMediaFile(db, {
@@ -210,6 +313,194 @@ describe("jobs service", () => {
     );
   });
 
+  test("embedding queue-pending 不会为已经失败的 vector_ref 反复创建新 job", async () => {
+    const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
+    const videoFile = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/media/clip.mp4",
+      relativePath: "clip.mp4",
+      mediaType: "video",
+      sizeBytes: 20,
+      mtimeMs: 2,
+    });
+    const segmentAsset = await createMediaAsset(db, {
+      fileId: videoFile.id,
+      assetType: "video_segment",
+      startTimeSeconds: "30",
+      endTimeSeconds: "60",
+      contentHash: "segment-hash",
+    });
+    await createVectorRef(db, {
+      assetId: segmentAsset.id,
+      fileId: videoFile.id,
+      libraryId: library.id,
+      collectionName: "video_segment_vectors",
+      pointId: "33333333-3333-4333-8333-333333333333",
+      modelName: "google/siglip-base-patch16-224",
+      modelVersion: "siglip-base-patch16-224",
+      vectorKind: "representative_frame_embedding",
+      vectorDim: 768,
+      distance: "Cosine",
+      contentHash: "segment-hash",
+      indexProfile: "balanced",
+    });
+    const failedJob = await createJob(db, {
+      jobType: "embed_video_frame",
+      inputJson: {
+        asset_id: segmentAsset.id,
+        frame_path: "/media/clip.mp4",
+        frame_time_seconds: 45,
+        collection: "video_segment_vectors",
+        model_name: "google/siglip-base-patch16-224",
+        model_version: "siglip-base-patch16-224",
+      },
+    });
+    await db
+      .update(jobs)
+      .set({
+        status: "failed",
+        errorMessage: "ffmpeg failed",
+        finishedAt: new Date(),
+      })
+      .where(eq(jobs.id, failedJob.id));
+
+    await expect(service.queuePendingEmbeddingJobs(10)).resolves.toEqual({
+      scanned: 1,
+      created: 0,
+      skipped: 1,
+    });
+    const listed = await service.listJobs({ limit: 10, offset: 0 });
+
+    expect(listed.items.filter((job) => job.job_type === "embed_video_frame")).toHaveLength(1);
+  });
+
+  test("embedding queue-pending 不会为已尝试过的 pending ref 创建重复 job", async () => {
+    const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
+    const imageFile = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/media/cat.jpg",
+      relativePath: "cat.jpg",
+      mediaType: "image",
+      sizeBytes: 10,
+      mtimeMs: 1,
+    });
+    const imageAsset = await createMediaAsset(db, {
+      fileId: imageFile.id,
+      assetType: "image",
+      path: "/media/cat.jpg",
+      contentHash: "cat-hash",
+    });
+    await createVectorRef(db, {
+      assetId: imageAsset.id,
+      fileId: imageFile.id,
+      libraryId: library.id,
+      collectionName: "image_vectors",
+      pointId: "44444444-4444-4444-8444-444444444444",
+      modelName: "google/siglip-base-patch16-224",
+      modelVersion: "siglip-base-patch16-224",
+      vectorKind: "image_embedding",
+      vectorDim: 768,
+      distance: "Cosine",
+      contentHash: "cat-hash",
+      indexProfile: "balanced",
+    });
+    const succeededJob = await createJob(db, {
+      jobType: "embed_image",
+      inputJson: {
+        asset_id: imageAsset.id,
+        path: "/media/cat.jpg",
+        collection: "image_vectors",
+        model_name: "google/siglip-base-patch16-224",
+        model_version: "siglip-base-patch16-224",
+      },
+    });
+    await db
+      .update(jobs)
+      .set({
+        status: "succeeded",
+        progress: 100,
+        resultJson: { point_id: "44444444-4444-4444-8444-444444444444" },
+        finishedAt: new Date(),
+      })
+      .where(eq(jobs.id, succeededJob.id));
+
+    await expect(service.queuePendingEmbeddingJobs(10)).resolves.toEqual({
+      scanned: 1,
+      created: 0,
+      skipped: 1,
+    });
+    const listed = await service.listJobs({ limit: 10, offset: 0 });
+
+    expect(listed.items.filter((job) => job.job_type === "embed_image")).toHaveLength(1);
+  });
+
+  test("embedding queue-pending 允许 reset 后的 vector_ref 重新创建 job", async () => {
+    const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
+    const imageFile = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/media/reset.jpg",
+      relativePath: "reset.jpg",
+      mediaType: "image",
+      sizeBytes: 10,
+      mtimeMs: 1,
+    });
+    const imageAsset = await createMediaAsset(db, {
+      fileId: imageFile.id,
+      assetType: "image",
+      path: "/media/reset.jpg",
+      contentHash: "reset-hash",
+    });
+    const ref = await createVectorRef(db, {
+      assetId: imageAsset.id,
+      fileId: imageFile.id,
+      libraryId: library.id,
+      collectionName: "image_vectors",
+      pointId: "55555555-5555-4555-8555-555555555555",
+      modelName: "google/siglip-base-patch16-224",
+      modelVersion: "siglip-base-patch16-224",
+      vectorKind: "image_embedding",
+      vectorDim: 768,
+      distance: "Cosine",
+      contentHash: "reset-hash",
+      indexProfile: "balanced",
+    });
+    const oldJob = await createJob(db, {
+      jobType: "embed_image",
+      inputJson: {
+        asset_id: imageAsset.id,
+        path: "/media/reset.jpg",
+        collection: "image_vectors",
+        model_name: "google/siglip-base-patch16-224",
+        model_version: "siglip-base-patch16-224",
+      },
+    });
+    await db
+      .update(jobs)
+      .set({
+        status: "succeeded",
+        progress: 100,
+        createdAt: new Date("2026-06-01T00:00:00Z"),
+        finishedAt: new Date("2026-06-01T00:00:00Z"),
+      })
+      .where(eq(jobs.id, oldJob.id));
+    await db
+      .update(vectorRefs)
+      .set({
+        status: "pending",
+        updatedAt: new Date("2026-06-01T00:01:00Z"),
+      })
+      .where(eq(vectorRefs.id, ref.id));
+
+    await expect(service.queuePendingEmbeddingJobs(10)).resolves.toEqual({
+      scanned: 1,
+      created: 1,
+      skipped: 0,
+    });
+    const listed = await service.listJobs({ limit: 10, offset: 0 });
+
+    expect(listed.items.filter((job) => job.job_type === "embed_image")).toHaveLength(2);
+  });
+
   test("将未 OCR 的 image 和 video_frame assets 批量转成 run_ocr jobs", async () => {
     const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
     const imageFile = await createMediaFile(db, {
@@ -271,6 +562,91 @@ describe("jobs service", () => {
         },
       }),
     ]);
+  });
+
+  test("OCR queue-pending 不会为已经失败的 asset 反复创建新 job", async () => {
+    const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/media/poster.png",
+      relativePath: "poster.png",
+      mediaType: "image",
+      sizeBytes: 10,
+      mtimeMs: 1,
+    });
+    const asset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "image",
+      path: "/media/poster.png",
+    });
+    const failedJob = await createJob(db, {
+      jobType: "run_ocr",
+      inputJson: {
+        asset_ids: [asset.id],
+        engine: "paddleocr",
+        language: "ch",
+      },
+    });
+    await db
+      .update(jobs)
+      .set({
+        status: "failed",
+        errorMessage: "The truth value of an empty array is ambiguous",
+        finishedAt: new Date(),
+      })
+      .where(eq(jobs.id, failedJob.id));
+
+    await expect(service.queuePendingOcrJobs({ libraryId: library.id })).resolves.toEqual({
+      scanned: 1,
+      created: 0,
+      skipped: 1,
+    });
+    const listed = await service.listJobs({ limit: 10, offset: 0 });
+
+    expect(listed.items.filter((job) => job.job_type === "run_ocr")).toHaveLength(1);
+  });
+
+  test("OCR queue-pending 不会为已成功但没有文本的 asset 重复创建 job", async () => {
+    const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/media/blank.png",
+      relativePath: "blank.png",
+      mediaType: "image",
+      sizeBytes: 10,
+      mtimeMs: 1,
+    });
+    const asset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "image",
+      path: "/media/blank.png",
+    });
+    const succeededJob = await createJob(db, {
+      jobType: "run_ocr",
+      inputJson: {
+        asset_ids: [asset.id],
+        engine: "paddleocr",
+        language: "ch",
+      },
+    });
+    await db
+      .update(jobs)
+      .set({
+        status: "succeeded",
+        resultJson: { assets_processed: 1, text_written: 0, skipped_no_text: 1 },
+        progress: 100,
+        finishedAt: new Date(),
+      })
+      .where(eq(jobs.id, succeededJob.id));
+
+    await expect(service.queuePendingOcrJobs({ libraryId: library.id })).resolves.toEqual({
+      scanned: 1,
+      created: 0,
+      skipped: 1,
+    });
+    const listed = await service.listJobs({ limit: 10, offset: 0 });
+
+    expect(listed.items.filter((job) => job.job_type === "run_ocr")).toHaveLength(1);
   });
 
   test("OCR queue-pending 使用 limit 并从 OCR_BATCH_SIZE 读取默认 batch size", async () => {

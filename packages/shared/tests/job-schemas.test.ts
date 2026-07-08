@@ -9,10 +9,12 @@ describe('job schemas', () => {
       collections: ['video_segment_vectors', 'video_frame_vectors'],
       segment_strategy: 'scene_detection',
       fallback: false,
+      keyframe_density: 'dense',
     })
 
     expect(output.segment_strategy).toBe('scene_detection')
     expect(output.fallback).toBe(false)
+    expect(output.keyframe_density).toBe('dense')
   })
 
   it('validates transcribe_audio input and output', () => {

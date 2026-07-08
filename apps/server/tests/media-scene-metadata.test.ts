@@ -6,6 +6,7 @@ import {
   createVectorRef,
 } from '../src/database/repositories.js'
 import { MediaService } from '../src/media/media.service.js'
+import type { QueryExpansionService } from '../src/search/query-expansion.service.js'
 import type { SearchQueryVectorService } from '../src/search/search-query-vector.service.js'
 import { SearchService } from '../src/search/search.service.js'
 import { createTestDatabase } from './database/test-db.js'
@@ -83,6 +84,9 @@ describe('scene metadata surfaces', () => {
       {
         embedQuery: async () => Array.from({ length: 768 }, () => 0.1),
       } as unknown as SearchQueryVectorService,
+      {
+        expand: async (query: string) => [{ text: query, weight: 1, source: 'original' }],
+      } as unknown as QueryExpansionService,
     )
 
     const response = await service.search({ query: 'opening shot', media_types: ['video'] })

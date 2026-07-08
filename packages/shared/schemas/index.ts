@@ -7,6 +7,7 @@ const positiveNumberSchema = z.number().positive()
 const nonNegativeNumberSchema = z.number().min(0)
 const collectionSchema = z.enum(vectorCollectionNames)
 const indexProfileSchema = z.enum(indexProfiles)
+const keyframeDensitySchema = z.enum(['light', 'balanced', 'dense'])
 
 // 这里是跨语言 job 协议的事实来源：NestJS 创建 job，Python worker 读取生成的 JSON Schema 校验输入。
 // 新 job type 必须先在这里声明输入/输出，再生成 packages/shared/generated/job-schemas.json。
@@ -55,6 +56,7 @@ export const indexMediaOutputSchema = z.object({
   fallback_reason: z.string().min(1).optional(),
   scenes_detected: nonNegativeIntegerSchema.optional(),
   keyframes_selected: nonNegativeIntegerSchema.optional(),
+  keyframe_density: keyframeDensitySchema.optional(),
 })
 
 export const transcribeAudioInputSchema = z.object({

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Bot, Briefcase, Film, Folder, Search, Sparkles } from 'lucide-react'
+import { Bot, Briefcase, Folder, Search, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { HealthIndicator } from './health-indicator'
 
@@ -7,22 +7,24 @@ const navItems = [
   { href: '/libraries', label: '素材库', icon: Folder },
   { href: '/search', label: '搜索', icon: Search },
   { href: '/jobs', label: '任务', icon: Briefcase },
-  { href: '/media/demo', label: '媒体', icon: Film },
   { href: '/agent', label: '助手', icon: Bot },
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-[var(--surface-soft)] text-[var(--ink)]">
-      <header className="sticky top-0 z-20 border-b border-[var(--hairline)] bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6">
-          <Link href="/search" className="flex items-center gap-2 font-bold text-[var(--primary)]">
-            <span className="grid size-10 place-items-center rounded-full bg-[var(--primary)] text-white">
-              媒
+    <div className="min-h-screen text-[var(--ink)]">
+      <header className="sticky top-0 z-20 border-b border-[var(--hairline)] bg-white/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center gap-2 px-4 sm:gap-4 sm:px-6">
+          <Link href="/search" className="flex items-center gap-2 font-semibold text-[var(--ink)]">
+            <span className="grid size-8 place-items-center rounded-md border border-[var(--hairline)] bg-white text-sm shadow-[var(--shadow-1)]">
+              <Sparkles aria-hidden="true" size={15} />
             </span>
             <span className="hidden sm:inline">媒体助手</span>
           </Link>
-          <nav aria-label="主导航" className="ml-auto flex items-center gap-1 overflow-x-auto">
+          <nav
+            aria-label="主导航"
+            className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto"
+          >
             {navItems.map((item) => {
               const Icon = item.icon
               return (
@@ -34,9 +36,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
           <HealthIndicator />
-          <Link href="/agent" className="primary-action">
+          <Link href="/agent" className="primary-action hidden sm:inline-flex">
             <Sparkles aria-hidden="true" size={16} />
-            <span>运行</span>
+            <span>Ask</span>
           </Link>
         </div>
       </header>

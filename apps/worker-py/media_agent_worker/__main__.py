@@ -5,6 +5,7 @@ import time
 from .exporting import ExportClipHandler
 from .embedding_worker import EmbedImageHandler, EmbedVideoFrameHandler
 from .embeddings import SiglipEmbedder
+from .env import load_project_env
 from .indexing import IndexMediaHandler
 from .ocr import OcrHandler
 from .probe import ProbeHandler
@@ -32,6 +33,7 @@ def build_runner(*, worker_id, job_repository, media_repository, qdrant_client, 
 
 
 def main():
+    load_project_env()
     worker_id = os.environ.get("WORKER_ID", f"worker-{os.getpid()}")
     poll_interval_seconds = float(os.environ.get("WORKER_POLL_INTERVAL_SECONDS", "2"))
     connection = connect_from_env()

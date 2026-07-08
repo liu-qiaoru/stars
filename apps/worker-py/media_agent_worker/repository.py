@@ -390,8 +390,8 @@ class PostgresMediaRepository:
             "metadata_json": row[17] or {},
         }
 
-    def invalidate_video_index_assets(self, file_id, segment_strategy):
-        # Changing segmentation strategy can leave old video_segment/video_frame rows around.
+    def invalidate_video_index_assets(self, file_id, segment_strategy, keyframe_density=None):
+        # Changing segmentation strategy or keyframe density can leave old video_segment/video_frame rows around.
         # Mark them stale instead of deleting so existing references remain auditable and safe to ignore in reads.
         stale_metadata = json.dumps({
             "stale": True,
@@ -404,9 +404,12 @@ class PostgresMediaRepository:
                 FROM media_assets
                 WHERE file_id = %s
                   AND asset_type IN ('video_segment', 'video_frame')
-                  AND metadata_json->>'segment_strategy' IS DISTINCT FROM %s
+                  AND (
+                    metadata_json->>'segment_strategy' IS DISTINCT FROM %s
+                    OR metadata_json->>'keyframe_density' IS DISTINCT FROM %s
+                  )
                 """,
-                (file_id, segment_strategy),
+                (file_id, segment_strategy, keyframe_density),
             )
             asset_ids = [row[0] for row in cursor.fetchall()]
             if not asset_ids:

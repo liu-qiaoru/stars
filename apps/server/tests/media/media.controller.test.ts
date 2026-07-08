@@ -5,11 +5,13 @@ import { DATABASE, PG_POOL } from "../../src/database/database.module.js";
 import { createLibrary, createMediaAsset, createMediaFile } from "../../src/database/repositories.js";
 import { MediaController } from "../../src/media/media.controller.js";
 import { MediaModule } from "../../src/media/media.module.js";
+import { MediaService } from "../../src/media/media.service.js";
 import { createTestDatabase } from "../database/test-db.js";
 
 let closeDb: () => Promise<void>;
 let closeModule: () => Promise<void>;
 let mediaController: MediaController;
+let mediaService: MediaService;
 let db: Awaited<ReturnType<typeof createTestDatabase>>["db"];
 const testSettings = {
   serverHost: "127.0.0.1",
@@ -35,6 +37,7 @@ beforeEach(async () => {
     .compile();
 
   mediaController = moduleRef.get(MediaController);
+  mediaService = moduleRef.get(MediaService);
   closeModule = () => moduleRef.close();
 });
 
@@ -93,6 +96,27 @@ describe("media API", () => {
           text_content: null,
         },
       ],
+    });
+  });
+
+  test("content endpoint metadata resolves a DB-backed local media file", async () => {
+    const library = await createLibrary(db, {
+      name: "Main Media",
+      rootPath: "/Volumes/Media",
+    });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/Volumes/Media/poster.jpg",
+      relativePath: "poster.jpg",
+      mediaType: "image",
+      sizeBytes: 1234,
+      mtimeMs: 1710000000000,
+    });
+
+    await expect(mediaService.getMediaContent(file.id)).resolves.toEqual({
+      path: "/Volumes/Media/poster.jpg",
+      media_type: "image",
+      content_type: "image/jpeg",
     });
   });
 });

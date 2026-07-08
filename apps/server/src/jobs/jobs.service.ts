@@ -4,14 +4,15 @@ import {
   claimNextJob,
   getJob,
   heartbeatJob,
-  listActiveOcrJobs,
-  listActiveEmbeddingJobs,
+  listAttemptedEmbeddingJobs,
+  listAttemptedOcrJobs,
   listJobs,
   listPendingOcrAssets,
   listPendingEmbeddingVectorRefs,
   markJobSucceeded,
   createJob,
   reclaimStaleJobs,
+  resolveJobFilePaths,
   type Database,
 } from '../database/repositories.js'
 
@@ -19,10 +20,14 @@ import {
 export class JobsService {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
 
-  async listJobs() {
-    const rows = await listJobs(this.db)
+  async listJobs(input: { limit?: number; offset?: number } = {}) {
+    const { rows, total, limit, offset } = await listJobs(this.db, input)
+    const filePathsByJobId = await resolveJobFilePaths(this.db, rows)
     return {
-      items: rows.map((row) => this.toResponse(row)),
+      items: rows.map((row) => this.toResponse(row, filePathsByJobId.get(row.id) ?? [])),
+      total,
+      limit,
+      offset,
     }
   }
 
@@ -31,7 +36,8 @@ export class JobsService {
     if (!row) {
       throw new NotFoundException('Job not found')
     }
-    return this.toResponse(row)
+    const filePathsByJobId = await resolveJobFilePaths(this.db, [row])
+    return this.toResponse(row, filePathsByJobId.get(row.id) ?? [])
   }
 
   async claimNextJob(workerId: string, now = new Date()) {
@@ -60,27 +66,31 @@ export class JobsService {
   }
 
   async queuePendingEmbeddingJobs(limit = 100) {
-    // 只为没有 active job 的 pending ref 创建任务，避免重复 worker 同时写同一个 Qdrant point。
+    // 只为没有 embedding 尝试记录的 pending ref 创建任务，避免失败/无结果场景被 coordinator 无限重建。
     const pendingRefs = await listPendingEmbeddingVectorRefs(this.db, limit)
-    const activeJobs = await listActiveEmbeddingJobs(this.db)
-    const activeKeys = new Set(
-      activeJobs.map((job) => {
-        const input = job.inputJson as {
-          asset_id?: string
-          collection?: string
-          model_name?: string
-          model_version?: string
-        }
-        return this.embeddingJobKey(input)
-      }),
-    )
+    const attemptedJobs = await listAttemptedEmbeddingJobs(this.db)
+    const lastAttemptedAtByKey = new Map<string, Date>()
+    for (const job of attemptedJobs) {
+      const input = job.inputJson as {
+        asset_id?: string
+        collection?: string
+        model_name?: string
+        model_version?: string
+      }
+      const key = this.embeddingJobKey(input)
+      const previous = lastAttemptedAtByKey.get(key)
+      if (!previous || job.createdAt > previous) {
+        lastAttemptedAtByKey.set(key, job.createdAt)
+      }
+    }
     let created = 0
     let skipped = 0
 
     for (const ref of pendingRefs) {
       const input = this.toEmbeddingJobInput(ref)
       const key = this.embeddingJobKey(input)
-      if (activeKeys.has(key)) {
+      const lastAttemptedAt = lastAttemptedAtByKey.get(key)
+      if (lastAttemptedAt && lastAttemptedAt >= ref.vectorRefUpdatedAt) {
         skipped += 1
         continue
       }
@@ -88,7 +98,7 @@ export class JobsService {
         jobType: input.collection === 'image_vectors' ? 'embed_image' : 'embed_video_frame',
         inputJson: input,
       })
-      activeKeys.add(key)
+      lastAttemptedAtByKey.set(key, new Date())
       created += 1
     }
 
@@ -113,16 +123,16 @@ export class JobsService {
       fileId: input.fileId,
       limit: input.limit ?? 500,
     })
-    const activeJobs = await listActiveOcrJobs(this.db)
-    const activeAssetIds = new Set(
-      activeJobs.flatMap((job) => {
-        const activeInput = job.inputJson as { asset_ids?: string[] }
-        return activeInput.asset_ids ?? []
+    const attemptedJobs = await listAttemptedOcrJobs(this.db)
+    const attemptedAssetIds = new Set(
+      attemptedJobs.flatMap((job) => {
+        const jobInput = job.inputJson as { asset_ids?: string[] }
+        return jobInput.asset_ids ?? []
       }),
     )
     const queueableAssetIds = pendingAssets
       .map((asset) => asset.assetId)
-      .filter((assetId) => !activeAssetIds.has(assetId))
+      .filter((assetId) => !attemptedAssetIds.has(assetId))
     const skipped = pendingAssets.length - queueableAssetIds.length
     let created = 0
 
@@ -195,7 +205,7 @@ export class JobsService {
     return `${input.asset_id ?? ''}|${input.collection ?? ''}|${input.model_name ?? ''}|${input.model_version ?? ''}`
   }
 
-  private toResponse(row: Awaited<ReturnType<typeof getJob>>) {
+  private toResponse(row: Awaited<ReturnType<typeof getJob>>, filePaths: string[] = []) {
     if (!row) {
       throw new NotFoundException('Job not found')
     }
@@ -210,6 +220,7 @@ export class JobsService {
       heartbeat_at: row.heartbeatAt?.toISOString() ?? null,
       timeout_seconds: row.timeoutSeconds,
       progress: row.progress,
+      file_paths: filePaths,
       input: row.inputJson,
       result: row.resultJson,
       error_message: row.errorMessage,

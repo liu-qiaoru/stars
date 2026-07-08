@@ -111,6 +111,34 @@ describe("hybrid search ranking", () => {
     expect(results[1].score).toBeCloseTo(0.3 * 0.55, 5);
   });
 
+  test("keeps weak vector-only matches and marks them low confidence", () => {
+    const results = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "weak-vector",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["vector_match"],
+          source_scores: { video_segment_vectors: 0.04 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "text-match",
+          start_time_seconds: 30,
+          end_time_seconds: 40,
+          reasons: ["transcript_match"],
+          source_scores: { text_search: 0.1 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(results.map((result) => result.asset_id)).toEqual(["text-match", "weak-vector"]);
+    expect(results[0].confidence).toBe("high");
+    expect(results[1].confidence).toBe("low");
+  });
+
   test("applies offset and limit after adjacent windows are merged", () => {
     const results = buildHybridResults(
       [
