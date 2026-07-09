@@ -13,8 +13,10 @@ class WorkerRunner:
         scan_handler=None,
         probe_handler=None,
         index_handler=None,
+        generate_caption_handler=None,
         embed_image_handler=None,
         embed_video_frame_handler=None,
+        embed_text_asset_handler=None,
         transcribe_handler=None,
         ocr_handler=None,
         export_handler=None,
@@ -24,8 +26,10 @@ class WorkerRunner:
         self.scan_handler = scan_handler
         self.probe_handler = probe_handler
         self.index_handler = index_handler
+        self.generate_caption_handler = generate_caption_handler
         self.embed_image_handler = embed_image_handler
         self.embed_video_frame_handler = embed_video_frame_handler
+        self.embed_text_asset_handler = embed_text_asset_handler
         self.transcribe_handler = transcribe_handler
         self.ocr_handler = ocr_handler
         self.export_handler = export_handler
@@ -51,10 +55,14 @@ class WorkerRunner:
                 result = self.probe_handler.handle(job["input_json"])
             elif job["job_type"] == "index_media" and self.index_handler is not None:
                 result = self.index_handler.handle(job["input_json"])
+            elif job["job_type"] == "generate_caption" and self.generate_caption_handler is not None:
+                result = self.generate_caption_handler.handle(job["input_json"])
             elif job["job_type"] == "embed_image" and self.embed_image_handler is not None:
                 result = self.embed_image_handler.handle(job["input_json"])
             elif job["job_type"] == "embed_video_frame" and self.embed_video_frame_handler is not None:
                 result = self.embed_video_frame_handler.handle(job["input_json"])
+            elif job["job_type"] == "embed_text_asset" and self.embed_text_asset_handler is not None:
+                result = self.embed_text_asset_handler.handle(job["input_json"])
             elif job["job_type"] == "transcribe_audio" and self.transcribe_handler is not None:
                 result = self.transcribe_handler.handle(job["input_json"])
             elif job["job_type"] == "run_ocr" and self.ocr_handler is not None:

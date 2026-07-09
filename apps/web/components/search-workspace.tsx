@@ -232,6 +232,7 @@ function SearchResultPreview({
 }) {
   const mediaUrl = createApiClient().mediaContentUrl(item.file_id, {
     startTimeSeconds: item.start_time_seconds,
+    endTimeSeconds: item.end_time_seconds,
   })
 
   if (item.media_type === 'image') {
@@ -288,6 +289,7 @@ function MediaPreviewDialog({
 
   const mediaUrl = createApiClient().mediaContentUrl(item.file_id, {
     startTimeSeconds: item.start_time_seconds,
+    endTimeSeconds: item.end_time_seconds,
   })
   const timeRange =
     item.start_time_seconds === null || item.end_time_seconds === null

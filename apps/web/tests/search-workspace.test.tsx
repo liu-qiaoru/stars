@@ -90,7 +90,7 @@ describe('SearchWorkspace', () => {
     expect(within(hybridRegion).getAllByText('转写命中')).toHaveLength(2)
     expect(within(hybridRegion).getByLabelText('/media/launch.mp4')).toHaveAttribute(
       'src',
-      'http://127.0.0.1:4000/media/file-2/content#t=120',
+      'http://127.0.0.1:4000/media/file-2/content#t=120,150',
     )
     expect(within(hybridRegion).getByLabelText('/media/interview.wav')).toHaveClass(
       'media-audio-thumb',
@@ -218,7 +218,7 @@ describe('SearchWorkspace', () => {
     dialog = screen.getByRole('dialog', { name: '预览 /media/launch.mp4' })
     expect(within(dialog).getByLabelText('/media/launch.mp4')).toHaveAttribute(
       'src',
-      'http://127.0.0.1:4000/media/file-video/content#t=120',
+      'http://127.0.0.1:4000/media/file-video/content#t=120,150',
     )
     expect(within(dialog).getByLabelText('/media/launch.mp4')).toHaveAttribute('controls')
 
@@ -227,7 +227,7 @@ describe('SearchWorkspace', () => {
     dialog = screen.getByRole('dialog', { name: '预览 /media/interview.wav' })
     expect(within(dialog).getByLabelText('/media/interview.wav')).toHaveAttribute(
       'src',
-      'http://127.0.0.1:4000/media/file-audio/content#t=30',
+      'http://127.0.0.1:4000/media/file-audio/content#t=30,55',
     )
     expect(within(dialog).getByLabelText('/media/interview.wav')).toHaveAttribute('controls')
   })

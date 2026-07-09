@@ -313,6 +313,60 @@ describe("jobs service", () => {
     );
   });
 
+  test("将 pending caption_text_vectors 转成 embed_text_asset job", async () => {
+    const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/media/clip.mp4",
+      relativePath: "clip.mp4",
+      mediaType: "video",
+      sizeBytes: 20,
+      mtimeMs: 2,
+    });
+    const captionAsset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "caption",
+      startTimeSeconds: "30",
+      endTimeSeconds: "60",
+      textContent: "A person is cooking in a kitchen",
+      contentHash: "caption-hash",
+    });
+
+    await createVectorRef(db, {
+      assetId: captionAsset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: "caption_text_vectors",
+      pointId: "66666666-6666-4666-8666-666666666666",
+      modelName: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      modelVersion: "paraphrase-multilingual-MiniLM-L12-v2",
+      vectorKind: "vlm_caption_text_embedding",
+      vectorDim: 384,
+      distance: "Cosine",
+      contentHash: "caption-hash",
+      indexProfile: "balanced",
+    });
+
+    await expect(service.queuePendingEmbeddingJobs(10)).resolves.toEqual({
+      scanned: 1,
+      created: 1,
+      skipped: 0,
+    });
+    const listed = await service.listJobs({ limit: 10, offset: 0 });
+
+    expect(listed.items).toEqual([
+      expect.objectContaining({
+        job_type: "embed_text_asset",
+        input: expect.objectContaining({
+          asset_id: captionAsset.id,
+          collection: "caption_text_vectors",
+          model_name: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+          model_version: "paraphrase-multilingual-MiniLM-L12-v2",
+        }),
+      }),
+    ]);
+  });
+
   test("embedding queue-pending 不会为已经失败的 vector_ref 反复创建新 job", async () => {
     const library = await createLibrary(db, { name: "Main", rootPath: "/media" });
     const videoFile = await createMediaFile(db, {

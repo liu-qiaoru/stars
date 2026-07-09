@@ -2,8 +2,9 @@ import os
 import signal
 import time
 
+from .captioning import GenerateCaptionHandler
 from .exporting import ExportClipHandler
-from .embedding_worker import EmbedImageHandler, EmbedVideoFrameHandler
+from .embedding_worker import EmbedImageHandler, EmbedTextAssetHandler, EmbedVideoFrameHandler
 from .embeddings import SiglipEmbedder
 from .env import load_project_env
 from .indexing import IndexMediaHandler
@@ -16,16 +17,27 @@ from .transcription import TranscribeHandler
 from .worker import WorkerRunner
 
 
-def build_runner(*, worker_id, job_repository, media_repository, qdrant_client, embedder=None):
+def build_runner(
+    *,
+    worker_id,
+    job_repository,
+    media_repository,
+    qdrant_client,
+    embedder=None,
+    text_embedder=None,
+):
     shared_embedder = embedder or SiglipEmbedder()
+    shared_text_embedder = text_embedder or embedder
     return WorkerRunner(
         worker_id=worker_id,
         job_repository=job_repository,
         scan_handler=ScanHandler(media_repository, job_repository=job_repository),
         probe_handler=ProbeHandler(media_repository, job_repository=job_repository),
         index_handler=IndexMediaHandler(media_repository, job_repository=job_repository),
+        generate_caption_handler=GenerateCaptionHandler(media_repository),
         embed_image_handler=EmbedImageHandler(media_repository, qdrant_client, shared_embedder),
         embed_video_frame_handler=EmbedVideoFrameHandler(media_repository, qdrant_client, shared_embedder),
+        embed_text_asset_handler=EmbedTextAssetHandler(media_repository, qdrant_client, shared_text_embedder),
         transcribe_handler=TranscribeHandler(media_repository),
         ocr_handler=OcrHandler(media_repository),
         export_handler=ExportClipHandler(media_repository),

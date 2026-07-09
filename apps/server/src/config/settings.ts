@@ -21,6 +21,16 @@ export interface Settings {
   deepseekBaseUrl: string
   deepseekApiKey?: string
   deepseekModel: string
+  captionIndexingEnabled: boolean
+  captionSearchEnabled: boolean
+  localVlmEnabled: boolean
+  localVlmServiceUrl: string
+  searchRerankMode: 'off' | 'blocking'
+  searchRerankTopK: number
+  searchRerankTimeoutMs: number
+  frameCacheEnabled: boolean
+  frameCacheMaxBytes: number
+  frameCacheImageMaxWidth: number
 }
 
 type Env = Record<string, string | undefined>
@@ -163,6 +173,83 @@ const settingsSchema = z.object({
   DEEPSEEK_BASE_URL: z.string().url('DEEPSEEK_BASE_URL must be a valid URL').default('https://api.deepseek.com'),
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
   DEEPSEEK_MODEL: z.string().min(1).default('deepseek-v4-flash'),
+  CAPTION_INDEXING_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  CAPTION_SEARCH_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  LOCAL_VLM_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  LOCAL_VLM_SERVICE_URL: z
+    .string()
+    .url('LOCAL_VLM_SERVICE_URL must be a valid URL')
+    .default('http://127.0.0.1:4030'),
+  SEARCH_RERANK_MODE: z.enum(['off', 'blocking']).default('off'),
+  SEARCH_RERANK_TOP_K: z
+    .string()
+    .default('10')
+    .transform((value, context) => {
+      const topK = Number(value)
+      if (!Number.isInteger(topK) || topK < 1 || topK > 50) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SEARCH_RERANK_TOP_K must be between 1 and 50',
+        })
+        return z.NEVER
+      }
+      return topK
+    }),
+  SEARCH_RERANK_TIMEOUT_MS: z
+    .string()
+    .default('30000')
+    .transform((value, context) => {
+      const timeout = Number(value)
+      if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 120000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SEARCH_RERANK_TIMEOUT_MS must be between 1000 and 120000',
+        })
+        return z.NEVER
+      }
+      return timeout
+    }),
+  FRAME_CACHE_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  FRAME_CACHE_MAX_BYTES: z
+    .string()
+    .default('1073741824')
+    .transform((value, context) => {
+      const maxBytes = Number(value)
+      if (!Number.isInteger(maxBytes) || maxBytes < 0) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'FRAME_CACHE_MAX_BYTES must be a non-negative integer',
+        })
+        return z.NEVER
+      }
+      return maxBytes
+    }),
+  FRAME_CACHE_IMAGE_MAX_WIDTH: z
+    .string()
+    .default('512')
+    .transform((value, context) => {
+      const maxWidth = Number(value)
+      if (!Number.isInteger(maxWidth) || maxWidth < 64 || maxWidth > 4096) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'FRAME_CACHE_IMAGE_MAX_WIDTH must be between 64 and 4096',
+        })
+        return z.NEVER
+      }
+      return maxWidth
+    }),
 })
 
 export function createSettings(env: Env = process.env): Settings {
@@ -189,5 +276,15 @@ export function createSettings(env: Env = process.env): Settings {
     deepseekBaseUrl: parsed.DEEPSEEK_BASE_URL,
     deepseekApiKey: parsed.DEEPSEEK_API_KEY,
     deepseekModel: parsed.DEEPSEEK_MODEL,
+    captionIndexingEnabled: parsed.CAPTION_INDEXING_ENABLED,
+    captionSearchEnabled: parsed.CAPTION_SEARCH_ENABLED,
+    localVlmEnabled: parsed.LOCAL_VLM_ENABLED,
+    localVlmServiceUrl: parsed.LOCAL_VLM_SERVICE_URL,
+    searchRerankMode: parsed.SEARCH_RERANK_MODE,
+    searchRerankTopK: parsed.SEARCH_RERANK_TOP_K,
+    searchRerankTimeoutMs: parsed.SEARCH_RERANK_TIMEOUT_MS,
+    frameCacheEnabled: parsed.FRAME_CACHE_ENABLED,
+    frameCacheMaxBytes: parsed.FRAME_CACHE_MAX_BYTES,
+    frameCacheImageMaxWidth: parsed.FRAME_CACHE_IMAGE_MAX_WIDTH,
   }
 }

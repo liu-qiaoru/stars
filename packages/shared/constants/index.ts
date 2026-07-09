@@ -6,6 +6,8 @@ export const jobTypes = [
   'run_ocr',
   'embed_image',
   'embed_video_frame',
+  'embed_text_asset',
+  'generate_caption',
   'export_clip',
 ] as const
 
@@ -26,6 +28,7 @@ export const mediaAssetTypes = [
   'video_frame',
   'video_segment',
   'audio_segment',
+  'caption',
   'text_chunk',
   'thumbnail',
   'transcript_chunk',
@@ -37,6 +40,7 @@ export const vectorCollectionNames = [
   'video_frame_vectors',
   'video_segment_vectors',
   'audio_segment_vectors',
+  'caption_text_vectors',
   'text_chunk_vectors',
 ] as const
 

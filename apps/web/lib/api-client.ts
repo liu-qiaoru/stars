@@ -186,11 +186,21 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<{ job_id: string; status: string }>(`/libraries/${id}/scan`, { method: 'POST' }),
     listJobs: (input: { limit?: number; offset?: number } = {}) =>
       request<JobListResponse>(withQuery('/jobs', input), { method: 'GET' }),
-    mediaContentUrl: (id: string, input: { startTimeSeconds?: number | null } = {}) => {
+    mediaContentUrl: (
+      id: string,
+      input: { startTimeSeconds?: number | null; endTimeSeconds?: number | null } = {},
+    ) => {
       const fragment =
         input.startTimeSeconds === null || input.startTimeSeconds === undefined
           ? ''
-          : `#t=${Math.max(0, input.startTimeSeconds)}`
+          : `#t=${[
+              Math.max(0, input.startTimeSeconds),
+              input.endTimeSeconds === null || input.endTimeSeconds === undefined
+                ? undefined
+                : Math.max(0, input.endTimeSeconds),
+            ]
+              .filter((value) => value !== undefined)
+              .join(',')}`
       return `${baseUrl}/media/${id}/content${fragment}`
     },
     searchMedia: (input: SearchRequest) =>

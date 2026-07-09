@@ -30,6 +30,13 @@ VECTOR_CONFIGS = {
         "vector_kind": "frame_embedding",
         "distance": "Cosine",
     },
+    "caption_text_vectors": {
+        "vector_dim": 384,
+        "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+        "vector_kind": "vlm_caption_text_embedding",
+        "distance": "Cosine",
+    },
 }
 
 SCENE_MIN_SECONDS = 3.0
@@ -37,6 +44,10 @@ SCENE_MAX_COUNT = 2000
 SCENE_DETECT_THRESHOLD = 27.0
 KEYFRAME_DENSITIES = {"light", "balanced", "dense"}
 KEYFRAME_DENSITY = "dense"
+
+
+def env_flag(name, default="false"):
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def deterministic_point_id(*, asset_id, collection_name, model_name, model_version, vector_kind, content_hash):
@@ -190,6 +201,7 @@ class IndexMediaHandler:
         assets_created = 0
         vector_refs_created = 0
         ocr_asset_ids = []
+        caption_source_asset_ids = []
 
         if media_type == "image":
             asset_inputs = [
@@ -250,6 +262,13 @@ class IndexMediaHandler:
                 vector_refs_created += 1
                 if asset["asset_type"] in ("image", "video_frame"):
                     ocr_asset_ids.append(asset["id"])
+                if (
+                    self.job_repository is not None
+                    and env_flag("CAPTION_INDEXING_ENABLED")
+                    and env_flag("LOCAL_VLM_ENABLED")
+                    and asset["asset_type"] in ("image", "video_segment")
+                ):
+                    caption_source_asset_ids.append(asset["id"])
             if collection_name not in collections:
                 collections.append(collection_name)
 
@@ -264,6 +283,20 @@ class IndexMediaHandler:
                 },
                 timeout_seconds=7200,
             )
+
+        if caption_source_asset_ids and self.job_repository is not None:
+            for source_asset_id in caption_source_asset_ids:
+                self.job_repository.create_job(
+                    "generate_caption",
+                    {
+                        "file_id": file["id"],
+                        "source_asset_ids": [source_asset_id],
+                        "prompt_version": os.environ.get("CAPTION_PROMPT_VERSION", "caption-v1"),
+                        "model_name": os.environ.get("LOCAL_VLM_MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct"),
+                        "model_version": os.environ.get("LOCAL_VLM_MODEL_VERSION", "qwen2.5-vl-7b-instruct"),
+                    },
+                    timeout_seconds=7200,
+                )
 
         return {
             "assets_created": assets_created,

@@ -181,7 +181,7 @@ describe("agent API", () => {
           asset_id: asset.id,
           start_time_seconds: 30,
           end_time_seconds: 60,
-          score: 0.82 * 0.55,
+          score: 0.82,
         }),
       ],
     });

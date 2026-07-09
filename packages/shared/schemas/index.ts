@@ -102,12 +102,34 @@ export const embedVideoFrameInputSchema = z.object({
   model_version: z.string().min(1),
 })
 
+export const embedTextAssetInputSchema = z.object({
+  asset_id: uuidSchema,
+  collection: z.literal('caption_text_vectors'),
+  model_name: z.string().min(1),
+  model_version: z.string().min(1),
+})
+
+export const generateCaptionInputSchema = z.object({
+  file_id: uuidSchema,
+  source_asset_ids: z.array(uuidSchema).min(1),
+  prompt_version: z.literal('caption-v1').default('caption-v1'),
+  model_name: z.string().min(1).default('Qwen/Qwen2.5-VL-7B-Instruct'),
+  model_version: z.string().min(1).default('qwen2.5-vl-7b-instruct'),
+})
+
 export const embeddingOutputSchema = z.object({
   point_id: uuidSchema,
   collection: collectionSchema,
   vector_dim: z.number().int().positive(),
   model_name: z.string().min(1),
   model_version: z.string().min(1),
+})
+
+export const generateCaptionOutputSchema = z.object({
+  caption_asset_id: uuidSchema,
+  source_assets: z.array(uuidSchema).min(1),
+  text_written: nonNegativeIntegerSchema,
+  vector_ref_created: z.boolean().optional(),
 })
 
 export const exportClipInputSchema = z
@@ -135,6 +157,8 @@ export const jobInputSchemas = {
   run_ocr: runOcrInputSchema,
   embed_image: embedImageInputSchema,
   embed_video_frame: embedVideoFrameInputSchema,
+  embed_text_asset: embedTextAssetInputSchema,
+  generate_caption: generateCaptionInputSchema,
   export_clip: exportClipInputSchema,
 } satisfies Record<z.infer<typeof jobTypeSchema>, z.ZodTypeAny>
 
@@ -147,5 +171,7 @@ export const jobOutputSchemas = {
   run_ocr: runOcrOutputSchema,
   embed_image: embeddingOutputSchema,
   embed_video_frame: embeddingOutputSchema,
+  embed_text_asset: embeddingOutputSchema,
+  generate_caption: generateCaptionOutputSchema,
   export_clip: exportClipOutputSchema,
 } satisfies Record<z.infer<typeof jobTypeSchema>, z.ZodTypeAny>

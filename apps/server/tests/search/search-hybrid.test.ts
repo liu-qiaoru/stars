@@ -78,6 +78,24 @@ describe("hybrid search ranking", () => {
     expect(result.score).toBeCloseTo(0.82 * 0.55 + (2 / 3) * 0.45 + 0.08, 5);
   });
 
+  test("keeps a single-source vector score on the original normalized scale", () => {
+    const [result] = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "strong-single-vector",
+          start_time_seconds: 60,
+          end_time_seconds: 70,
+          reasons: ["vector_match"],
+          source_scores: { video_segment_vectors: 0.82 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(result.score).toBeCloseTo(0.82, 5);
+  });
+
   test("does not inflate a low single-source result to a full score", () => {
     const results = buildHybridResults(
       [
@@ -105,13 +123,13 @@ describe("hybrid search ranking", () => {
     );
 
     expect(results.map((result) => result.asset_id)).toEqual([
-      "multi-signal",
       "low-single-vector",
+      "multi-signal",
     ]);
-    expect(results[1].score).toBeCloseTo(0.3 * 0.55, 5);
+    expect(results[0].score).toBeCloseTo(0.3, 5);
   });
 
-  test("keeps weak vector-only matches and marks them low confidence", () => {
+  test("filters weak vector matches before hybrid ranking but keeps text rank", () => {
     const results = buildHybridResults(
       [
         {
@@ -134,9 +152,102 @@ describe("hybrid search ranking", () => {
       { limit: 10, offset: 0 },
     );
 
-    expect(results.map((result) => result.asset_id)).toEqual(["text-match", "weak-vector"]);
-    expect(results[0].confidence).toBe("high");
-    expect(results[1].confidence).toBe("low");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      asset_id: "text-match",
+      reasons: ["transcript_match"],
+      source_scores: { text_search: 0.1 },
+    });
+  });
+
+  test("filters negative vector scores before hybrid ranking", () => {
+    const results = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "negative-vector",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["vector_match"],
+          source_scores: { video_segment_vectors: -0.2 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(results).toEqual([]);
+  });
+
+  test("ignores weak merged signals so a strong caption match is not diluted", () => {
+    const [result] = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "caption",
+          start_time_seconds: 30,
+          end_time_seconds: 40,
+          reasons: ["caption_match"],
+          source_scores: { caption_text_vectors: 0.86 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "weak-vector",
+          start_time_seconds: 31,
+          end_time_seconds: 39,
+          reasons: ["vector_match"],
+          source_scores: { video_segment_vectors: 0.02 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(result).toMatchObject({
+      asset_id: "caption",
+      reasons: ["caption_match"],
+      source_scores: { caption_text_vectors: 0.86 },
+      score: 0.86,
+      primary_reason: "caption_match",
+    });
+  });
+
+  test("does not merge adjacent caption-only video windows into a full-video result", () => {
+    const results = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "caption-a",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["caption_match"],
+          source_scores: { caption_text_vectors: 0.42 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "caption-b",
+          start_time_seconds: 10,
+          end_time_seconds: 20,
+          reasons: ["caption_match"],
+          source_scores: { caption_text_vectors: 0.86 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toMatchObject({
+      asset_id: "caption-b",
+      start_time_seconds: 10,
+      end_time_seconds: 20,
+      score: 0.86,
+      merged_asset_ids: ["caption-b"],
+    });
+    expect(results[1]).toMatchObject({
+      asset_id: "caption-a",
+      start_time_seconds: 0,
+      end_time_seconds: 10,
+      score: 0.42,
+      merged_asset_ids: ["caption-a"],
+    });
   });
 
   test("applies offset and limit after adjacent windows are merged", () => {

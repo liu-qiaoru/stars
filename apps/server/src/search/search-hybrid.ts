@@ -1,4 +1,4 @@
-export type HybridReason = 'vector_match' | 'transcript_match' | 'ocr_match'
+export type HybridReason = 'vector_match' | 'transcript_match' | 'ocr_match' | 'caption_match'
 
 export interface HybridCandidateInput {
   asset_id: string
@@ -29,8 +29,13 @@ const ADJACENT_VIDEO_WINDOW_SECONDS = 5
 const VECTOR_SOURCE_WEIGHT = 0.55
 const TEXT_SOURCE_WEIGHT = 0.45
 const MULTI_SIGNAL_BONUS = 0.08
-const MIN_VECTOR_ONLY_RAW_SCORE = 0.05
-const REASON_TIE_BREAK_ORDER: HybridReason[] = ['transcript_match', 'ocr_match', 'vector_match']
+const MIN_HYBRID_SOURCE_SCORE = 0.1
+const REASON_TIE_BREAK_ORDER: HybridReason[] = [
+  'transcript_match',
+  'ocr_match',
+  'caption_match',
+  'vector_match',
+]
 
 // Hybrid reranker 是纯函数，方便用单测固定合并和打分语义。
 // 输入候选已经通过 PostgreSQL 补齐事实字段；这里不再访问数据库或 Qdrant。
@@ -38,14 +43,41 @@ export function buildHybridResults(
   candidates: HybridCandidateInput[],
   options: { limit: number; offset: number },
 ): HybridSearchResult[] {
-  const assetOrder = new Map(candidates.map((candidate, index) => [candidate.asset_id, index]))
-  const mergedByAsset = mergeSameAsset(candidates)
+  const filteredCandidates = candidates.flatMap((candidate) => {
+    const filtered = filterWeakSources(candidate)
+    return filtered ? [filtered] : []
+  })
+  const assetOrder = new Map(
+    filteredCandidates.map((candidate, index) => [candidate.asset_id, index]),
+  )
+  const mergedByAsset = mergeSameAsset(filteredCandidates)
   const mergedWindows = mergeAdjacentVideoWindows(mergedByAsset, assetOrder)
 
   return mergedWindows
     .map((candidate) => rankCandidate(sortMergedAssetIds(candidate, assetOrder)))
     .sort((left, right) => compareRankedResults(left, right))
     .slice(options.offset, options.offset + options.limit)
+}
+
+function filterWeakSources(candidate: HybridCandidateInput): HybridCandidateInput | undefined {
+  const sourceScores = Object.fromEntries(
+    Object.entries(candidate.source_scores).filter(
+      ([sourceKey, rawScore]) =>
+        sourceKey === 'text_search' ||
+        normalizeSourceScore(sourceKey, rawScore) >= MIN_HYBRID_SOURCE_SCORE,
+    ),
+  )
+  const reasons = uniqueReasons(
+    Object.keys(sourceScores).map((sourceKey) => reasonForSource(sourceKey, candidate.reasons)),
+  )
+  if (!Object.keys(sourceScores).length || !reasons.length) {
+    return undefined
+  }
+  return {
+    ...candidate,
+    reasons,
+    source_scores: sourceScores,
+  }
 }
 
 function mergeSameAsset(candidates: HybridCandidateInput[]): MergeCandidate[] {
@@ -110,7 +142,19 @@ function canMergeVideoWindows(left: MergeCandidate, right: MergeCandidate) {
   if (left.end_time_seconds === null || right.start_time_seconds === null) {
     return false
   }
+  if (isCaptionOnly(left) && isCaptionOnly(right)) {
+    return false
+  }
   return right.start_time_seconds - left.end_time_seconds <= ADJACENT_VIDEO_WINDOW_SECONDS
+}
+
+function isCaptionOnly(candidate: MergeCandidate) {
+  return (
+    candidate.reasons.length === 1 &&
+    candidate.reasons[0] === 'caption_match' &&
+    Object.keys(candidate.source_scores).length === 1 &&
+    candidate.source_scores.caption_text_vectors !== undefined
+  )
 }
 
 function toMergeCandidate(candidate: HybridCandidateInput): MergeCandidate {
@@ -158,14 +202,20 @@ function rankCandidate(candidate: MergeCandidate): HybridSearchResult {
 
 function scoreCandidate(candidate: HybridCandidateInput) {
   // 不做 per-query min-max，避免单个低分结果被放大到 1。
-  // 向量分数按 raw cosine clamp，FTS rank 用饱和映射，再按 source 权重累加。
+  // 向量分数按 raw cosine clamp，FTS rank 用饱和映射；只有多来源时才按来源权重组合。
   const contributions = new Map<HybridReason, number>()
   let score = 0
+  let totalWeight = 0
   for (const [sourceKey, rawScore] of Object.entries(candidate.source_scores)) {
+    const weight = sourceWeight(sourceKey)
     const contribution = weightedSourceScore(sourceKey, rawScore)
     const reason = reasonForSource(sourceKey, candidate.reasons)
     contributions.set(reason, Math.max(contributions.get(reason) ?? 0, contribution))
     score += contribution
+    totalWeight += weight
+  }
+  if (totalWeight > 0) {
+    score = score / totalWeight
   }
   if (uniqueReasons(candidate.reasons).length > 1) {
     score += MULTI_SIGNAL_BONUS
@@ -201,6 +251,9 @@ function sourceWeight(sourceKey: string) {
 }
 
 function reasonForSource(sourceKey: string, reasons: HybridReason[]): HybridReason {
+  if (sourceKey === 'caption_text_vectors') {
+    return 'caption_match'
+  }
   if (sourceKey !== 'text_search') {
     return 'vector_match'
   }
@@ -209,6 +262,9 @@ function reasonForSource(sourceKey: string, reasons: HybridReason[]): HybridReas
   }
   if (reasons.includes('ocr_match')) {
     return 'ocr_match'
+  }
+  if (reasons.includes('caption_match')) {
+    return 'caption_match'
   }
   return 'transcript_match'
 }
@@ -252,7 +308,10 @@ function reasonSortOrder(reason: HybridReason) {
   if (reason === 'transcript_match') {
     return 1
   }
-  return 2
+  if (reason === 'ocr_match') {
+    return 2
+  }
+  return 3
 }
 
 function uniqueStrings(values: string[]) {
@@ -282,19 +341,7 @@ function compareRankedResults(left: HybridSearchResult, right: HybridSearchResul
 }
 
 function confidenceForCandidate(candidate: HybridCandidateInput): HybridSearchResult['confidence'] {
-  if (candidate.reasons.some((reason) => reason !== 'vector_match')) {
-    return 'high'
-  }
-  return strongestRawVectorScore(candidate.source_scores) >= MIN_VECTOR_ONLY_RAW_SCORE ? 'high' : 'low'
-}
-
-function strongestRawVectorScore(sourceScores: Record<string, number>) {
-  return Math.max(
-    0,
-    ...Object.entries(sourceScores)
-      .filter(([sourceKey]) => sourceKey !== 'text_search')
-      .map(([, score]) => score),
-  )
+  return 'high'
 }
 
 function minNullable(left: number | null, right: number | null) {

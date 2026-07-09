@@ -173,6 +173,7 @@ export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 
           'image_vectors',
           'video_frame_vectors',
           'video_segment_vectors',
+          'caption_text_vectors',
         ]),
         isNull(mediaFiles.deletedAt),
       ),
@@ -260,7 +261,7 @@ export async function listAttemptedEmbeddingJobs(db: Database) {
     .from(jobs)
     .where(
       and(
-        inArray(jobs.jobType, ['embed_image', 'embed_video_frame']),
+        inArray(jobs.jobType, ['embed_image', 'embed_video_frame', 'embed_text_asset']),
         inArray(jobs.status, ['queued', 'running', 'failed', 'succeeded']),
       ),
     )
@@ -385,6 +386,7 @@ export async function listSearchResultMetadata(
     .select({
       pointId: vectorRefs.pointId,
       assetId: mediaAssets.id,
+      assetType: mediaAssets.assetType,
       fileId: mediaFiles.id,
       mediaType: mediaFiles.mediaType,
       path: mediaFiles.path,

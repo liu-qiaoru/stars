@@ -8,6 +8,7 @@
     "dev:server": "pnpm --filter @local-media-agent/server dev",
     "dev:web": "pnpm --filter @local-media-agent/web dev",
     "dev:model": "PYTHONPATH=apps/worker-py .venv/bin/python -m media_agent_worker.model_service",
+    "dev:vlm": "PYTHONPATH=apps/worker-py .venv/bin/python -m media_agent_worker.vlm_service",
     "dev:worker": "PYTHONPATH=apps/worker-py .venv/bin/python -m media_agent_worker",
     "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d postgres qdrant",
     "infra:redis": "docker compose --env-file .env -f infra/docker-compose.yml --profile realtime up -d redis",

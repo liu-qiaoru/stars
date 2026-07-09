@@ -2,6 +2,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from media_agent_worker.indexing import IndexMediaHandler, deterministic_point_id
 from media_agent_worker.probe import ProbeHandler, parse_image_dimensions
@@ -260,6 +261,40 @@ class ProbeAndIndexTest(unittest.TestCase):
                 "language": "ch",
             })
             self.assertEqual(job_repository.created_jobs[0]["timeout_seconds"], 7200)
+
+    def test_index_media_creates_caption_job_only_when_caption_switches_are_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            image_path = str(Path(tmp_dir) / "poster.jpg")
+            Path(image_path).write_bytes(b"image")
+            repository = FakeMediaRepository()
+            repository.files["file-1"] = {
+                "id": "file-1",
+                "library_id": "library-1",
+                "path": image_path,
+                "media_type": "image",
+            }
+            job_repository = InMemoryJobRepository()
+            handler = IndexMediaHandler(repository, job_repository=job_repository)
+
+            with patch.dict("os.environ", {
+                "CAPTION_INDEXING_ENABLED": "true",
+                "LOCAL_VLM_ENABLED": "true",
+            }):
+                handler.handle({
+                    "file_id": "file-1",
+                    "index_profile": "balanced",
+                    "segment_strategy": "fixed_30s",
+                })
+
+            created_job_types = [job["job_type"] for job in job_repository.created_jobs]
+            self.assertEqual(created_job_types, ["run_ocr", "generate_caption"])
+            self.assertEqual(job_repository.created_jobs[1]["input_json"], {
+                "file_id": "file-1",
+                "source_asset_ids": ["asset-1"],
+                "prompt_version": "caption-v1",
+                "model_name": "Qwen/Qwen2.5-VL-7B-Instruct",
+                "model_version": "qwen2.5-vl-7b-instruct",
+            })
 
     def test_index_media_scene_detection_creates_scene_segments_keyframes_and_metadata(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

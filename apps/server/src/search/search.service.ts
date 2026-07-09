@@ -9,7 +9,12 @@ import {
   type Database,
 } from '../database/repositories.js'
 import { QDRANT_CLIENT } from '../qdrant/qdrant.module.js'
-import { VECTOR_COLLECTIONS, type VectorCollectionName } from '../qdrant/vector-collections.js'
+import {
+  VECTOR_COLLECTIONS,
+  type VectorCollectionConfig,
+  type VectorCollectionName,
+} from '../qdrant/vector-collections.js'
+import { SETTINGS, type Settings } from '../config/settings.js'
 import { QueryExpansionService, type QueryVariant } from './query-expansion.service.js'
 import {
   buildHybridResults,
@@ -18,11 +23,19 @@ import {
 } from './search-hybrid.js'
 import { SearchQueryVectorService } from './search-query-vector.service.js'
 
-const supportedSearchCollections = [
-  { collection: 'image_vectors', mediaType: 'image' },
-  { collection: 'video_segment_vectors', mediaType: 'video' },
-  { collection: 'video_frame_vectors', mediaType: 'video' },
-] as const satisfies { collection: VectorCollectionName; mediaType: (typeof mediaTypes)[number] }[]
+const baseSearchCollections = [
+  { collection: 'image_vectors', mediaTypes: ['image'] },
+  { collection: 'video_segment_vectors', mediaTypes: ['video'] },
+  { collection: 'video_frame_vectors', mediaTypes: ['video'] },
+] as const satisfies { collection: VectorCollectionName; mediaTypes: readonly (typeof mediaTypes)[number][] }[]
+
+const captionSearchCollection = {
+  collection: 'caption_text_vectors',
+  mediaTypes: ['image', 'video'],
+} as const satisfies {
+  collection: VectorCollectionName
+  mediaTypes: readonly (typeof mediaTypes)[number][]
+}
 
 // SearchService 负责把多个召回来源统一成一个响应：
 // Qdrant 做视觉向量召回，PostgreSQL FTS 做 transcript/OCR 文本召回，最终在内存里合并 rerank。
@@ -53,25 +66,29 @@ export class SearchService {
     @Inject(QDRANT_CLIENT) private readonly qdrantClient: Pick<QdrantClient, 'search'>,
     @Inject(SearchQueryVectorService) private readonly queryVectorService: SearchQueryVectorService,
     @Inject(QueryExpansionService) private readonly queryExpansionService: QueryExpansionService,
+    @Inject(SETTINGS) private readonly settings: Settings,
   ) {}
 
   async search(input: SearchRequest) {
     const request = this.parseRequest(input)
     const sourceLimit = this.sourceLimit(request)
+    const availableCollections = this.settings.captionSearchEnabled
+      ? [...baseSearchCollections, captionSearchCollection]
+      : baseSearchCollections
     const vectorMediaTypes = request.media_types.length
       ? request.media_types
-      : [...new Set(supportedSearchCollections.map((entry) => entry.mediaType))]
-    const selectedCollections = supportedSearchCollections.filter((entry) =>
-      vectorMediaTypes.includes(entry.mediaType),
+      : [...new Set(availableCollections.flatMap((entry) => entry.mediaTypes))]
+    const selectedCollections = availableCollections.filter((entry) =>
+      entry.mediaTypes.some((mediaType) => vectorMediaTypes.includes(mediaType)),
     )
     const queryVectorCache = new Map<string, Promise<number[]>>()
-    const embedQuery = (query: string, vectorDim: number) => {
-      const key = `${vectorDim}:${query}`
+    const embedQuery = (query: string, config: VectorCollectionConfig) => {
+      const key = `${config.modelName}:${config.modelVersion}:${config.vectorDim}:${query}`
       const cached = queryVectorCache.get(key)
       if (cached) {
         return cached
       }
-      const promise = this.queryVectorService.embedQuery(query, vectorDim)
+      const promise = this.queryVectorService.embedQuery(query, config)
       queryVectorCache.set(key, promise)
       return promise
     }
@@ -84,7 +101,7 @@ export class SearchService {
         const config = VECTOR_COLLECTIONS[collection]
         const points = await this.searchCollection(collection, {
           queryVariants,
-          vectorDim: config.vectorDim,
+          vectorConfig: config,
           libraryIds: request.library_ids,
           limit: sourceLimit,
           embedQuery,
@@ -136,17 +153,17 @@ export class SearchService {
     collection: VectorCollectionName,
     input: {
       queryVariants: QueryVariant[]
-      vectorDim: number
+      vectorConfig: VectorCollectionConfig
       libraryIds: string[]
       limit: number
-      embedQuery: (query: string, vectorDim: number) => Promise<number[]>
+      embedQuery: (query: string, config: VectorCollectionConfig) => Promise<number[]>
     },
   ) {
     const byPointId = new Map<string, Schemas['ScoredPoint']>()
     for (const variant of input.queryVariants) {
       const points = await this.qdrantClient.search(collection, {
         // Search API 只读取 Qdrant；query embedding 由本地 model service 同步生成，批量媒体 embedding 仍走 worker job。
-        vector: await input.embedQuery(variant.text, input.vectorDim),
+        vector: await input.embedQuery(variant.text, input.vectorConfig),
         filter: this.buildFilter(input.libraryIds),
         limit: input.limit,
         offset: 0,
@@ -224,10 +241,14 @@ export class SearchService {
           end_time_seconds: endTimeSeconds,
           scene_id: this.sceneId(row.metadataJson),
           score: point.score,
-          reason: 'vector_match',
+          reason: this.vectorReason(collection),
         },
       ]
     })
+  }
+
+  private vectorReason(collection: VectorCollectionName): HybridReason {
+    return collection === 'caption_text_vectors' ? 'caption_match' : 'vector_match'
   }
 
   private scoreKindForDistance(distance: string) {
@@ -319,7 +340,12 @@ export class SearchService {
   }
 
   private hybridReason(reason: string): HybridReason | undefined {
-    if (reason === 'vector_match' || reason === 'transcript_match' || reason === 'ocr_match') {
+    if (
+      reason === 'vector_match' ||
+      reason === 'transcript_match' ||
+      reason === 'ocr_match' ||
+      reason === 'caption_match'
+    ) {
       return reason
     }
     return undefined

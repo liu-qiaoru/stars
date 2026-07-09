@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-Local-first multimodal media search and editing agent. TypeScript/NestJS main API (`apps/server`), Python worker (`apps/worker-py`) + separate Python model service for media/model tasks, Next.js frontend (`apps/web`), shared schemas (`packages/shared`). ~1 TB personal media library target (video-heavy). Default config: external LLM **off**; all retrieval runs on local models (SigLIP, faster-whisper, PaddleOCR).
+Local-first multimodal media search and editing agent. TypeScript/NestJS main API (`apps/server`), Python worker (`apps/worker-py`) + separate Python model/VLM services for media/model tasks, Next.js frontend (`apps/web`), shared schemas (`packages/shared`). ~1 TB personal media library target (video-heavy). Default config: external LLM **off**; all retrieval runs on local models (SigLIP, faster-whisper, PaddleOCR, Qwen2.5-VL via local Ollama when caption indexing/rerank is enabled).
 
 ## Commands
 
@@ -44,26 +44,28 @@ docker compose --env-file .env -f infra/docker-compose.yml config             # 
 python3.12 -m venv .venv && .venv/bin/python -m pip install -r apps/worker-py/requirements.txt
 PYTHONPATH=apps/worker-py .venv/bin/python -m media_agent_worker                # worker
 PYTHONPATH=apps/worker-py .venv/bin/python -m media_agent_worker.model_service  # model service on :4020
+pnpm dev:vlm                                                                 # VLM caption service on :4030; defaults to Ollama on :11434
 ```
 
 If bare `pnpm` fails, use `corepack pnpm` (or `corepack enable`). Regenerate JSON schemas (`shared check` does this) before running server/Python tests whenever a Zod job schema changed.
 
 ## Local Runtime Topology
 
-End-to-end retrieval needs **five** things running; this is the part that requires reading several files to piece together:
+End-to-end retrieval needs **five** things running; caption indexing/rerank needs a sixth local service:
 
 1. **PostgreSQL + Qdrant** via `infra/docker-compose.yml`.
 2. **NestJS server** (`:4000`) — HTTP API, job creation, Qdrant reads, FTS reads, agent runtime. Owns schema.
-3. **Python worker** (`media_agent_worker`) — claims jobs from PostgreSQL (`FOR UPDATE SKIP LOCKED`), runs scan/probe/index/embed/transcribe/OCR/clip. Writes Qdrant points + `media_assets` + `vector_refs`.
-4. **Python model service** (`model_service`, `:4020`) — localhost HTTP service wrapping SigLIP. **Distinct from the worker**: the server calls it *synchronously* at search time to embed the query text. Without it, `/search` vector retrieval is unavailable (batch media embedding still works via worker jobs).
+3. **Python worker** (`media_agent_worker`) — claims jobs from PostgreSQL (`FOR UPDATE SKIP LOCKED`), runs scan/probe/index/embed/transcribe/OCR/caption/clip. Writes Qdrant points + `media_assets` + `vector_refs`.
+4. **Python model service** (`model_service`, `:4020`) — localhost HTTP service wrapping SigLIP plus lazy caption text embedding. **Distinct from the worker**: the server calls it *synchronously* at search time to embed the query text. Without it, `/search` vector retrieval is unavailable (batch media embedding still works via worker jobs).
 5. **Next.js web** (`:3000`).
+6. **Python VLM service** (`vlm_service`, `:4030`) — localhost HTTP service exposing `/caption`; by default it calls Ollama `:11434` with `OLLAMA_VLM_MODEL` (for example `qwen2.5vl:7b`). Needed only when `CAPTION_INDEXING_ENABLED=true` and `LOCAL_VLM_ENABLED=true` or later VLM rerank is enabled.
 
 ## Architecture
 
 ### Monorepo Layout
 
 - `apps/server` — NestJS API (Express adapter, ESM). Business logic, HTTP endpoints, DB access, Qdrant reads, agent runtime, search.
-- `apps/worker-py` — Python 3.12 worker. Claims jobs, executes media/model tasks. Raw SQL only (no ORM). Also hosts `model_service.py` (the synchronous embedding HTTP service).
+- `apps/worker-py` — Python 3.12 worker. Claims jobs, executes media/model tasks. Raw SQL only (no ORM). Also hosts `model_service.py` (the synchronous embedding HTTP service) and `vlm_service.py` (the local VLM caption service; defaults to Ollama backend).
 - `packages/shared` — Zod schemas, TypeScript types, constants, generated JSON Schema for the Python worker, API client. **TypeScript owns all schemas.**
 - `apps/web` — Next.js 16 / React 19 / Tailwind 4 frontend.
 - `infra/` — Docker Compose for PostgreSQL, Qdrant, optional Redis.
@@ -76,12 +78,13 @@ End-to-end retrieval needs **five** things running; this is the part that requir
 **PostgreSQL-backed job queue.** TS server creates jobs (`status='queued'`). Python worker claims with `SELECT ... FOR UPDATE SKIP LOCKED`. No Dramatiq/Celery/BullMQ. See `docs/job-protocol.md`.
 
 **Two embedding paths — do not conflate.**
-- *Batch media embedding* (indexing): `index_media` creates `pending` `vector_refs` → worker `embed_image`/`embed_video_frame` jobs write Qdrant + flip `vector_refs.status='indexed'`. Large vectors never cross the TS↔Python boundary as args; worker reads/writes Qdrant directly.
-- *Synchronous query embedding* (search): `/search` → `SearchQueryVectorService` → `ModelGatewayService.embedText` → `model_service:4020`. Must be synchronous — putting it on the job queue would stall search behind indexing.
+- *Batch media embedding* (indexing): `index_media` creates `pending` `vector_refs` → worker `embed_image`/`embed_video_frame`/`embed_text_asset` jobs write Qdrant + flip `vector_refs.status='indexed'`. Large vectors never cross the TS↔Python boundary as args; worker reads/writes Qdrant directly.
+- *Synchronous query embedding* (search): `/search` → `SearchQueryVectorService` → `ModelGatewayService.embedText` → `model_service:4020`. Query embedding is model-aware: SigLIP collections use SigLIP text tower, `caption_text_vectors` uses the caption text embedding model. Must be synchronous — putting it on the job queue would stall search behind indexing.
+- *Caption indexing* (Phase 15A): with `CAPTION_INDEXING_ENABLED=true` and `LOCAL_VLM_ENABLED=true`, `index_media` creates `generate_caption` jobs for image/video_segment assets. The worker calls `vlm_service:4030 /caption`; the VLM service defaults to `LOCAL_VLM_BACKEND=ollama` and calls `OLLAMA_BASE_URL/api/generate` using `OLLAMA_VLM_MODEL`, while `LOCAL_VLM_MODEL_NAME` / `LOCAL_VLM_MODEL_VERSION` remain the protocol/model identity recorded in jobs and caption assets. The worker writes `asset_type='caption'`, creates pending `caption_text_vectors`, then `embed_text_asset` writes Qdrant. Video captioning extracts temporary frames and deletes them after the VLM call; no persistent frame cache is used in Phase 15A.
 
-**Job pipeline auto-triggers + coordination endpoints.** In-worker, one handler completing creates the next jobs: `scan_library → probe_media → index_media`; `index_media` then fans out to `transcribe_audio`, `embed_*` (via pending `vector_refs`), and `run_ocr` (for image/video_frame assets). The server's two catch-up endpoints re-scan and fan out whatever the auto-trigger missed: `POST /jobs/embedding/queue-pending` (pending `vector_refs`) and `POST /jobs/ocr/queue-pending` (image/video_frame assets lacking OCR).
+**Job pipeline auto-triggers + coordination endpoints.** In-worker, one handler completing creates the next jobs: `scan_library → probe_media → index_media`; `index_media` then fans out to `transcribe_audio`, `embed_*` (via pending `vector_refs`), `run_ocr` (for image/video_frame assets), and optionally `generate_caption` (for image/video_segment assets when caption switches are enabled). The server's two catch-up endpoints re-scan and fan out whatever the auto-trigger missed: `POST /jobs/embedding/queue-pending` (pending `vector_refs`) and `POST /jobs/ocr/queue-pending` (image/video_frame assets lacking OCR).
 
-**Full-text search is co-located on `media_assets`.** `media_assets.text_content` + a generated `text_tsv` tsvector (`to_tsvector('simple', ...)`) + GIN index. Transcript (`text_chunk`) and OCR (`image`/`video_frame`) **both write into the same column**; no separate search table. `SearchService` queries `text_chunk`/`image`/`video_frame` and maps `reason` by asset type: `text_chunk → text_match`, `image`/`video_frame → ocr_match`.
+**Full-text search is co-located on `media_assets`.** `media_assets.text_content` + a generated `text_tsv` tsvector (`to_tsvector('simple', ...)`) + GIN index. Transcript (`text_chunk`) and OCR (`image`/`video_frame`) **both write into the same column**; no separate search table. `SearchService` queries `text_chunk`/`image`/`video_frame` and maps `reason` by asset type: `text_chunk → text_match`, `image`/`video_frame → ocr_match`. Caption assets are not included in FTS in Phase 15A; caption retrieval uses `caption_text_vectors` and returns `caption_match`.
 
 **NestJS module structure.** Each domain is a standalone module (config, health, database, libraries, jobs, media, search, clips, agent, qdrant, model-gateway). DI via Symbol tokens: `DATABASE` (Drizzle), `SETTINGS` (parsed env), `QDRANT_CLIENT`, `PG_POOL`. No direct imports of infrastructure.
 
@@ -97,6 +100,7 @@ End-to-end retrieval needs **five** things running; this is the part that requir
 - Phase 11: `scenedetect` — video scene detection.
 - Phase 12: faster-whisper (CTranslate2) — transcription.
 - Phase 13: PaddleOCR — image/keyframe OCR.
+- Phase 15A: Qwen2.5-VL caption generation defaults to Ollama (`LOCAL_VLM_BACKEND=ollama`, `OLLAMA_VLM_MODEL=qwen2.5vl:7b`). The legacy Transformers backend is still available with `LOCAL_VLM_BACKEND=transformers` and then uses `torch`, `torchvision`, `accelerate`, `pillow`; caption text embedding uses `transformers` mean pooling on `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`.
 
 ## Node/pnpm Notes
 
@@ -112,6 +116,7 @@ End-to-end retrieval needs **five** things running; this is the part that requir
 - `docs/job-protocol.md` — job types, input/output schemas, claim rules, worker write boundaries.
 - `docs/vector-index-design.md` — Qdrant collections, point structure, payload fields, FTS.
 - `docs/implementation-plan.md` — phased plan (currently through Phase 13) with deliverables and acceptance criteria.
+- `docs/superpowers/plans/2026-07-08-vlm-caption-rerank.md` — Phase 15A/15B caption retrieval and VLM rerank plan.
 - `docs/tasks/todo.md` — phase tracking with checkboxes and review notes.
 - `docs/tasks/lessons.md` — architectural decisions and reasoning.
 

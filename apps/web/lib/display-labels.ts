@@ -12,6 +12,7 @@ const collectionLabels: Record<string, string> = {
   image_vectors: '图片向量',
   video_segment_vectors: '视频片段向量',
   video_frame_vectors: '视频帧向量',
+  caption_text_vectors: 'Caption 文本向量',
 }
 
 const scoreKindLabels: Record<string, string> = {
@@ -24,12 +25,15 @@ const reasonLabels: Record<string, string> = {
   vector_match: '视觉命中',
   transcript_match: '转写命中',
   ocr_match: 'OCR 命中',
+  caption_match: 'Caption 命中',
 }
 
 const jobTypeLabels: Record<string, string> = {
   scan_library: '扫描素材库',
   probe_media: '探测媒体',
   index_media: '索引媒体',
+  generate_caption: '生成 Caption',
+  embed_text_asset: '文本向量化',
   export_clip: '导出片段',
 }
 
@@ -45,7 +49,9 @@ const statusLabels: Record<string, string> = {
 const assetTypeLabels: Record<string, string> = {
   image: '图片资产',
   video_segment: '视频片段',
+  video_frame: '视频帧',
   audio_segment: '音频片段',
+  caption: 'Caption 文本',
 }
 
 export function formatMediaType(mediaType: MediaType) {

@@ -178,6 +178,7 @@
                 "video_frame_vectors",
                 "video_segment_vectors",
                 "audio_segment_vectors",
+                "caption_text_vectors",
                 "text_chunk_vectors"
               ]
             }
@@ -389,6 +390,7 @@
               "video_frame_vectors",
               "video_segment_vectors",
               "audio_segment_vectors",
+              "caption_text_vectors",
               "text_chunk_vectors"
             ]
           },
@@ -472,6 +474,7 @@
               "video_frame_vectors",
               "video_segment_vectors",
               "audio_segment_vectors",
+              "caption_text_vectors",
               "text_chunk_vectors"
             ]
           },
@@ -494,6 +497,149 @@
           "vector_dim",
           "model_name",
           "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "embed_text_asset": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection": {
+            "type": "string",
+            "const": "caption_text_vectors"
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "asset_id",
+          "collection",
+          "model_name",
+          "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "point_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection": {
+            "type": "string",
+            "enum": [
+              "image_vectors",
+              "video_frame_vectors",
+              "video_segment_vectors",
+              "audio_segment_vectors",
+              "caption_text_vectors",
+              "text_chunk_vectors"
+            ]
+          },
+          "vector_dim": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "point_id",
+          "collection",
+          "vector_dim",
+          "model_name",
+          "model_version"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
+    "generate_caption": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_asset_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1
+          },
+          "prompt_version": {
+            "type": "string",
+            "const": "caption-v1",
+            "default": "caption-v1"
+          },
+          "model_name": {
+            "type": "string",
+            "minLength": 1,
+            "default": "Qwen/Qwen2.5-VL-7B-Instruct"
+          },
+          "model_version": {
+            "type": "string",
+            "minLength": 1,
+            "default": "qwen2.5-vl-7b-instruct"
+          }
+        },
+        "required": [
+          "file_id",
+          "source_asset_ids"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "caption_asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_assets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1
+          },
+          "text_written": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "vector_ref_created": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "caption_asset_id",
+          "source_assets",
+          "text_written"
         ],
         "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"

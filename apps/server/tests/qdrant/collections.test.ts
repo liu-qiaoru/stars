@@ -6,6 +6,7 @@ describe("vector collection registry", () => {
   test("定义 Phase 10 SigLIP Qdrant collections", () => {
     expect(Object.keys(VECTOR_COLLECTIONS).sort()).toEqual([
       "audio_segment_vectors",
+      "caption_text_vectors",
       "image_vectors",
       "text_chunk_vectors",
       "video_frame_vectors",
@@ -22,6 +23,12 @@ describe("vector collection registry", () => {
     expect(VECTOR_COLLECTIONS.text_chunk_vectors).toMatchObject({
       modelName: "sentence-transformers",
       modelVersion: "all-MiniLM-L6-v2",
+      vectorDim: 384,
+    });
+    expect(VECTOR_COLLECTIONS.caption_text_vectors).toMatchObject({
+      modelName: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      modelVersion: "paraphrase-multilingual-MiniLM-L12-v2",
+      vectorKind: "vlm_caption_text_embedding",
       vectorDim: 384,
     });
   });

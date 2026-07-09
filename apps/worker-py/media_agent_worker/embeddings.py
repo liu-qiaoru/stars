@@ -5,6 +5,9 @@ import os
 DEFAULT_SIGLIP_MODEL_NAME = "google/siglip-base-patch16-224"
 DEFAULT_SIGLIP_MODEL_VERSION = "siglip-base-patch16-224"
 DEFAULT_SIGLIP_VECTOR_DIM = 768
+DEFAULT_CAPTION_TEXT_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+DEFAULT_CAPTION_TEXT_MODEL_VERSION = "paraphrase-multilingual-MiniLM-L12-v2"
+DEFAULT_CAPTION_TEXT_VECTOR_DIM = 384
 
 
 def normalize_vector(vector):
@@ -104,6 +107,59 @@ class SiglipEmbedder:
         if self.expected_vector_dim is not None and actual_dim != self.expected_vector_dim:
             raise RuntimeError(
                 f"SigLIP vector dimension mismatch: expected {self.expected_vector_dim}, got {actual_dim}"
+            )
+        self.vector_dim = actual_dim
+        return normalize_vector(vector)
+
+
+class TransformerTextEmbedder:
+    """Local text embedding wrapper for generated VLM captions."""
+
+    def __init__(
+        self,
+        *,
+        model_name=DEFAULT_CAPTION_TEXT_MODEL_NAME,
+        model_version=DEFAULT_CAPTION_TEXT_MODEL_VERSION,
+        expected_vector_dim=DEFAULT_CAPTION_TEXT_VECTOR_DIM,
+        device=None,
+    ):
+        try:
+            import torch
+            from transformers import AutoModel, AutoTokenizer
+        except ImportError as error:
+            raise RuntimeError(
+                "Install torch and transformers to use caption text embeddings"
+            ) from error
+
+        self.torch = torch
+        self.model_name = model_name
+        self.model_version = model_version
+        self.expected_vector_dim = expected_vector_dim
+        self.device = select_torch_device(device, torch_module=torch)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name)
+        self.model.to(self.device)
+        self.model.eval()
+        self.vector_dim = expected_vector_dim
+
+    def embed_text(self, text):
+        inputs = self.tokenizer(
+            [text],
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+        )
+        inputs = {key: value.to(self.device) for key, value in inputs.items()}
+        with self.torch.no_grad():
+            outputs = self.model(**inputs)
+            hidden = outputs.last_hidden_state
+            mask = inputs["attention_mask"].unsqueeze(-1).expand(hidden.size()).float()
+            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
+        vector = pooled[0].detach().float().cpu().tolist()
+        actual_dim = len(vector)
+        if self.expected_vector_dim is not None and actual_dim != self.expected_vector_dim:
+            raise RuntimeError(
+                f"Caption text vector dimension mismatch: expected {self.expected_vector_dim}, got {actual_dim}"
             )
         self.vector_dim = actual_dim
         return normalize_vector(vector)

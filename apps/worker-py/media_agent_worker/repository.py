@@ -355,7 +355,8 @@ class PostgresMediaRepository:
                   vr.asset_id, vr.file_id, vr.library_id, vr.collection_name, vr.point_id,
                   vr.model_name, vr.model_version, vr.vector_kind, vr.vector_dim, vr.distance,
                   vr.content_hash, vr.index_profile, ma.asset_type, mf.media_type,
-                  ma.start_time_seconds, ma.end_time_seconds, ma.frame_time_seconds, ma.metadata_json
+                  ma.start_time_seconds, ma.end_time_seconds, ma.frame_time_seconds, ma.metadata_json,
+                  ma.text_content
                 FROM vector_refs vr
                 JOIN media_assets ma ON ma.id = vr.asset_id
                 JOIN media_files mf ON mf.id = vr.file_id
@@ -388,6 +389,39 @@ class PostgresMediaRepository:
             "end_time_seconds": float(row[15]) if row[15] is not None else None,
             "frame_time_seconds": float(row[16]) if row[16] is not None else None,
             "metadata_json": row[17] or {},
+            "text_content": row[18],
+        }
+
+    def get_caption_source_asset(self, asset_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                  ma.id, ma.file_id, ma.asset_type, COALESCE(ma.path, mf.path) AS path,
+                  ma.start_time_seconds, ma.end_time_seconds, ma.frame_time_seconds,
+                  ma.content_hash, ma.metadata_json, mf.library_id, mf.media_type
+                FROM media_assets ma
+                JOIN media_files mf ON mf.id = ma.file_id
+                WHERE ma.id = %s
+                  AND ma.asset_type IN ('image', 'video_segment')
+                """,
+                (asset_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f"Caption source asset not found: {asset_id}")
+        return {
+            "id": str(row[0]),
+            "file_id": str(row[1]),
+            "asset_type": row[2],
+            "path": row[3],
+            "start_time_seconds": float(row[4]) if row[4] is not None else None,
+            "end_time_seconds": float(row[5]) if row[5] is not None else None,
+            "frame_time_seconds": float(row[6]) if row[6] is not None else None,
+            "content_hash": row[7],
+            "metadata_json": row[8] or {},
+            "library_id": str(row[9]),
+            "media_type": row[10],
         }
 
     def invalidate_video_index_assets(self, file_id, segment_strategy, keyframe_density=None):

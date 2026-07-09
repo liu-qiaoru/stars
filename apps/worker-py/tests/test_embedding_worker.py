@@ -3,10 +3,10 @@ import unittest
 from pathlib import Path
 
 from media_agent_worker.__main__ import build_runner
-from media_agent_worker.embedding_worker import EmbedImageHandler, EmbedVideoFrameHandler
+from media_agent_worker.embedding_worker import EmbedImageHandler, EmbedTextAssetHandler, EmbedVideoFrameHandler
 from media_agent_worker.embedding_worker import extract_video_frame
 from media_agent_worker.embeddings import normalize_vector, select_torch_device
-from media_agent_worker.model_service import handle_embed_text_request
+from media_agent_worker.model_service import EmbeddingModelRouter, handle_embed_text_request
 from media_agent_worker.worker import WorkerRunner
 
 
@@ -77,6 +77,26 @@ class EmbeddingWorkerTest(unittest.TestCase):
         })
         self.assertEqual(embedder.texts, ["red car"])
 
+    def test_model_service_routes_caption_text_model_requests(self):
+        siglip_embedder = FakeEmbedder()
+        caption_embedder = FakeEmbedder()
+        caption_embedder.model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        caption_embedder.model_version = "paraphrase-multilingual-MiniLM-L12-v2"
+        router = EmbeddingModelRouter(
+            siglip_embedder=siglip_embedder,
+            caption_text_embedder_factory=lambda: caption_embedder,
+        )
+
+        response = handle_embed_text_request(router, {
+            "text": "一只猫坐在窗边",
+            "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+        })
+
+        self.assertEqual(response["model_name"], "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+        self.assertEqual(caption_embedder.texts, ["一只猫坐在窗边"])
+        self.assertEqual(siglip_embedder.texts, [])
+
     def test_embed_image_job_writes_qdrant_point_and_marks_vector_ref_indexed(self):
         repository = FakeEmbeddingRepository()
         repository.add_vector_ref({
@@ -115,6 +135,48 @@ class EmbeddingWorkerTest(unittest.TestCase):
         self.assertEqual(collection_name, "image_vectors")
         self.assertEqual(point["vector"], [0.1, 0.2, 0.3, 0.4])
         self.assertEqual(point["payload"]["model_name"], "google/siglip-base-patch16-224")
+
+    def test_embed_text_asset_job_writes_caption_vector_and_marks_ref_indexed(self):
+        repository = FakeEmbeddingRepository()
+        repository.add_vector_ref({
+            "asset_id": "caption-1",
+            "file_id": "file-1",
+            "library_id": "library-1",
+            "collection_name": "caption_text_vectors",
+            "point_id": "44444444-4444-4444-8444-444444444444",
+            "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+            "vector_kind": "vlm_caption_text_embedding",
+            "vector_dim": 4,
+            "distance": "Cosine",
+            "content_hash": "caption-hash",
+            "index_profile": "balanced",
+            "asset_type": "caption",
+            "media_type": "video",
+            "start_time_seconds": 10.0,
+            "end_time_seconds": 20.0,
+            "text_content": "一只猫坐在窗边",
+            "metadata_json": {"source": "vlm_caption", "prompt_version": "caption-v1"},
+        })
+        qdrant = FakeQdrantClient()
+        embedder = FakeEmbedder()
+        handler = EmbedTextAssetHandler(repository, qdrant, embedder)
+
+        result = handler.handle({
+            "asset_id": "caption-1",
+            "collection": "caption_text_vectors",
+            "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+        })
+
+        self.assertEqual(result["point_id"], "44444444-4444-4444-8444-444444444444")
+        self.assertEqual(embedder.texts, ["一只猫坐在窗边"])
+        self.assertEqual(repository.indexed, ["44444444-4444-4444-8444-444444444444"])
+        collection_name, point = qdrant.points[0]
+        self.assertEqual(collection_name, "caption_text_vectors")
+        self.assertEqual(point["vector"], [0.4, 0.3, 0.2, 0.1])
+        self.assertEqual(point["payload"]["asset_type"], "caption")
+        self.assertEqual(point["payload"]["source"], "vlm_caption")
 
     def test_embed_video_segment_job_extracts_representative_frame_before_embedding(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -212,6 +274,7 @@ class EmbeddingWorkerTest(unittest.TestCase):
 
         self.assertIs(runner.embed_image_handler.embedder, embedder)
         self.assertIs(runner.embed_video_frame_handler.embedder, embedder)
+        self.assertIs(runner.embed_text_asset_handler.embedder, embedder)
 
     def test_extract_video_frame_removes_temp_file_when_ffmpeg_fails(self):
         outputs = []

@@ -31,6 +31,16 @@ describe("createSettings", () => {
       deepseekBaseUrl: "https://api.deepseek.com",
       deepseekApiKey: undefined,
       deepseekModel: "deepseek-v4-flash",
+      captionIndexingEnabled: false,
+      captionSearchEnabled: false,
+      localVlmEnabled: false,
+      localVlmServiceUrl: "http://127.0.0.1:4030",
+      searchRerankMode: "off",
+      searchRerankTopK: 10,
+      searchRerankTimeoutMs: 30000,
+      frameCacheEnabled: false,
+      frameCacheMaxBytes: 1073741824,
+      frameCacheImageMaxWidth: 512,
     });
   });
 

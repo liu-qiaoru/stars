@@ -2,7 +2,7 @@ import os
 import subprocess
 import tempfile
 
-from .embeddings import SiglipEmbedder
+from .embeddings import SiglipEmbedder, TransformerTextEmbedder
 
 
 def extract_video_frame(source_path, frame_time_seconds, runner=subprocess.run):
@@ -39,20 +39,27 @@ class BaseEmbeddingHandler:
         self.qdrant_client = qdrant_client
         self.embedder = embedder or SiglipEmbedder()
 
-    def _embed_and_write(self, *, job_input, image_path):
+    def _load_vector_ref(self, job_input):
         # Re-read vector_ref at execution time so retries use the current model version, point id and payload fields.
-        vector_ref = self.repository.get_vector_ref_for_embedding(
+        return self.repository.get_vector_ref_for_embedding(
             asset_id=job_input["asset_id"],
             collection_name=job_input["collection"],
             model_name=job_input["model_name"],
             model_version=job_input["model_version"],
         )
+
+    def _embed_and_write(self, *, job_input, image_path):
+        vector_ref = self._load_vector_ref(job_input)
         vector = self.embedder.embed_image_path(image_path)
+        return self._write_vector(vector_ref, vector)
+
+    def _write_vector(self, vector_ref, vector):
         if len(vector) != vector_ref["vector_dim"]:
             raise ValueError(
                 f"Embedding dimension mismatch for {vector_ref['point_id']}: "
                 f"expected {vector_ref['vector_dim']}, got {len(vector)}"
             )
+        metadata = vector_ref.get("metadata_json", {})
 
         self.qdrant_client.upsert_point(
             # Payload is intentionally redundant with PostgreSQL for cheap Qdrant filtering/debugging.
@@ -73,6 +80,8 @@ class BaseEmbeddingHandler:
                     "scene_id": vector_ref.get("metadata_json", {}).get("scene_id"),
                     "segment_strategy": vector_ref.get("metadata_json", {}).get("segment_strategy"),
                     "keyframe_index": vector_ref.get("metadata_json", {}).get("keyframe_index"),
+                    "source": metadata.get("source"),
+                    "prompt_version": metadata.get("prompt_version"),
                     "model_name": vector_ref["model_name"],
                     "model_version": vector_ref["model_version"],
                     "vector_kind": vector_ref["vector_kind"],
@@ -115,3 +124,26 @@ class EmbedVideoFrameHandler(BaseEmbeddingHandler):
                     os.unlink(extracted_path)
                 except FileNotFoundError:
                     pass
+
+
+class EmbedTextAssetHandler(BaseEmbeddingHandler):
+    def __init__(self, repository, qdrant_client, embedder=None, embedder_factory=TransformerTextEmbedder):
+        self.repository = repository
+        self.qdrant_client = qdrant_client
+        self.embedder = embedder
+        self.embedder_factory = embedder_factory
+
+    def _text_embedder(self):
+        if self.embedder is None:
+            self.embedder = self.embedder_factory()
+        return self.embedder
+
+    def handle(self, job_input):
+        vector_ref = self._load_vector_ref(job_input)
+        if vector_ref["asset_type"] != "caption":
+            raise ValueError(f"embed_text_asset only supports caption assets, got {vector_ref['asset_type']}")
+        text = vector_ref.get("text_content")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(f"Caption asset has no text_content: {vector_ref['asset_id']}")
+        vector = self._text_embedder().embed_text(text)
+        return self._write_vector(vector_ref, vector)

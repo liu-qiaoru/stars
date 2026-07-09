@@ -83,6 +83,9 @@ describe("typed API client", () => {
     expect(client.mediaContentUrl("file-1", { startTimeSeconds: 12.5 })).toBe(
       "http://api.local/media/file-1/content#t=12.5",
     );
+    expect(client.mediaContentUrl("file-1", { startTimeSeconds: 12.5, endTimeSeconds: 24 })).toBe(
+      "http://api.local/media/file-1/content#t=12.5,24",
+    );
   });
 
   test("posts clip export requests with time range", async () => {

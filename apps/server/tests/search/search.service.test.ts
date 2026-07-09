@@ -37,6 +37,16 @@ const testSettings: Settings = {
   deepseekBaseUrl: "https://api.deepseek.com",
   deepseekApiKey: undefined,
   deepseekModel: "deepseek-v4-flash",
+  captionIndexingEnabled: false,
+  captionSearchEnabled: false,
+  localVlmEnabled: false,
+  localVlmServiceUrl: "http://127.0.0.1:4030",
+  searchRerankMode: "off",
+  searchRerankTopK: 10,
+  searchRerankTimeoutMs: 30000,
+  frameCacheEnabled: false,
+  frameCacheMaxBytes: 1073741824,
+  frameCacheImageMaxWidth: 512,
 };
 let currentSettings: Settings = testSettings;
 
@@ -160,7 +170,7 @@ describe("search service", () => {
           start_time_seconds: null,
           end_time_seconds: null,
           scene_id: null,
-          score: 0.91 * 0.55,
+          score: 0.91,
           score_kind: "hybrid_score",
           primary_reason: "vector_match",
           reasons: ["vector_match"],
@@ -175,7 +185,7 @@ describe("search service", () => {
           start_time_seconds: 30,
           end_time_seconds: 60,
           scene_id: null,
-          score: 0.82 * 0.55,
+          score: 0.82,
           score_kind: "hybrid_score",
           primary_reason: "vector_match",
           reasons: ["vector_match"],
@@ -242,7 +252,11 @@ describe("search service", () => {
         },
       }),
     );
-    expect(embedText).toHaveBeenCalledWith("cat by window", 768);
+    expect(embedText).toHaveBeenCalledWith("cat by window", {
+      modelName: "google/siglip-base-patch16-224",
+      modelVersion: "siglip-base-patch16-224",
+      vectorDim: 768,
+    });
   });
 
   test("空结果返回稳定分页结构", async () => {
@@ -331,7 +345,11 @@ describe("search service", () => {
     const result = await service.search({ query, media_types: ["video"], limit: 10 });
 
     expect(embedText).toHaveBeenCalledTimes(1);
-    expect(embedText).toHaveBeenCalledWith(query, 768);
+    expect(embedText).toHaveBeenCalledWith(query, {
+      modelName: "google/siglip-base-patch16-224",
+      modelVersion: "siglip-base-patch16-224",
+      vectorDim: 768,
+    });
     expect(logSpy).toHaveBeenCalledWith('provider=none api_key=unset query_expansion=disabled');
     expect(result.results).toEqual([
       expect.objectContaining({
@@ -439,8 +457,16 @@ describe("search service", () => {
         headers: expect.objectContaining({ authorization: "Bearer test-key" }),
       }),
     );
-    expect(embedText).toHaveBeenCalledWith("架子鼓", 768);
-    expect(embedText).toHaveBeenCalledWith("drum kit", 768);
+    expect(embedText).toHaveBeenCalledWith("架子鼓", {
+      modelName: "google/siglip-base-patch16-224",
+      modelVersion: "siglip-base-patch16-224",
+      vectorDim: 768,
+    });
+    expect(embedText).toHaveBeenCalledWith("drum kit", {
+      modelName: "google/siglip-base-patch16-224",
+      modelVersion: "siglip-base-patch16-224",
+      vectorDim: 768,
+    });
     expect(result.results[0]).toMatchObject({ asset_id: asset.id });
     expect(result.results[0]?.source_scores.video_segment_vectors).toBeCloseTo(0.72, 5);
     expect(logSpy).toHaveBeenCalledWith(
@@ -538,6 +564,115 @@ describe("search service", () => {
         },
       }),
     ]);
+  });
+
+  test("caption search is disabled by default", async () => {
+    search.mockResolvedValue([]);
+
+    await service.search({ query: "kitchen cooking", media_types: ["video"], limit: 10 });
+
+    expect(search).not.toHaveBeenCalledWith("caption_text_vectors", expect.any(Object));
+  });
+
+  test("caption vector hits are returned as caption_match when enabled", async () => {
+    currentSettings = {
+      ...testSettings,
+      captionSearchEnabled: true,
+    };
+    await closeModule();
+    const moduleRef = await Test.createTestingModule({
+      imports: [SearchModule],
+    })
+      .overrideProvider(DATABASE)
+      .useValue(db)
+      .overrideProvider(PG_POOL)
+      .useValue(null)
+      .overrideProvider(SETTINGS)
+      .useValue(currentSettings)
+      .overrideProvider(QDRANT_CLIENT)
+      .useValue({ search })
+      .overrideProvider(ModelGatewayService)
+      .useValue({ embedText })
+      .compile();
+    service = moduleRef.get(SearchService);
+    closeModule = () => moduleRef.close();
+
+    const library = await createLibrary(db, { name: "Video", rootPath: "/video" });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/video/kitchen.mp4",
+      relativePath: "kitchen.mp4",
+      mediaType: "video",
+      sizeBytes: 100,
+      mtimeMs: 1710000000000,
+    });
+    const captionAsset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "caption",
+      startTimeSeconds: "10",
+      endTimeSeconds: "20",
+      textContent: "A person cooks in a kitchen",
+      contentHash: "caption-hash",
+    });
+    const pointId = "12121212-1212-4212-8212-121212121212";
+    await createVectorRef(db, {
+      assetId: captionAsset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: "caption_text_vectors",
+      pointId,
+      modelName: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      modelVersion: "paraphrase-multilingual-MiniLM-L12-v2",
+      vectorKind: "vlm_caption_text_embedding",
+      vectorDim: 384,
+      distance: "Cosine",
+      contentHash: "caption-hash",
+      indexProfile: "balanced",
+      status: "indexed",
+    });
+    embedText.mockImplementation(async (_text: string, expected: unknown) => {
+      if (typeof expected === "object" && expected !== null && "vectorDim" in expected) {
+        return Array.from({ length: Number(expected.vectorDim) }, (_, index) => index / Number(expected.vectorDim));
+      }
+      return Array.from({ length: 768 }, (_, index) => index / 768);
+    });
+    search.mockImplementation(async (collectionName: string) => {
+      if (collectionName === "caption_text_vectors") {
+        return [{ id: pointId, score: 0.86 }];
+      }
+      return [];
+    });
+
+    const result = await service.search({ query: "kitchen cooking", media_types: ["video"], limit: 10 });
+
+    expect(search).toHaveBeenCalledWith("caption_text_vectors", expect.any(Object));
+    expect(result.groups).toEqual(
+      expect.arrayContaining([
+        {
+          collection: "caption_text_vectors",
+          score_kind: "cosine_similarity",
+          results: [
+            {
+              asset_id: captionAsset.id,
+              file_id: file.id,
+              media_type: "video",
+              path: "/video/kitchen.mp4",
+              start_time_seconds: 10,
+              end_time_seconds: 20,
+              scene_id: null,
+              score: 0.86,
+              reason: "caption_match",
+            },
+          ],
+        },
+      ]),
+    );
+    expect(result.results[0]).toMatchObject({
+      asset_id: captionAsset.id,
+      primary_reason: "caption_match",
+      reasons: ["caption_match"],
+      source_scores: { caption_text_vectors: 0.86 },
+    });
   });
 
   test("audio-only search returns transcript matches from PostgreSQL FTS", async () => {

@@ -95,7 +95,7 @@ export class JobsService {
         continue
       }
       await createJob(this.db, {
-        jobType: input.collection === 'image_vectors' ? 'embed_image' : 'embed_video_frame',
+        jobType: this.embeddingJobType(input.collection),
         inputJson: input,
       })
       lastAttemptedAtByKey.set(key, new Date())
@@ -172,6 +172,14 @@ export class JobsService {
         model_version: ref.modelVersion,
       }
     }
+    if (ref.collectionName === 'caption_text_vectors') {
+      return {
+        asset_id: ref.assetId,
+        collection: ref.collectionName,
+        model_name: ref.modelName,
+        model_version: ref.modelVersion,
+      }
+    }
 
     return {
       asset_id: ref.assetId,
@@ -194,6 +202,19 @@ export class JobsService {
       return (Number(ref.startTimeSeconds) + Number(ref.endTimeSeconds)) / 2
     }
     return 0
+  }
+
+  private embeddingJobType(collection: string) {
+    if (collection === 'image_vectors') {
+      return 'embed_image'
+    }
+    if (collection === 'caption_text_vectors') {
+      return 'embed_text_asset'
+    }
+    if (collection === 'video_frame_vectors' || collection === 'video_segment_vectors') {
+      return 'embed_video_frame'
+    }
+    throw new Error(`Unsupported embedding collection: ${collection}`)
   }
 
   private embeddingJobKey(input: {
