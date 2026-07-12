@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common'
 import { EvaluationService } from './evaluation.service.js'
 
 @Controller('evaluation')
 export class EvaluationController {
-  constructor(private readonly service: EvaluationService) {}
+  constructor(@Inject(EvaluationService) private readonly service: EvaluationService) {}
 
   @Get('sets') listSets() {
     return this.service.listSets()
