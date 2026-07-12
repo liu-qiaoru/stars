@@ -17,11 +17,17 @@ interface SearchWorkspaceProps {
   libraries: LibrarySummary[]
   initialQuery: string
   initialResults: SearchResponse
+  apiClient?: Pick<ReturnType<typeof createApiClient>, 'searchMedia'>
 }
 
 const mediaFilters = ['image', 'video', 'audio'] as const
 
-export function SearchWorkspace({ libraries, initialQuery, initialResults }: SearchWorkspaceProps) {
+export function SearchWorkspace({
+  libraries,
+  initialQuery,
+  initialResults,
+  apiClient = createApiClient(),
+}: SearchWorkspaceProps) {
   const [query, setQuery] = useState(initialQuery)
   const [activeMedia, setActiveMedia] = useState<(typeof mediaFilters)[number][]>([
     'image',
@@ -30,6 +36,7 @@ export function SearchWorkspace({ libraries, initialQuery, initialResults }: Sea
   ])
   const [results, setResults] = useState(initialResults)
   const [isLoading, setIsLoading] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [previewItem, setPreviewItem] = useState<SearchResultItem | null>(null)
   // 新 API 优先展示 top-level hybrid results；旧 groups 响应仍可通过 visibleResults fallback 渲染。
   const primaryResults = useMemo(() => visibleResults(results), [results])
@@ -43,10 +50,10 @@ export function SearchWorkspace({ libraries, initialQuery, initialResults }: Sea
       return
     }
     setIsLoading(true)
+    setSearchError(null)
     setQuery(nextQuery)
     try {
-      const client = createApiClient()
-      const response = await client.searchMedia({
+      const response = await apiClient.searchMedia({
         query: nextQuery,
         media_types: activeMedia,
         library_ids: [],
@@ -54,8 +61,8 @@ export function SearchWorkspace({ libraries, initialQuery, initialResults }: Sea
         offset: 0,
       })
       setResults(response)
-    } catch {
-      setResults(initialResults)
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : '未知错误')
     } finally {
       setIsLoading(false)
     }
@@ -76,14 +83,32 @@ export function SearchWorkspace({ libraries, initialQuery, initialResults }: Sea
           <p className="eyebrow">向量检索</p>
           <h1 className="page-title">搜索本地媒体</h1>
         </div>
-        <form action={submitSearch} className="search-shell">
+        <form
+          className="search-shell"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void submitSearch(new FormData(event.currentTarget))
+          }}
+        >
           <Search aria-hidden="true" size={18} />
-          <input name="query" defaultValue={query} aria-label="搜索关键词" />
+          <input name="query" defaultValue={query} aria-label="搜索关键词" disabled={isLoading} />
           <button type="submit" className="primary-action" disabled={isLoading}>
             {isLoading ? '搜索中' : '搜索'}
           </button>
         </form>
       </section>
+
+      {isLoading ? (
+        <div className="search-progress" role="status" aria-live="polite">
+          <span className="search-spinner" aria-hidden="true" />
+          正在检索，请稍候…
+        </div>
+      ) : null}
+      {searchError ? (
+        <div className="search-error" role="alert">
+          搜索失败：{searchError}。已保留上一次结果。
+        </div>
+      ) : null}
 
       <section className="filter-row" aria-label="搜索筛选">
         <span className="inline-flex items-center gap-2 text-sm font-bold">
@@ -96,6 +121,7 @@ export function SearchWorkspace({ libraries, initialQuery, initialResults }: Sea
             type="button"
             className={activeMedia.includes(mediaType) ? 'filter-chip-active' : 'filter-chip'}
             onClick={() => toggleMedia(mediaType)}
+            disabled={isLoading}
           >
             {formatMediaType(mediaType)}
           </button>
@@ -223,13 +249,7 @@ function SearchCard({
   )
 }
 
-function SearchResultPreview({
-  item,
-  priority,
-}: {
-  item: SearchResultItem
-  priority: boolean
-}) {
+function SearchResultPreview({ item, priority }: { item: SearchResultItem; priority: boolean }) {
   const mediaUrl = createApiClient().mediaContentUrl(item.file_id, {
     startTimeSeconds: item.start_time_seconds,
     endTimeSeconds: item.end_time_seconds,
@@ -270,13 +290,7 @@ function SearchResultPreview({
   return <div aria-label={item.path} className="media-thumb aspect-[16/10]" />
 }
 
-function MediaPreviewDialog({
-  item,
-  onClose,
-}: {
-  item: SearchResultItem
-  onClose: () => void
-}) {
+function MediaPreviewDialog({ item, onClose }: { item: SearchResultItem; onClose: () => void }) {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {

@@ -52,10 +52,33 @@ describe('job schemas', () => {
   })
 
   it('rejects unsupported run_ocr engines', () => {
-    expect(() => jobInputSchemas.run_ocr.parse({
-      asset_ids: ['11111111-1111-4111-8111-111111111111'],
-      engine: 'easyocr',
-      language: 'ch',
-    })).toThrow()
+    expect(() =>
+      jobInputSchemas.run_ocr.parse({
+        asset_ids: ['11111111-1111-4111-8111-111111111111'],
+        engine: 'easyocr',
+        language: 'ch',
+      }),
+    ).toThrow()
+  })
+
+  it('accepts scene-caption-v2 while preserving caption-v1 jobs', () => {
+    const base = {
+      file_id: '11111111-1111-4111-8111-111111111111',
+      source_asset_ids: ['22222222-2222-4222-8222-222222222222'],
+      model_name: 'Qwen/Qwen2.5-VL-7B-Instruct',
+      model_version: 'qwen2.5-vl-7b-instruct',
+    }
+
+    expect(
+      jobInputSchemas.generate_caption.parse({ ...base, prompt_version: 'caption-v1' })
+        .prompt_version,
+    ).toBe('caption-v1')
+    expect(
+      jobInputSchemas.generate_caption.parse({ ...base, prompt_version: 'scene-caption-v2' })
+        .prompt_version,
+    ).toBe('scene-caption-v2')
+    expect(() =>
+      jobInputSchemas.generate_caption.parse({ ...base, prompt_version: 'caption-v3' }),
+    ).toThrow()
   })
 })

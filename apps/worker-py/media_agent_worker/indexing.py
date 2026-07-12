@@ -1,7 +1,11 @@
 import hashlib
+import logging
 import math
 import os
 import uuid
+
+
+logger = logging.getLogger(__name__)
 
 
 POINT_NAMESPACE = uuid.UUID("f3f4e35a-688d-4f79-99e0-91f9480a5827")
@@ -40,10 +44,12 @@ VECTOR_CONFIGS = {
 }
 
 SCENE_MIN_SECONDS = 3.0
+SCENE_MAX_SECONDS = 30.0
 SCENE_MAX_COUNT = 2000
 SCENE_DETECT_THRESHOLD = 27.0
 KEYFRAME_DENSITIES = {"light", "balanced", "dense"}
 KEYFRAME_DENSITY = "dense"
+VIDEO_INDEX_LAYOUT_VERSION = "scene-frames-v2"
 
 
 def env_flag(name, default="false"):
@@ -84,7 +90,7 @@ def detect_scenes_pyscenedetect(path, *, threshold=SCENE_DETECT_THRESHOLD, min_s
 
     # PySceneDetect returns timecode objects; the rest of the worker stores plain
     # seconds so media_assets, vector payloads, and FFmpeg frame extraction agree.
-    detector = ContentDetector(threshold=threshold, min_scene_len=max(1, int(min_scene_seconds)))
+    detector = ContentDetector(threshold=threshold, min_scene_len=f"{float(min_scene_seconds)}s")
     scenes = detect(path, detector)
     return [(start.get_seconds(), end.get_seconds()) for start, end in scenes]
 
@@ -117,6 +123,22 @@ def merge_short_scenes(scenes, *, min_seconds=SCENE_MIN_SECONDS):
         else:
             compacted.append((start, end))
     return compacted
+
+
+def split_long_scenes(scenes, *, max_seconds=SCENE_MAX_SECONDS):
+    if max_seconds <= 0:
+        raise ValueError("SCENE_MAX_SECONDS must be positive")
+    windows = []
+    for original_index, (start, end) in enumerate(scenes, start=1):
+        start = float(start)
+        end = float(end)
+        part_count = max(1, math.ceil((end - start) / max_seconds))
+        part_start = start
+        for part_index in range(1, part_count + 1):
+            part_end = min(part_start + max_seconds, end)
+            windows.append((part_start, part_end, original_index, part_index, part_count))
+            part_start = part_end
+    return windows
 
 
 def extra_keyframe_times(start, end, density=KEYFRAME_DENSITY):
@@ -176,6 +198,7 @@ class IndexMediaHandler:
         *,
         scene_detector=detect_scenes_pyscenedetect,
         scene_min_seconds=None,
+        scene_max_seconds=None,
         scene_max_count=None,
         keyframe_density=None,
         job_repository=None,
@@ -184,6 +207,9 @@ class IndexMediaHandler:
         self.job_repository = job_repository
         self.scene_detector = scene_detector
         self.scene_min_seconds = float(scene_min_seconds or os.environ.get("SCENE_MIN_SECONDS", SCENE_MIN_SECONDS))
+        self.scene_max_seconds = float(scene_max_seconds or os.environ.get("SCENE_MAX_SECONDS", SCENE_MAX_SECONDS))
+        if self.scene_max_seconds <= 0:
+            raise ValueError("SCENE_MAX_SECONDS must be positive")
         self.scene_max_count = int(scene_max_count or os.environ.get("SCENE_MAX_COUNT", SCENE_MAX_COUNT))
         self.keyframe_density = normalize_keyframe_density(keyframe_density or os.environ.get("KEYFRAME_DENSITY"))
 
@@ -202,6 +228,10 @@ class IndexMediaHandler:
         vector_refs_created = 0
         ocr_asset_ids = []
         caption_source_asset_ids = []
+        scene_caption_source_asset_ids = set()
+        segment_assets_by_scene_id = {}
+        newly_indexed_scene_ids = set()
+        segment_vector_refs_staled = 0
 
         if media_type == "image":
             asset_inputs = [
@@ -227,13 +257,25 @@ class IndexMediaHandler:
             )
             # Strategy changes can produce a different segment/frame graph. Mark
             # only the old graph stale before upserting the new deterministic assets.
-            self.repository.invalidate_video_index_assets(file["id"], invalidation_strategy, self.keyframe_density)
+            self.repository.invalidate_video_index_assets(
+                file["id"],
+                invalidation_strategy,
+                self.keyframe_density,
+                VIDEO_INDEX_LAYOUT_VERSION,
+            )
+        if media_type == "video" and hasattr(self.repository, "mark_video_segment_vector_refs_stale"):
+            segment_vector_refs_staled = self.repository.mark_video_segment_vector_refs_stale(file["id"])
 
         for asset_input in asset_inputs:
             # Create/refresh the PostgreSQL asset first, then derive a stable Qdrant point id from that asset.
-            collection_name = asset_input.pop("collection_name")
-            config = VECTOR_CONFIGS[collection_name]
+            collection_name = asset_input.pop("collection_name", None)
             asset = self.repository.upsert_media_asset(**asset_input)
+            scene_id = asset_input.get("metadata_json", {}).get("scene_id")
+            if asset["asset_type"] == "video_segment" and isinstance(scene_id, str):
+                segment_assets_by_scene_id[scene_id] = asset
+            if collection_name is None:
+                continue
+            config = VECTOR_CONFIGS[collection_name]
             content_hash = asset_input["content_hash"]
             point_id = deterministic_point_id(
                 asset_id=asset["id"],
@@ -262,6 +304,8 @@ class IndexMediaHandler:
                 vector_refs_created += 1
                 if asset["asset_type"] in ("image", "video_frame"):
                     ocr_asset_ids.append(asset["id"])
+                if asset["asset_type"] == "video_frame" and isinstance(scene_id, str):
+                    newly_indexed_scene_ids.add(scene_id)
                 if (
                     self.job_repository is not None
                     and env_flag("CAPTION_INDEXING_ENABLED")
@@ -271,6 +315,19 @@ class IndexMediaHandler:
                     caption_source_asset_ids.append(asset["id"])
             if collection_name not in collections:
                 collections.append(collection_name)
+
+        if (
+            media_type == "video"
+            and self.job_repository is not None
+            and env_flag("CAPTION_INDEXING_ENABLED")
+            and env_flag("LOCAL_VLM_ENABLED")
+        ):
+            for scene_id in sorted(newly_indexed_scene_ids):
+                if scene_id not in segment_assets_by_scene_id:
+                    continue
+                source_asset_id = segment_assets_by_scene_id[scene_id]["id"]
+                caption_source_asset_ids.append(source_asset_id)
+                scene_caption_source_asset_ids.add(source_asset_id)
 
         if ocr_asset_ids and self.job_repository is not None:
             # OCR is asset-granular: image assets and selected video frames can be processed independently.
@@ -291,14 +348,18 @@ class IndexMediaHandler:
                     {
                         "file_id": file["id"],
                         "source_asset_ids": [source_asset_id],
-                        "prompt_version": os.environ.get("CAPTION_PROMPT_VERSION", "caption-v1"),
+                        "prompt_version": (
+                            "scene-caption-v2"
+                            if source_asset_id in scene_caption_source_asset_ids
+                            else "caption-v1"
+                        ),
                         "model_name": os.environ.get("LOCAL_VLM_MODEL_NAME", "Qwen/Qwen2.5-VL-7B-Instruct"),
                         "model_version": os.environ.get("LOCAL_VLM_MODEL_VERSION", "qwen2.5-vl-7b-instruct"),
                     },
                     timeout_seconds=7200,
                 )
 
-        return {
+        outcome = {
             "assets_created": assets_created,
             "vector_refs_created": vector_refs_created,
             "collections": collections,
@@ -308,7 +369,21 @@ class IndexMediaHandler:
             **({"scenes_detected": scenes_detected} if media_type == "video" else {}),
             **({"keyframes_selected": keyframes_selected} if media_type == "video" else {}),
             **({"keyframe_density": self.keyframe_density} if media_type == "video" else {}),
+            **({"segment_vector_refs_staled": segment_vector_refs_staled} if media_type == "video" else {}),
         }
+        if media_type == "video":
+            logger.info(
+                "video_index file_id=%s strategy=%s fallback=%s scenes=%s keyframes=%s "
+                "stale_segment_refs=%s fallback_reason=%s",
+                file["id"],
+                actual_strategy,
+                fallback,
+                scenes_detected,
+                keyframes_selected,
+                segment_vector_refs_staled,
+                fallback_reason,
+            )
+        return outcome
 
     def _video_asset_inputs(self, file, requested_strategy):
         # scene_detection is best-effort. Any detector failure or unusable output falls back to fixed 30s segments.
@@ -326,18 +401,36 @@ class IndexMediaHandler:
             fallback_reason = f"Scene count {len(detected)} exceeds max {self.scene_max_count}"
         # Keep scene_detection as a best-effort strategy: noisy/empty detector
         # output falls back to deterministic 30s segments instead of failing the job.
-        scenes = [] if fallback_reason else merge_short_scenes(detected, min_seconds=self.scene_min_seconds)
-        if fallback_reason is None and not scenes:
+        merged_scenes = [] if fallback_reason else merge_short_scenes(detected, min_seconds=self.scene_min_seconds)
+        if fallback_reason is None and not merged_scenes:
             fallback_reason = "PySceneDetect returned no usable scenes"
 
         if fallback_reason:
             return self._fixed_30s_asset_inputs(file, "fixed_30s_fallback"), "fixed_30s", True, fallback_reason, 0, 0
 
+        scene_windows = split_long_scenes(merged_scenes, max_seconds=self.scene_max_seconds)
         asset_inputs = []
         keyframes_selected = 0
-        for index, (start, end) in enumerate(scenes, start=1):
-            scene_id = f"scene-{index:04d}"
+        for start, end, original_index, part_index, part_count in scene_windows:
+            original_scene_id = f"scene-{original_index:04d}"
+            scene_id = (
+                original_scene_id
+                if part_count == 1
+                else f"{original_scene_id}-part-{part_index:03d}"
+            )
             midpoint = (start + end) / 2.0
+            shared_metadata = {
+                "scene_id": scene_id,
+                "original_scene_id": original_scene_id,
+                "scene_part_index": part_index,
+                "scene_part_count": part_count,
+                "scene_max_seconds": self.scene_max_seconds,
+                "segment_strategy": "scene_detection",
+                "keyframe_density": self.keyframe_density,
+                "index_layout_version": VIDEO_INDEX_LAYOUT_VERSION,
+                "stale": False,
+                "stale_reason": None,
+            }
             asset_inputs.append({
                 "file_id": file["id"],
                 "asset_type": "video_segment",
@@ -345,13 +438,22 @@ class IndexMediaHandler:
                 "end_time_seconds": end,
                 "content_hash": f"{file['id']}:scene:{scene_id}:{start:g}:{end:g}",
                 "metadata_json": {
-                    "scene_id": scene_id,
+                    **shared_metadata,
                     "keyframe_index": 0,
-                    "segment_strategy": "scene_detection",
-                    "keyframe_density": self.keyframe_density,
                     "representative_frame_time_seconds": midpoint,
                 },
-                "collection_name": "video_segment_vectors",
+            })
+            asset_inputs.append({
+                "file_id": file["id"],
+                "asset_type": "video_frame",
+                "frame_time_seconds": midpoint,
+                "content_hash": f"{file['id']}:scene:{scene_id}:representative:{midpoint:g}",
+                "metadata_json": {
+                    **shared_metadata,
+                    "keyframe_index": 0,
+                    "is_scene_representative": True,
+                },
+                "collection_name": "video_frame_vectors",
             })
             for keyframe_index, frame_time in enumerate(extra_keyframe_times(start, end, self.keyframe_density), start=1):
                 if abs(frame_time - midpoint) < 0.001:
@@ -362,20 +464,32 @@ class IndexMediaHandler:
                     "frame_time_seconds": frame_time,
                     "content_hash": f"{file['id']}:scene:{scene_id}:keyframe:{keyframe_index}:{frame_time:g}",
                     "metadata_json": {
-                        "scene_id": scene_id,
+                        **shared_metadata,
                         "keyframe_index": keyframe_index,
-                        "segment_strategy": "scene_detection",
-                        "keyframe_density": self.keyframe_density,
+                        "is_scene_representative": False,
                     },
                     "collection_name": "video_frame_vectors",
                 })
                 keyframes_selected += 1
 
-        return asset_inputs, "scene_detection", False, None, len(scenes), keyframes_selected
+        return asset_inputs, "scene_detection", False, None, len(scene_windows), keyframes_selected
 
     def _fixed_30s_asset_inputs(self, file, segment_strategy):
         asset_inputs = []
-        for start, end in fixed_30s_segments(file.get("duration_seconds")):
+        for segment_index, (start, end) in enumerate(fixed_30s_segments(file.get("duration_seconds")), start=1):
+            scene_id = f"segment-{segment_index:04d}"
+            midpoint = (start + end) / 2.0
+            shared_metadata = {
+                "scene_id": scene_id,
+                "scene_part_index": 1,
+                "scene_part_count": 1,
+                "scene_max_seconds": self.scene_max_seconds,
+                "segment_strategy": segment_strategy,
+                "keyframe_density": self.keyframe_density,
+                "index_layout_version": VIDEO_INDEX_LAYOUT_VERSION,
+                "stale": False,
+                "stale_reason": None,
+            }
             asset_inputs.append({
                 "file_id": file["id"],
                 "asset_type": "video_segment",
@@ -383,11 +497,21 @@ class IndexMediaHandler:
                 "end_time_seconds": end,
                 "content_hash": f"{file['id']}:segment:{start:g}:{end:g}",
                 "metadata_json": {
-                    "scene_id": None,
+                    **shared_metadata,
                     "keyframe_index": 0,
-                    "segment_strategy": segment_strategy,
-                    "keyframe_density": self.keyframe_density,
+                    "representative_frame_time_seconds": midpoint,
                 },
-                "collection_name": "video_segment_vectors",
+            })
+            asset_inputs.append({
+                "file_id": file["id"],
+                "asset_type": "video_frame",
+                "frame_time_seconds": midpoint,
+                "content_hash": f"{file['id']}:segment:{scene_id}:representative:{midpoint:g}",
+                "metadata_json": {
+                    **shared_metadata,
+                    "keyframe_index": 0,
+                    "is_scene_representative": True,
+                },
+                "collection_name": "video_frame_vectors",
             })
         return asset_inputs

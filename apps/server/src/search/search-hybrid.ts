@@ -10,6 +10,8 @@ export interface HybridCandidateInput {
   scene_id: string | null
   reasons: HybridReason[]
   source_scores: Record<string, number>
+  merged_asset_ids?: string[]
+  best_frame_time_seconds?: number | null
 }
 
 export interface HybridSearchResult extends HybridCandidateInput {
@@ -162,7 +164,9 @@ function toMergeCandidate(candidate: HybridCandidateInput): MergeCandidate {
     ...candidate,
     reasons: uniqueReasons(candidate.reasons),
     source_scores: { ...candidate.source_scores },
-    merged_asset_ids: [candidate.asset_id],
+    merged_asset_ids: candidate.merged_asset_ids?.length
+      ? [...candidate.merged_asset_ids]
+      : [candidate.asset_id],
     representative_contribution: strongestContribution(candidate),
   }
 }
@@ -340,7 +344,7 @@ function compareRankedResults(left: HybridSearchResult, right: HybridSearchResul
   )
 }
 
-function confidenceForCandidate(candidate: HybridCandidateInput): HybridSearchResult['confidence'] {
+function confidenceForCandidate(_candidate: HybridCandidateInput): HybridSearchResult['confidence'] {
   return 'high'
 }
 

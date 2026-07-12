@@ -161,10 +161,12 @@ OCR 补队列会把同一 asset 上已有的 `run_ocr` 尝试记录（queued/run
 
 ```text
 pending → probed（probe_media 完成后由 worker 写入）
-probed → indexed（真实 embedding 完成后）
+probed → indexed（任意一个 active vector ref 首次真实 embedding 成功并写入 Qdrant 后）
 ```
 
 `probed` 表示文件 metadata（duration、width、height、codec）已探测完毕，可以创建 index job。scene detection 在 `index_media` 内部完成，不引入新的 `index_status`。
+
+`mark_vector_ref_indexed(point_id)` 在同一数据库事务中更新 `vector_refs.status` 和对应 `media_files.index_status`。`0002_backfill_indexed_media_files.sql` 会为升级前已经存在 indexed vector ref 的 active 文件回填状态，避免素材库 `indexed_count` 永久为 0。其余 pending/failed refs 不阻止文件被计为“已索引”，因为至少一个成功向量已经使该文件可检索。
 
 ## Job Types
 
@@ -253,7 +255,7 @@ Input：
 `segment_strategy` 取值：
 
 - `fixed_30s`：固定 30 秒切片（Phase 5/10 默认）。
-- `scene_detection`：Phase 11。用 PySceneDetect 检测 scene 边界替代固定切片。每个 scene 生成 1 个代表帧（中点）`video_segment` asset → `video_segment_vectors`，并按 `KEYFRAME_DENSITY` 生成额外关键帧 `video_frame` asset → `video_frame_vectors`（关键帧与代表帧不重复）。默认 `KEYFRAME_DENSITY=dense`：短 scene 也会补额外关键帧，中长 scene 按时长增加，单 scene 最多 10 个额外关键帧；可切到 `balanced` / `light` 控制成本。scene 短于 `SCENE_MIN_SECONDS`（默认 3s）时并入相邻 scene。PySceneDetect 抛错、检测到 0 个 scene 或 scene 数超过上限（默认 2000）时回退 `fixed_30s`。详见 `docs/implementation-plan.md` Phase 11。
+- `scene_detection`：用 PySceneDetect 检测镜头边界；短 scene 先按 `SCENE_MIN_SECONDS` 合并，长 scene 再按 `SCENE_MAX_SECONDS`（默认 30s）拆成稳定子窗口。每个窗口创建一个 `video_segment` 边界容器和至少一个中点 `video_frame`，额外帧由 `KEYFRAME_DENSITY` 决定；所有视觉向量只写 `video_frame_vectors`。检测失败时使用带稳定 `segment-0001` scene ID 的固定 30 秒窗口。启用 caption 后，视频 segment 自动创建 `scene-caption-v2`，VLM 读取同窗口最多 `SCENE_CAPTION_MAX_FRAMES` 张有序关键帧。
 
 仅视频受 `segment_strategy` 影响；图片固定走 `image_vectors` 单 asset 路径。
 

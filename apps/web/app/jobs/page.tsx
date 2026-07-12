@@ -10,7 +10,7 @@ interface JobsPageProps {
   }>
 }
 
-const DEFAULT_LIMIT = 500
+const DEFAULT_LIMIT = 25
 
 export default async function JobsPage({ searchParams }: JobsPageProps) {
   const params = await searchParams

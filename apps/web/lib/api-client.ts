@@ -10,6 +10,20 @@ export interface LibrarySummary {
   failed_count?: number
 }
 
+export interface LibraryMediaItem {
+  id: string
+  relative_path: string
+  media_type: MediaType
+  index_status: string
+}
+
+export interface LibraryMediaListResponse {
+  items: LibraryMediaItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface JobSummary {
   id: string
   job_type: string
@@ -184,6 +198,10 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<LibrarySummary>('/libraries', { method: 'POST', body: JSON.stringify(input) }),
     scanLibrary: (id: string) =>
       request<{ job_id: string; status: string }>(`/libraries/${id}/scan`, { method: 'POST' }),
+    listLibraryMedia: (id: string, input: { limit?: number; offset?: number } = {}) =>
+      request<LibraryMediaListResponse>(withQuery(`/libraries/${id}/media`, input), {
+        method: 'GET',
+      }),
     listJobs: (input: { limit?: number; offset?: number } = {}) =>
       request<JobListResponse>(withQuery('/jobs', input), { method: 'GET' }),
     mediaContentUrl: (

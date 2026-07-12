@@ -18,11 +18,13 @@ export interface Settings {
   jobCoordinatorOcrLimit: number
   queryExpansionProvider: 'none' | 'deepseek'
   queryExpansionTimeoutMs: number
+  queryExpansionMaxVariants: number
   deepseekBaseUrl: string
   deepseekApiKey?: string
   deepseekModel: string
   captionIndexingEnabled: boolean
   captionSearchEnabled: boolean
+  videoSegmentSearchEnabled: boolean
   localVlmEnabled: boolean
   localVlmServiceUrl: string
   searchRerankMode: 'off' | 'blocking'
@@ -156,6 +158,20 @@ const settingsSchema = z.object({
       return limit
     }),
   QUERY_EXPANSION_PROVIDER: z.enum(['none', 'deepseek']).default('none'),
+  QUERY_EXPANSION_MAX_VARIANTS: z
+    .string()
+    .default('3')
+    .transform((value, context) => {
+      const limit = Number(value)
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'QUERY_EXPANSION_MAX_VARIANTS must be between 1 and 10',
+        })
+        return z.NEVER
+      }
+      return limit
+    }),
   QUERY_EXPANSION_TIMEOUT_MS: z
     .string()
     .default('10000')
@@ -170,7 +186,10 @@ const settingsSchema = z.object({
       }
       return timeout
     }),
-  DEEPSEEK_BASE_URL: z.string().url('DEEPSEEK_BASE_URL must be a valid URL').default('https://api.deepseek.com'),
+  DEEPSEEK_BASE_URL: z
+    .string()
+    .url('DEEPSEEK_BASE_URL must be a valid URL')
+    .default('https://api.deepseek.com'),
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
   DEEPSEEK_MODEL: z.string().min(1).default('deepseek-v4-flash'),
   CAPTION_INDEXING_ENABLED: z
@@ -180,6 +199,10 @@ const settingsSchema = z.object({
   CAPTION_SEARCH_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
+    .transform((value) => value === 'true'),
+  VIDEO_SEGMENT_SEARCH_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
     .transform((value) => value === 'true'),
   LOCAL_VLM_ENABLED: z
     .enum(['true', 'false'])
@@ -273,11 +296,13 @@ export function createSettings(env: Env = process.env): Settings {
     jobCoordinatorOcrLimit: parsed.JOB_COORDINATOR_OCR_LIMIT,
     queryExpansionProvider: parsed.QUERY_EXPANSION_PROVIDER,
     queryExpansionTimeoutMs: parsed.QUERY_EXPANSION_TIMEOUT_MS,
+    queryExpansionMaxVariants: parsed.QUERY_EXPANSION_MAX_VARIANTS,
     deepseekBaseUrl: parsed.DEEPSEEK_BASE_URL,
     deepseekApiKey: parsed.DEEPSEEK_API_KEY,
     deepseekModel: parsed.DEEPSEEK_MODEL,
     captionIndexingEnabled: parsed.CAPTION_INDEXING_ENABLED,
     captionSearchEnabled: parsed.CAPTION_SEARCH_ENABLED,
+    videoSegmentSearchEnabled: parsed.VIDEO_SEGMENT_SEARCH_ENABLED,
     localVlmEnabled: parsed.LOCAL_VLM_ENABLED,
     localVlmServiceUrl: parsed.LOCAL_VLM_SERVICE_URL,
     searchRerankMode: parsed.SEARCH_RERANK_MODE,

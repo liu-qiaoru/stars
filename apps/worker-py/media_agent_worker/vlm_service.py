@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -17,6 +18,12 @@ DEFAULT_OLLAMA_VLM_MODEL = "qwen2.5vl:7b"
 DEFAULT_CAPTION_PROMPT = (
     "请用中文简洁描述画面中的主体、动作、场景、可见文字和风格。"
     "只输出描述，不要输出列表或解释。"
+)
+SCENE_CAPTION_PROMPT = (
+    "以下图片来自同一段视频，并已按时间从早到晚排列。"
+    "请综合所有图片，用中文简洁描述主体、环境、可见文字，以及图片明确显示的动作或状态变化。"
+    "不要把单张图片当成整个场景，不要推断采样帧之间未展示的事件。"
+    "只输出一段描述，不要输出列表或解释。"
 )
 
 
@@ -38,13 +45,15 @@ class OllamaVlCaptioner:
         self.timeout_seconds = int(timeout_seconds)
         self.urlopen = urlopen
 
-    def caption_image_path(self, image_path, prompt=DEFAULT_CAPTION_PROMPT):
-        with open(image_path, "rb") as image_file:
-            encoded_image = base64.b64encode(image_file.read()).decode("ascii")
+    def caption_image_paths(self, image_paths, prompt=DEFAULT_CAPTION_PROMPT):
+        encoded_images = []
+        for image_path in image_paths:
+            with open(image_path, "rb") as image_file:
+                encoded_images.append(base64.b64encode(image_file.read()).decode("ascii"))
         payload = {
             "model": self.ollama_model,
             "prompt": prompt,
-            "images": [encoded_image],
+            "images": encoded_images,
             "stream": False,
         }
         request = urllib_request.Request(
@@ -109,13 +118,16 @@ class TransformersQwenVlCaptioner:
             self.model.to(self.device)
         self.model.eval()
 
-    def caption_image_path(self, image_path, prompt=DEFAULT_CAPTION_PROMPT):
-        with self.Image.open(image_path) as image:
-            image = image.convert("RGB")
+    def caption_image_paths(self, image_paths, prompt=DEFAULT_CAPTION_PROMPT):
+        with ExitStack() as stack:
+            images = [
+                stack.enter_context(self.Image.open(image_path)).convert("RGB")
+                for image_path in image_paths
+            ]
             messages = [{
                 "role": "user",
                 "content": [
-                    {"type": "image"},
+                    *[{"type": "image"} for _image in images],
                     {"type": "text", "text": prompt},
                 ],
             }]
@@ -124,7 +136,7 @@ class TransformersQwenVlCaptioner:
                 tokenize=False,
                 add_generation_prompt=True,
             )
-            inputs = self.processor(text=[text], images=[image], return_tensors="pt")
+            inputs = self.processor(text=[text], images=images, return_tensors="pt")
         target_device = next(self.model.parameters()).device
         inputs = {key: value.to(target_device) for key, value in inputs.items()}
         with self.torch.no_grad():
@@ -168,19 +180,38 @@ def build_captioner_from_env():
 
 
 def handle_caption_request(captioner, payload):
-    image_path = payload.get("image_path")
-    if not isinstance(image_path, str) or not image_path:
-        raise ValueError("image_path is required")
+    legacy_image_path = payload.get("image_path")
+    image_paths = payload.get("image_paths")
+    if image_paths is None and isinstance(legacy_image_path, str) and legacy_image_path:
+        image_paths = [legacy_image_path]
+    if not isinstance(image_paths, list) or not image_paths or not all(
+        isinstance(image_path, str) and image_path for image_path in image_paths
+    ):
+        raise ValueError("image_paths must be a non-empty string array")
+    max_frames = int(os.environ.get("SCENE_CAPTION_MAX_FRAMES", "6"))
+    if max_frames < 1 or max_frames > 12:
+        raise ValueError("SCENE_CAPTION_MAX_FRAMES must be between 1 and 12")
+    if len(image_paths) > max_frames:
+        raise ValueError(f"image_paths exceeds SCENE_CAPTION_MAX_FRAMES={max_frames}")
     prompt_version = payload.get("prompt_version", "caption-v1")
-    if prompt_version != "caption-v1":
+    if prompt_version not in ("caption-v1", "scene-caption-v2"):
         raise ValueError(f"Unsupported prompt_version: {prompt_version}")
+    frame_times_seconds = payload.get("frame_times_seconds")
+    if prompt_version == "scene-caption-v2":
+        if (
+            not isinstance(frame_times_seconds, list)
+            or len(frame_times_seconds) != len(image_paths)
+            or not all(isinstance(value, (int, float)) for value in frame_times_seconds)
+        ):
+            raise ValueError("scene-caption-v2 requires one numeric frame time per image")
     requested_model_name = payload.get("model_name")
     requested_model_version = payload.get("model_version")
     if requested_model_name not in (None, captioner.model_name):
         raise ValueError(f"Unsupported model_name: {requested_model_name}")
     if requested_model_version not in (None, captioner.model_version):
         raise ValueError(f"Unsupported model_version: {requested_model_version}")
-    caption = captioner.caption_image_path(image_path, prompt=DEFAULT_CAPTION_PROMPT)
+    prompt = SCENE_CAPTION_PROMPT if prompt_version == "scene-caption-v2" else DEFAULT_CAPTION_PROMPT
+    caption = captioner.caption_image_paths(image_paths, prompt=prompt)
     return {
         "model_name": captioner.model_name,
         "model_version": captioner.model_version,

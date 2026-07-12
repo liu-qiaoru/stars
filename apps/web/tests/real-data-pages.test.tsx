@@ -116,7 +116,7 @@ describe('real data pages', () => {
 
     render(await JobsPage({ searchParams: Promise.resolve({}) }))
 
-    expect(apiClient.listJobs).toHaveBeenCalledWith({ limit: 500, offset: 0 })
+    expect(apiClient.listJobs).toHaveBeenCalledWith({ limit: 25, offset: 0 })
     expect(screen.getByText('real-job')).toBeInTheDocument()
     expect(screen.getByText('/Users/qiao/Movies')).toBeInTheDocument()
     expect(screen.queryByText('扫描任务示例')).not.toBeInTheDocument()

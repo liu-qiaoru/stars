@@ -1,8 +1,48 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, test } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { describe, expect, test, vi } from 'vitest'
 import { SearchWorkspace } from '../components/search-workspace'
 
 describe('SearchWorkspace', () => {
+  test('shows a visible loading state and preserves results when search fails', async () => {
+    let rejectSearch!: (reason: Error) => void
+    const searchMedia = vi.fn(
+      () => new Promise<never>((_resolve, reject) => (rejectSearch = reject)),
+    )
+    render(
+      <SearchWorkspace
+        libraries={[]}
+        initialQuery="old"
+        initialResults={{
+          limit: 20,
+          offset: 0,
+          results: [
+            {
+              asset_id: 'old-result',
+              file_id: 'file-old',
+              media_type: 'image',
+              path: '/media/old.jpg',
+              start_time_seconds: null,
+              end_time_seconds: null,
+              score: 0.8,
+            },
+          ],
+          groups: [],
+        }}
+        apiClient={{ searchMedia }}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('搜索关键词'), { target: { value: 'new query' } })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('正在检索')
+    expect(screen.getByLabelText('搜索关键词')).toBeDisabled()
+    rejectSearch(new Error('model service unavailable'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('搜索失败')
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+    expect(screen.getByText('/media/old.jpg')).toBeInTheDocument()
+  })
+
   test('renders hybrid results as the primary search list', () => {
     render(
       <SearchWorkspace

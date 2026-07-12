@@ -8,6 +8,7 @@ class FakeConnection:
     def __init__(self, row):
         self.row = row
         self.commits = 0
+        self.executed = []
 
     def cursor(self):
         return FakeCursor(self)
@@ -28,6 +29,9 @@ class FakeCursor:
         return False
 
     def execute(self, query, params=None):
+        self.connection.executed.append((query, params))
+        if "UPDATE vector_refs" in query or "UPDATE media_files" in query:
+            return
         if query.strip().startswith("SELECT id, file_id"):
             self.fetchone_result = tuple(self.connection.row)
             return
@@ -52,6 +56,23 @@ class FakeCursor:
 
 
 class PostgresMediaRepositoryTest(unittest.TestCase):
+    def test_mark_vector_ref_indexed_also_marks_its_file_indexed_in_one_commit(self):
+        connection = FakeConnection([])
+        repository = PostgresMediaRepository(connection)
+
+        repository.mark_vector_ref_indexed("point-1")
+
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(len(connection.executed), 2)
+        self.assertIn("UPDATE vector_refs", connection.executed[0][0])
+        self.assertIn("status = 'indexed'", connection.executed[0][0])
+        self.assertIn("status IN ('pending', 'indexed')", connection.executed[0][0])
+        self.assertEqual(connection.executed[0][1], ("point-1",))
+        self.assertIn("UPDATE media_files", connection.executed[1][0])
+        self.assertIn("index_status = 'indexed'", connection.executed[1][0])
+        self.assertIn("FROM vector_refs", connection.executed[1][0])
+        self.assertEqual(connection.executed[1][1], ("point-1",))
+
     def test_upsert_media_asset_preserves_ocr_text_and_merges_metadata_when_reindexing(self):
         row = [
             "asset-1",

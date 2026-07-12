@@ -88,6 +88,8 @@ Response：
 }
 ```
 
+`indexed_count` 统计 `media_files.index_status='indexed'` 的 active 文件。任意一个 active vector ref 成功写入 Qdrant 后，worker 会在同一事务中把对应文件标记为 indexed；不要求该文件所有 vector refs 都完成。升级前已有 indexed refs 的文件由 `0002_backfill_indexed_media_files.sql` 回填。
+
 ## GET /libraries/{id}
 
 返回单个 library。
@@ -104,6 +106,30 @@ Response：
   "updated_at": "2026-05-26T10:00:00Z"
 }
 ```
+
+## GET /libraries/{id}/media
+
+按素材库分页返回 active media files。`limit` 默认 25、范围 1～100；`offset` 默认 0，必须为非负整数。结果按 `relative_path`、`id` 稳定升序，供素材库卡片按需展开和“加载更多”。
+
+Response：
+
+```json
+{
+  "items": [
+    {
+      "id": "6a9f...",
+      "relative_path": "Movies/concert.mp4",
+      "media_type": "video",
+      "index_status": "indexed"
+    }
+  ],
+  "total": 1240,
+  "limit": 25,
+  "offset": 0
+}
+```
+
+library 不存在返回 404；非法分页参数返回 400。软删除文件不返回。
 
 ## PATCH /libraries/{id}/disable
 
@@ -355,10 +381,10 @@ Response：
 
 `POST /search` 返回 `{ limit, offset, results, groups }`。`results` 是统一 hybrid retrieval + reranking 后的主结果列表，使用 `score_kind='hybrid_score'`；`groups` 保留为原始来源分组，用于兼容旧响应形状和调试召回质量。
 
-向量 group（`image_vectors` / `video_segment_vectors` / `video_frame_vectors`，`reason='vector_match'`，`score_kind='cosine_similarity'`）来自 Qdrant。视频搜索会同时召回 scene 代表帧和额外关键帧，并在 top-level `results` 中按同文件相邻时间窗口合并。`text_search` group（`score_kind='ts_rank_cd'`）来自 `media_assets.text_tsv`（对 `text_content` 跑 `to_tsvector('simple', ...)` 的 PostgreSQL FTS）：`text_chunk` asset 命中为 `reason='transcript_match'`（transcript），`image`/`video_frame` asset 命中为 `reason='ocr_match'`（OCR 画面文字）。触发 media type 为 `image`/`audio`/`video`，受 `library_ids` 过滤。
+向量 group 来自 Qdrant。`video_frame_vectors` 在 top-level `results` 中按 `(file_id, scene_id)` 做 MaxSim，最大 cosine 的帧作为代表证据，时间边界来自 PostgreSQL `video_segment`；原始 `groups` 继续保留逐帧结果。`video_segment_vectors` 仅由 `VIDEO_SEGMENT_SEARCH_ENABLED=true` 的迁移兼容期开启，新索引不再创建该 ref。`text_search` group 来自 `media_assets.text_tsv`：`text_chunk` 为 transcript 命中，`image`/`video_frame` 为 OCR 命中。
 
 - top-level result 使用 `primary_reason`、`confidence`、`reasons`、`source_scores` 和 `merged_asset_ids` 表达命中解释。`confidence='low'` 表示当前只找到弱视觉向量候选，前端应提示“相关性较弱”；带 transcript/OCR 的文本命中或较强视觉向量命中返回 `confidence='high'`。跨 asset 合并时，`asset_id` 是代表命中的 asset，`merged_asset_ids` 总是包含代表 asset，长度至少为 1。
-- 视觉搜索默认不扩展搜索词；`QUERY_EXPANSION_PROVIDER=deepseek` 且配置 `DEEPSEEK_API_KEY` 后，服务端会把用户原始 query 发送给 DeepSeek 生成最多 5 个短语变体，再分别做 query embedding 和向量召回。同一 point 多次命中时保留加权后的最高分；扩展词权重低于原始 query，且不会把本地媒体路径或搜索结果发送给 DeepSeek。
+- 视觉搜索默认不扩展搜索词；`QUERY_EXPANSION_PROVIDER=deepseek` 且配置 `DEEPSEEK_API_KEY` 后，服务端会把用户原始 query 发送给 DeepSeek。`QUERY_EXPANSION_MAX_VARIANTS` 默认是 3，表示“原始 query + 最多两个扩展短语”；prompt 和服务端归一化都会执行该上限，不能因模型返回超量候选而放大 embedding/Qdrant 查询次数。同一 point 多次命中时保留加权后的最高分；扩展词权重低于原始 query，且不会把本地媒体路径或搜索结果发送给 DeepSeek。
 - 转写命中使用 `transcript_match`，OCR 使用 `ocr_match`，向量使用 `vector_match`。`document_match` 预留给 document pipeline，Phase 14 不主动产生。
 - `source_scores` key 使用固定 source key：当前为 `image_vectors`、`video_segment_vectors`、`video_frame_vectors`、`text_search`；后续新增向量来源时使用 Qdrant collection 名。同 source 多次命中时保留最大分数；启用 query expansion 时，向量来源分数会先乘以 query variant 权重。`source_scores` 不能跨 source 直接比较。
 - 纯向量弱相关候选不会被静默丢弃；系统会保留候选并标记 `confidence='low'`，避免搜索结果变成空数组又不给用户任何线索。带 transcript/OCR 的文本命中不受该向量置信度阈值影响。
@@ -583,3 +609,9 @@ Response（`ALLOW_EXTERNAL_LLM=false`）：
   "message": "外部大模型未启用；已记录任务，但不会调用云端模型。"
 }
 ```
+
+## 视频索引迁移接口
+
+`POST /jobs/video/reindex` 为现有 active 视频分批创建 `index_media` 任务。body 支持 `library_id`、`file_id`、`limit`（1～1000）、`dry_run` 和 `only_not_ready`；已有 queued/running `index_media` 的文件会计入 `skipped_active`，不会重复创建。
+
+`GET /jobs/video/reindex-readiness` 返回视觉切换门槛：`segments_without_frames`、`segments_over_30_seconds`、`active_video_segment_vector_refs` 均为 0 时 `ready=true`。`segments_without_scene_caption_v2` 单独表示 caption 完整度；它会让默认 reindex 继续选中该文件，但不阻断 frame MaxSim 的视觉切换。

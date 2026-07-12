@@ -243,7 +243,15 @@ document_chunk
 
 ## Segment Vector 策略
 
-`video_segment_vectors` 使用代表帧策略。Phase 11 起 video segment 来自 PySceneDetect 的 scene（fallback 为固定 30s 切片）：
+`video_segment_vectors` 是迁移前的代表帧策略。新索引保留 `video_segment` 资产作为边界与 caption 容器，但不再创建该 collection 的 vector ref；迁移完成后通过 `VIDEO_SEGMENT_SEARCH_ENABLED=false` 停止在线读取，旧 points 不删除、旧 refs 标记 stale。
+
+当前视频视觉索引策略：
+
+1. PySceneDetect 得到原始 scene，超过 `SCENE_MAX_SECONDS` 的长镜头继续拆窗，fallback 也使用固定 30 秒窗口。
+2. 每个窗口至少创建一个带相同 `scene_id` 的 `video_frame`，并根据密度创建额外关键帧；每帧独立写入 `video_frame_vectors`。
+3. 在线检索按 `(file_id, scene_id)` 做 MaxSim，最佳帧提供分数和证据，`video_segment` 提供真实时间边界。
+
+旧策略记录如下：
 
 ```text
 1. 每个 scene 选一个代表帧，取 scene 中点。

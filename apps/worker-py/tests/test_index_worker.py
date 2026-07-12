@@ -44,7 +44,13 @@ class FakeMediaRepository:
         self.vector_refs[key] = vector_ref
         return "created" if created else "skipped"
 
-    def invalidate_video_index_assets(self, file_id, segment_strategy, keyframe_density=None):
+    def invalidate_video_index_assets(
+        self,
+        file_id,
+        segment_strategy,
+        keyframe_density=None,
+        index_layout_version=None,
+    ):
         stale_asset_ids = {
             asset["id"]
             for asset in self.assets.values()
@@ -53,6 +59,7 @@ class FakeMediaRepository:
             and (
                 asset.get("metadata_json", {}).get("segment_strategy") != segment_strategy
                 or asset.get("metadata_json", {}).get("keyframe_density") != keyframe_density
+                or asset.get("metadata_json", {}).get("index_layout_version") != index_layout_version
             )
         }
         if stale_asset_ids:
@@ -68,6 +75,18 @@ class FakeMediaRepository:
             if vector_ref["asset_id"] not in stale_asset_ids
         }
         return {"assets_invalidated": len(stale_asset_ids), "vector_refs_invalidated": len(stale_asset_ids)}
+
+    def mark_video_segment_vector_refs_stale(self, file_id):
+        stale = 0
+        for vector_ref in self.vector_refs.values():
+            if (
+                vector_ref["file_id"] == file_id
+                and vector_ref["collection_name"] == "video_segment_vectors"
+                and vector_ref.get("status") != "stale"
+            ):
+                vector_ref["status"] = "stale"
+                stale += 1
+        return stale
 
 
 class InMemoryJobRepository:
@@ -209,29 +228,40 @@ class ProbeAndIndexTest(unittest.TestCase):
             self.assertEqual(first, {
                 "assets_created": 3,
                 "vector_refs_created": 3,
-                "collections": ["video_segment_vectors"],
+                "collections": ["video_frame_vectors"],
                 "segment_strategy": "fixed_30s",
                 "fallback": False,
                 "scenes_detected": 0,
                 "keyframes_selected": 0,
                 "keyframe_density": "dense",
+                "segment_vector_refs_staled": 0,
             })
             self.assertEqual(second, {
                 "assets_created": 0,
                 "vector_refs_created": 0,
-                "collections": ["video_segment_vectors"],
+                "collections": ["video_frame_vectors"],
                 "segment_strategy": "fixed_30s",
                 "fallback": False,
                 "scenes_detected": 0,
                 "keyframes_selected": 0,
                 "keyframe_density": "dense",
+                "segment_vector_refs_staled": 0,
             })
-            self.assertEqual(len(repository.assets), 3)
+            self.assertEqual(len(repository.assets), 6)
             self.assertEqual(len(repository.vector_refs), 3)
             vector_ref = next(iter(repository.vector_refs.values()))
             self.assertEqual(vector_ref["model_name"], "google/siglip-base-patch16-224")
             self.assertEqual(vector_ref["model_version"], "siglip-base-patch16-224")
             self.assertEqual(vector_ref["vector_dim"], 768)
+            self.assertEqual(vector_ref["collection_name"], "video_frame_vectors")
+            segment_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_segment"]
+            frame_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_frame"]
+            self.assertEqual([asset["metadata_json"]["scene_id"] for asset in segment_assets], [
+                "segment-0001",
+                "segment-0002",
+                "segment-0003",
+            ])
+            self.assertTrue(all(asset["metadata_json"]["is_scene_representative"] for asset in frame_assets))
 
     def test_index_media_creates_run_ocr_job_for_image_asset(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -319,21 +349,50 @@ class ProbeAndIndexTest(unittest.TestCase):
 
             self.assertEqual(result["segment_strategy"], "scene_detection")
             self.assertFalse(result["fallback"])
-            self.assertEqual(result["scenes_detected"], 3)
-            self.assertEqual(result["keyframes_selected"], 9)
+            self.assertEqual(result["scenes_detected"], 4)
+            self.assertEqual(result["keyframes_selected"], 8)
             self.assertEqual(result["keyframe_density"], "dense")
-            self.assertEqual(result["collections"], ["video_segment_vectors", "video_frame_vectors"])
+            self.assertEqual(result["collections"], ["video_frame_vectors"])
             segment_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_segment"]
             frame_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_frame"]
-            self.assertEqual(len(segment_assets), 3)
-            self.assertEqual(len(frame_assets), 9)
+            self.assertEqual(len(segment_assets), 4)
+            self.assertEqual(len(frame_assets), 12)
             self.assertEqual(segment_assets[0]["metadata_json"]["scene_id"], "scene-0001")
             self.assertEqual(segment_assets[0]["metadata_json"]["segment_strategy"], "scene_detection")
             self.assertEqual(segment_assets[0]["metadata_json"]["keyframe_density"], "dense")
             self.assertEqual(frame_assets[0]["metadata_json"]["scene_id"], "scene-0001")
-            self.assertEqual(frame_assets[0]["metadata_json"]["keyframe_index"], 1)
+            self.assertEqual(frame_assets[0]["metadata_json"]["keyframe_index"], 0)
+            self.assertTrue(frame_assets[0]["metadata_json"]["is_scene_representative"])
             self.assertEqual(frame_assets[0]["metadata_json"]["keyframe_density"], "dense")
             self.assertEqual(len(repository.vector_refs), 12)
+
+    def test_index_media_splits_a_three_minute_detected_scene_into_30_second_windows(self):
+        repository = FakeMediaRepository()
+        repository.files["file-1"] = {
+            "id": "file-1",
+            "library_id": "library-1",
+            "path": "/tmp/video.mp4",
+            "media_type": "video",
+            "duration_seconds": 180.0,
+        }
+        handler = IndexMediaHandler(repository, scene_detector=lambda _path: [(0.0, 180.0)])
+
+        result = handler.handle({
+            "file_id": "file-1",
+            "index_profile": "balanced",
+            "segment_strategy": "scene_detection",
+        })
+
+        segments = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_segment"]
+        self.assertEqual(result["scenes_detected"], 6)
+        self.assertEqual(
+            [(asset["start_time_seconds"], asset["end_time_seconds"]) for asset in segments],
+            [(0.0, 30.0), (30.0, 60.0), (60.0, 90.0), (90.0, 120.0), (120.0, 150.0), (150.0, 180.0)],
+        )
+        self.assertEqual(
+            [asset["metadata_json"]["scene_id"] for asset in segments],
+            [f"scene-0001-part-{index:03d}" for index in range(1, 7)],
+        )
 
     def test_index_media_uses_dense_keyframe_density_by_default(self):
         repository = FakeMediaRepository()
@@ -358,8 +417,9 @@ class ProbeAndIndexTest(unittest.TestCase):
         frame_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_frame"]
         self.assertEqual(result["keyframe_density"], "dense")
         self.assertEqual(result["keyframes_selected"], 1)
-        self.assertEqual(len(frame_assets), 1)
-        self.assertNotEqual(frame_assets[0]["frame_time_seconds"], 3.0)
+        self.assertEqual(len(frame_assets), 2)
+        self.assertEqual(frame_assets[0]["frame_time_seconds"], 3.0)
+        self.assertTrue(frame_assets[0]["metadata_json"]["is_scene_representative"])
 
     def test_index_media_creates_run_ocr_job_for_scene_video_frame_assets(self):
         repository = FakeMediaRepository()
@@ -384,7 +444,7 @@ class ProbeAndIndexTest(unittest.TestCase):
         })
 
         frame_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_frame"]
-        self.assertEqual(len(frame_assets), 6)
+        self.assertEqual(len(frame_assets), 9)
         self.assertEqual(job_repository.created_jobs, [
             {
                 "job_type": "run_ocr",
@@ -396,6 +456,36 @@ class ProbeAndIndexTest(unittest.TestCase):
                 "timeout_seconds": 7200,
             },
         ])
+
+    def test_index_media_creates_scene_caption_v2_jobs_for_video_segments(self):
+        repository = FakeMediaRepository()
+        repository.files["file-1"] = {
+            "id": "file-1",
+            "library_id": "library-1",
+            "path": "/tmp/video.mp4",
+            "media_type": "video",
+            "duration_seconds": 20.0,
+        }
+        job_repository = InMemoryJobRepository()
+        handler = IndexMediaHandler(
+            repository,
+            job_repository=job_repository,
+            scene_detector=lambda _path: [(0.0, 20.0)],
+        )
+
+        with patch.dict("os.environ", {
+            "CAPTION_INDEXING_ENABLED": "true",
+            "LOCAL_VLM_ENABLED": "true",
+        }):
+            handler.handle({
+                "file_id": "file-1",
+                "index_profile": "balanced",
+                "segment_strategy": "scene_detection",
+            })
+
+        caption_jobs = [job for job in job_repository.created_jobs if job["job_type"] == "generate_caption"]
+        self.assertEqual(len(caption_jobs), 1)
+        self.assertEqual(caption_jobs[0]["input_json"]["prompt_version"], "scene-caption-v2")
 
     def test_index_media_merges_short_scenes_before_creating_assets(self):
         repository = FakeMediaRepository()
@@ -443,10 +533,39 @@ class ProbeAndIndexTest(unittest.TestCase):
         self.assertEqual(result["segment_strategy"], "fixed_30s")
         self.assertTrue(result["fallback"])
         self.assertIn("PySceneDetect failed", result["fallback_reason"])
-        self.assertEqual(len(repository.assets), 3)
-        asset = next(iter(repository.assets.values()))
-        self.assertIsNone(asset["metadata_json"]["scene_id"])
-        self.assertEqual(asset["metadata_json"]["segment_strategy"], "fixed_30s_fallback")
+        self.assertEqual(len(repository.assets), 6)
+        segment_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_segment"]
+        frame_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_frame"]
+        self.assertEqual(segment_assets[0]["metadata_json"]["scene_id"], "segment-0001")
+        self.assertEqual(segment_assets[0]["metadata_json"]["segment_strategy"], "fixed_30s_fallback")
+        self.assertEqual(frame_assets[0]["metadata_json"]["scene_id"], "segment-0001")
+        self.assertTrue(frame_assets[0]["metadata_json"]["is_scene_representative"])
+
+    def test_light_density_short_scene_still_has_a_midpoint_frame(self):
+        repository = FakeMediaRepository()
+        repository.files["file-1"] = {
+            "id": "file-1",
+            "library_id": "library-1",
+            "path": "/tmp/video.mp4",
+            "media_type": "video",
+            "duration_seconds": 8.0,
+        }
+        handler = IndexMediaHandler(
+            repository,
+            scene_detector=lambda _path: [(0.0, 8.0)],
+            keyframe_density="light",
+        )
+
+        handler.handle({
+            "file_id": "file-1",
+            "index_profile": "balanced",
+            "segment_strategy": "scene_detection",
+        })
+
+        frame_assets = [asset for asset in repository.assets.values() if asset["asset_type"] == "video_frame"]
+        self.assertEqual(len(frame_assets), 1)
+        self.assertEqual(frame_assets[0]["frame_time_seconds"], 4.0)
+        self.assertTrue(frame_assets[0]["metadata_json"]["is_scene_representative"])
 
     def test_index_media_invalidates_old_video_segments_when_strategy_changes(self):
         repository = FakeMediaRepository()
@@ -473,7 +592,7 @@ class ProbeAndIndexTest(unittest.TestCase):
         })
 
         self.assertEqual(first["assets_created"], 2)
-        self.assertEqual(second["assets_created"], 4)
+        self.assertEqual(second["assets_created"], 5)
         self.assertEqual(repository.invalidations, ["file-1"])
 
     def test_deterministic_mock_vector_and_point_id_are_stable(self):

@@ -1,4 +1,13 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common'
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { JobsService } from './jobs.service.js'
 
 @Controller('jobs')
@@ -13,6 +22,34 @@ export class JobsController {
     return this.jobsService.listJobs({
       limit: this.optionalInteger(limit, 'limit'),
       offset: this.optionalInteger(offset, 'offset'),
+    })
+  }
+
+  @Get('video/reindex-readiness')
+  getVideoReindexReadiness(
+    @Query('library_id') libraryId?: string,
+    @Query('file_id') fileId?: string,
+  ) {
+    return this.jobsService.getVideoReindexReadiness({ libraryId, fileId })
+  }
+
+  @Post('video/reindex')
+  queueVideoReindexJobs(
+    @Body()
+    body: {
+      library_id?: string
+      file_id?: string
+      limit?: number
+      dry_run?: boolean
+      only_not_ready?: boolean
+    },
+  ) {
+    return this.jobsService.queueVideoReindexJobs({
+      libraryId: body?.library_id,
+      fileId: body?.file_id,
+      limit: body?.limit,
+      dryRun: body?.dry_run,
+      onlyNotReady: body?.only_not_ready,
     })
   }
 

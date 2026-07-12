@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { JobsWorkspace } from '../components/jobs-workspace'
 
 const refresh = vi.hoisted(() => vi.fn())
@@ -21,6 +21,10 @@ const job = {
 
 beforeEach(() => {
   refresh.mockClear()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('jobs workspace', () => {
@@ -46,6 +50,16 @@ describe('jobs workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '刷新任务' }))
 
     expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  test('automatically refreshes the current page every five seconds while visible', () => {
+    vi.useFakeTimers()
+    render(<JobsWorkspace jobs={[job]} total={160} limit={25} offset={25} />)
+
+    vi.advanceTimersByTime(10_000)
+
+    expect(refresh).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('第 2 / 7 页')).toBeInTheDocument()
   })
 
   test('shows the failure reason for failed jobs', () => {

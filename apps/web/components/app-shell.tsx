@@ -1,5 +1,8 @@
+'use client'
+
 import Link from 'next/link'
-import { Bot, Briefcase, Folder, Search, Sparkles } from 'lucide-react'
+import { usePathname } from 'next/navigation'
+import { Briefcase, Folder, Search, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { HealthIndicator } from './health-indicator'
 
@@ -7,10 +10,10 @@ const navItems = [
   { href: '/libraries', label: '素材库', icon: Folder },
   { href: '/search', label: '搜索', icon: Search },
   { href: '/jobs', label: '任务', icon: Briefcase },
-  { href: '/agent', label: '助手', icon: Bot },
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname()
   return (
     <div className="min-h-screen text-[var(--ink)]">
       <header className="sticky top-0 z-20 border-b border-[var(--hairline)] bg-white/90 backdrop-blur-xl">
@@ -27,8 +30,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             {navItems.map((item) => {
               const Icon = item.icon
+              const active = routeMatches(pathname, item.href)
               return (
-                <Link key={item.href} href={item.href} className="nav-pill" aria-label={item.label}>
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={active ? 'nav-pill nav-pill-active' : 'nav-pill'}
+                  aria-label={item.label}
+                  aria-current={active ? 'page' : undefined}
+                >
                   <Icon aria-hidden="true" size={16} />
                   <span className="hidden md:inline">{item.label}</span>
                 </Link>
@@ -36,7 +46,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
           <HealthIndicator />
-          <Link href="/agent" className="primary-action hidden sm:inline-flex">
+          <Link
+            href="/agent"
+            className={
+              routeMatches(pathname, '/agent')
+                ? 'primary-action primary-action-active hidden sm:inline-flex'
+                : 'primary-action hidden sm:inline-flex'
+            }
+            aria-current={routeMatches(pathname, '/agent') ? 'page' : undefined}
+          >
             <Sparkles aria-hidden="true" size={16} />
             <span>Ask</span>
           </Link>
@@ -45,4 +63,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:py-8">{children}</main>
     </div>
   )
+}
+
+function routeMatches(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`)
 }

@@ -14,6 +14,12 @@
 
 ## 专题索引
 
+### 聚焦专题
+
+- [`retrieval-interview/RESEARCH_PLAN.md`](retrieval-interview/RESEARCH_PLAN.md) — 索引、检索、评测与面试理解专题；适合需要把 SigLIP、Embedding、Qdrant、多通道召回、分数和检索指标串成完整解释的读者。
+
+### 全局研究
+
 | 文件 | 主题 | 阅读用途 |
 | --- | --- | --- |
 | `01_architecture.md` | 架构全景 | 先建立进程、模块、存储和边界的整体图 |

@@ -112,7 +112,7 @@ export const embedTextAssetInputSchema = z.object({
 export const generateCaptionInputSchema = z.object({
   file_id: uuidSchema,
   source_asset_ids: z.array(uuidSchema).min(1),
-  prompt_version: z.literal('caption-v1').default('caption-v1'),
+  prompt_version: z.enum(['caption-v1', 'scene-caption-v2']).default('caption-v1'),
   model_name: z.string().min(1).default('Qwen/Qwen2.5-VL-7B-Instruct'),
   model_version: z.string().min(1).default('qwen2.5-vl-7b-instruct'),
 })

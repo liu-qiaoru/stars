@@ -516,3 +516,12 @@ Review：
 
 - Result：根目录工具链已直接替换为 Oxc：新增 `.oxlintrc.json` 和 `.oxfmtrc.jsonc`，`package.json` 的 `lint` / `format` / `format:check` 切换为 `oxlint` / `oxfmt`，新增 `lint:fix`；移除 `eslint.config.mjs`、`prettier.config.mjs`、`.prettierignore` 以及 ESLint/Prettier 相关 devDependencies，保留 `tsc --noEmit` 作为类型检查入口。
 - Notes：安装时沿用当前 `node_modules` 已使用的 pnpm store（`/Users/zhihu/Library/pnpm/store/v10`），避免重装整个依赖树。`corepack pnpm lint` 通过；首次 `corepack pnpm format:check` 报 17 个 JS/TS/JSON 文件格式差异，运行 `corepack pnpm format` 后复查通过，差异为 `oxfmt` 的换行/链式调用格式化；已关闭 `sortPackageJson`，避免 package 字段排序噪音。验证通过：`corepack pnpm --filter @local-media-agent/shared exec node --import tsx scripts/generate-json-schemas.ts`；`corepack pnpm --filter @local-media-agent/server exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/server exec vitest run`，15 个 test files / 40 tests 通过；`corepack pnpm --filter @local-media-agent/shared exec tsc --noEmit`；`corepack pnpm --filter @local-media-agent/shared exec vitest run`，1 个 test file / 4 tests 通过；`corepack pnpm --filter @local-media-agent/web check`，包含 5 个 test files / 8 tests 和 Next webpack build；`git diff --check` 通过。
+
+## Scene MaxSim、多关键帧 Caption 与前端任务体验
+
+- [x] 长镜头按最多 30 秒拆窗，每个窗口至少创建一个 `video_frame`，停止创建新的 `video_segment_vectors` refs。
+- [x] 视频帧按 `(file_id, scene_id)` 做 MaxSim，PostgreSQL 提供真实场景边界。
+- [x] Qwen2.5-VL 使用同场景 1～6 张有序关键帧生成 `scene-caption-v2`，保留完整 provenance。
+- [x] 增加视频批量重建与 readiness API，兼容开关验证通过后才关闭旧 segment 在线召回。
+- [x] 搜索页增加 loading/错误反馈；任务页每页 25 条、每 5 秒可见时自动刷新，并修复卡片粘连。
+- [x] 新增 Obsidian 笔记 `docs/知识库/RAG在当前项目中的应用.md` 和现有数据升级步骤。

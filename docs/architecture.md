@@ -148,7 +148,7 @@ Indexer 从文件创建 media assets：
 
 Retrieval 组合 Qdrant 向量搜索、PostgreSQL full-text search 和 PostgreSQL metadata 过滤。Qdrant 只返回召回结果和轻量 payload，最终响应必须回 PostgreSQL 补齐事实数据。
 
-Phase 14 后，`POST /search` 先 overfetch 各来源候选，再合并同 asset 和相邻视频窗口，最后输出 top-level `results`（`score_kind='hybrid_score'`）。原始 `groups` 仍保留用于调试，不再作为 Search 页面的主排序依据。
+`POST /search` 先 overfetch 各来源候选。视频视觉帧按 `(file_id, scene_id)` 做 MaxSim，scene 分数取命中帧最大 cosine，边界从 PostgreSQL `video_segment` 补齐；再与 caption、OCR、字幕候选做 hybrid 合并排序，输出 top-level `results`（`score_kind='hybrid_score'`）。原始 `groups` 仍保留逐帧/逐来源结果用于调试。长镜头先按 `SCENE_MAX_SECONDS`（默认 30 秒）拆窗，避免一个固定机位长视频只生成少量场景证据。
 
 ### Agent Runtime
 

@@ -424,7 +424,47 @@ class PostgresMediaRepository:
             "media_type": row[10],
         }
 
-    def invalidate_video_index_assets(self, file_id, segment_strategy, keyframe_density=None):
+    def list_scene_caption_frames(self, file_id, scene_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                  ma.id, ma.file_id, ma.asset_type, COALESCE(ma.path, mf.path) AS path,
+                  ma.frame_time_seconds, ma.content_hash, ma.metadata_json,
+                  mf.library_id, mf.media_type
+                FROM media_assets ma
+                JOIN media_files mf ON mf.id = ma.file_id
+                WHERE ma.file_id = %s
+                  AND ma.asset_type = 'video_frame'
+                  AND ma.metadata_json->>'scene_id' = %s
+                  AND COALESCE(ma.metadata_json->>'stale', 'false') <> 'true'
+                ORDER BY ma.frame_time_seconds ASC, ma.id ASC
+                """,
+                (file_id, scene_id),
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "id": str(row[0]),
+                "file_id": str(row[1]),
+                "asset_type": row[2],
+                "path": row[3],
+                "frame_time_seconds": float(row[4]) if row[4] is not None else None,
+                "content_hash": row[5],
+                "metadata_json": row[6] or {},
+                "library_id": str(row[7]),
+                "media_type": row[8],
+            }
+            for row in rows
+        ]
+
+    def invalidate_video_index_assets(
+        self,
+        file_id,
+        segment_strategy,
+        keyframe_density=None,
+        index_layout_version=None,
+    ):
         # Changing segmentation strategy or keyframe density can leave old video_segment/video_frame rows around.
         # Mark them stale instead of deleting so existing references remain auditable and safe to ignore in reads.
         stale_metadata = json.dumps({
@@ -441,9 +481,10 @@ class PostgresMediaRepository:
                   AND (
                     metadata_json->>'segment_strategy' IS DISTINCT FROM %s
                     OR metadata_json->>'keyframe_density' IS DISTINCT FROM %s
+                    OR metadata_json->>'index_layout_version' IS DISTINCT FROM %s
                   )
                 """,
-                (file_id, segment_strategy, keyframe_density),
+                (file_id, segment_strategy, keyframe_density, index_layout_version),
             )
             asset_ids = [row[0] for row in cursor.fetchall()]
             if not asset_ids:
@@ -476,6 +517,22 @@ class PostgresMediaRepository:
             "vector_refs_invalidated": vector_refs_invalidated,
         }
 
+    def mark_video_segment_vector_refs_stale(self, file_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE vector_refs
+                SET status = 'stale', updated_at = now()
+                WHERE file_id = %s
+                  AND collection_name = 'video_segment_vectors'
+                  AND status <> 'stale'
+                """,
+                (file_id,),
+            )
+            stale_count = cursor.rowcount
+        self.connection.commit()
+        return stale_count
+
     def mark_vector_ref_indexed(self, point_id):
         with self.connection.cursor() as cursor:
             cursor.execute(
@@ -483,6 +540,19 @@ class PostgresMediaRepository:
                 UPDATE vector_refs
                 SET status = 'indexed', updated_at = now()
                 WHERE point_id = %s
+                  AND status IN ('pending', 'indexed')
+                """,
+                (point_id,),
+            )
+            cursor.execute(
+                """
+                UPDATE media_files AS media_file
+                SET index_status = 'indexed', updated_at = now()
+                FROM vector_refs AS vector_ref
+                WHERE vector_ref.point_id = %s
+                  AND vector_ref.file_id = media_file.id
+                  AND vector_ref.status = 'indexed'
+                  AND media_file.deleted_at IS NULL
                 """,
                 (point_id,),
             )

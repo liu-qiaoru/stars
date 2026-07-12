@@ -275,7 +275,10 @@ export async function listAttemptedOcrJobs(db: Database) {
     })
     .from(jobs)
     .where(
-      and(eq(jobs.jobType, 'run_ocr'), inArray(jobs.status, ['queued', 'running', 'failed', 'succeeded'])),
+      and(
+        eq(jobs.jobType, 'run_ocr'),
+        inArray(jobs.status, ['queued', 'running', 'failed', 'succeeded']),
+      ),
     )
 }
 
@@ -402,6 +405,55 @@ export async function listSearchResultMetadata(
     .where(and(...conditions))
 }
 
+export async function listVideoSceneBounds(
+  db: Database,
+  keys: Array<{ fileId: string; sceneId: string }>,
+) {
+  if (!keys.length) {
+    return []
+  }
+  const requestedKeys = new Set(keys.map((key) => `${key.fileId}|${key.sceneId}`))
+  const rows = await db
+    .select({
+      assetId: mediaAssets.id,
+      fileId: mediaAssets.fileId,
+      startTimeSeconds: mediaAssets.startTimeSeconds,
+      endTimeSeconds: mediaAssets.endTimeSeconds,
+      metadataJson: mediaAssets.metadataJson,
+    })
+    .from(mediaAssets)
+    .where(
+      and(
+        eq(mediaAssets.assetType, 'video_segment'),
+        inArray(mediaAssets.fileId, [...new Set(keys.map((key) => key.fileId))]),
+        sql`COALESCE(media_assets.metadata_json->>'stale', 'false') <> 'true'`,
+      ),
+    )
+
+  const matched = new Map<string, (typeof rows)[number] & { sceneId: string }>()
+  for (const row of rows) {
+    const metadata = row.metadataJson
+    const sceneId =
+      typeof metadata === 'object' && metadata !== null && 'scene_id' in metadata
+        ? metadata.scene_id
+        : undefined
+    if (typeof sceneId !== 'string') {
+      continue
+    }
+    const key = `${row.fileId}|${sceneId}`
+    if (!requestedKeys.has(key)) {
+      continue
+    }
+    if (matched.has(key)) {
+      throw new Error(
+        `Multiple active video segments for file_id=${row.fileId} scene_id=${sceneId}`,
+      )
+    }
+    matched.set(key, { ...row, sceneId })
+  }
+  return [...matched.values()]
+}
+
 export async function listTextSearchResultMetadata(
   db: Database,
   input: {
@@ -475,6 +527,32 @@ export async function getLibraryMediaCounts(db: Database, libraryId: string) {
   }
 }
 
+export async function listLibraryMediaFiles(
+  db: Database,
+  input: { libraryId: string; limit: number; offset: number },
+) {
+  const conditions = and(eq(mediaFiles.libraryId, input.libraryId), isNull(mediaFiles.deletedAt))
+  const [items, totalRows] = await Promise.all([
+    db
+      .select({
+        id: mediaFiles.id,
+        relativePath: mediaFiles.relativePath,
+        mediaType: mediaFiles.mediaType,
+        indexStatus: mediaFiles.indexStatus,
+      })
+      .from(mediaFiles)
+      .where(conditions)
+      .orderBy(asc(mediaFiles.relativePath), asc(mediaFiles.id))
+      .limit(input.limit)
+      .offset(input.offset),
+    db.select({ total: count() }).from(mediaFiles).where(conditions),
+  ])
+  return {
+    items,
+    total: Number(totalRows[0]?.total ?? 0),
+  }
+}
+
 export async function updateLibraryStatus(
   db: Database,
   id: string,
@@ -494,10 +572,7 @@ export async function updateLibraryStatus(
   return row
 }
 
-export async function listJobs(
-  db: Database,
-  input: { limit?: number; offset?: number } = {},
-) {
+export async function listJobs(db: Database, input: { limit?: number; offset?: number } = {}) {
   const limit = Math.min(Math.max(input.limit ?? 100, 1), 500)
   const offset = Math.max(input.offset ?? 0, 0)
   const [rows, totalRows] = await Promise.all([
@@ -507,6 +582,163 @@ export async function listJobs(
   const total = Number(totalRows[0]?.total ?? 0)
 
   return { rows, total, limit, offset }
+}
+
+export async function getVideoReindexState(
+  db: Database,
+  filters: { libraryId?: string; fileId?: string } = {},
+) {
+  const fileConditions = [eq(mediaFiles.mediaType, 'video'), isNull(mediaFiles.deletedAt)]
+  if (filters.libraryId) {
+    fileConditions.push(eq(mediaFiles.libraryId, filters.libraryId))
+  }
+  if (filters.fileId) {
+    fileConditions.push(eq(mediaFiles.id, filters.fileId))
+  }
+  const files = await db
+    .select({ id: mediaFiles.id })
+    .from(mediaFiles)
+    .where(and(...fileConditions))
+    .orderBy(asc(mediaFiles.createdAt), asc(mediaFiles.id))
+  const fileIds = files.map((file) => file.id)
+  if (!fileIds.length) {
+    return {
+      fileIds,
+      notReadyFileIds: [] as string[],
+      visualNotReadyFileIds: [] as string[],
+      activeJobFileIds: new Set<string>(),
+      activeVideoSegments: 0,
+      segmentsWithoutFrames: 0,
+      segmentsOver30Seconds: 0,
+      activeVideoSegmentVectorRefs: 0,
+      segmentsWithoutSceneCaptionV2: 0,
+    }
+  }
+
+  const [assetRows, segmentRefRows, activeJobRows] = await Promise.all([
+    db
+      .select({
+        id: mediaAssets.id,
+        fileId: mediaAssets.fileId,
+        assetType: mediaAssets.assetType,
+        startTimeSeconds: mediaAssets.startTimeSeconds,
+        endTimeSeconds: mediaAssets.endTimeSeconds,
+        metadataJson: mediaAssets.metadataJson,
+      })
+      .from(mediaAssets)
+      .where(
+        and(
+          inArray(mediaAssets.fileId, fileIds),
+          inArray(mediaAssets.assetType, ['video_segment', 'video_frame', 'caption']),
+          sql`COALESCE(media_assets.metadata_json->>'stale', 'false') <> 'true'`,
+        ),
+      ),
+    db
+      .select({ fileId: vectorRefs.fileId })
+      .from(vectorRefs)
+      .where(
+        and(
+          inArray(vectorRefs.fileId, fileIds),
+          eq(vectorRefs.collectionName, 'video_segment_vectors'),
+          sql`vector_refs.status <> 'stale'`,
+        ),
+      ),
+    db
+      .select({ inputJson: jobs.inputJson })
+      .from(jobs)
+      .where(and(eq(jobs.jobType, 'index_media'), inArray(jobs.status, ['queued', 'running']))),
+  ])
+
+  const sceneKey = (fileId: string, sceneId: string) => `${fileId}|${sceneId}`
+  const framesByScene = new Set<string>()
+  const captionsByScene = new Set<string>()
+  const segments = assetRows.flatMap((asset) => {
+    const metadata = recordValue(asset.metadataJson)
+    const sceneId = metadata.scene_id
+    if (asset.assetType === 'video_frame' && typeof sceneId === 'string') {
+      framesByScene.add(sceneKey(asset.fileId, sceneId))
+    }
+    if (
+      asset.assetType === 'caption' &&
+      typeof sceneId === 'string' &&
+      metadata.prompt_version === 'scene-caption-v2'
+    ) {
+      captionsByScene.add(sceneKey(asset.fileId, sceneId))
+    }
+    return asset.assetType === 'video_segment'
+      ? [{ ...asset, sceneId: typeof sceneId === 'string' ? sceneId : null }]
+      : []
+  })
+  const segmentRefsByFile = new Set(segmentRefRows.map((row) => row.fileId))
+  let segmentsWithoutFrames = 0
+  let segmentsOver30Seconds = 0
+  let segmentsWithoutSceneCaptionV2 = 0
+  const notReadyFileIds = new Set<string>()
+  const visualNotReadyFileIds = new Set<string>()
+  const segmentCountByFile = new Map<string, number>()
+  for (const segment of segments) {
+    segmentCountByFile.set(segment.fileId, (segmentCountByFile.get(segment.fileId) ?? 0) + 1)
+    const key = segment.sceneId ? sceneKey(segment.fileId, segment.sceneId) : null
+    if (!key || !framesByScene.has(key)) {
+      segmentsWithoutFrames += 1
+      notReadyFileIds.add(segment.fileId)
+      visualNotReadyFileIds.add(segment.fileId)
+    }
+    const start = segment.startTimeSeconds === null ? null : Number(segment.startTimeSeconds)
+    const end = segment.endTimeSeconds === null ? null : Number(segment.endTimeSeconds)
+    if (start === null || end === null || end - start > 30.000001) {
+      segmentsOver30Seconds += 1
+      notReadyFileIds.add(segment.fileId)
+      visualNotReadyFileIds.add(segment.fileId)
+    }
+    if (!key || !captionsByScene.has(key)) {
+      segmentsWithoutSceneCaptionV2 += 1
+      notReadyFileIds.add(segment.fileId)
+    }
+  }
+  for (const fileId of fileIds) {
+    if (!segmentCountByFile.has(fileId) || segmentRefsByFile.has(fileId)) {
+      notReadyFileIds.add(fileId)
+      visualNotReadyFileIds.add(fileId)
+    }
+  }
+  const activeJobFileIds = new Set(
+    activeJobRows.flatMap((row) => {
+      const fileId = recordValue(row.inputJson).file_id
+      return typeof fileId === 'string' ? [fileId] : []
+    }),
+  )
+  return {
+    fileIds,
+    notReadyFileIds: [...notReadyFileIds],
+    visualNotReadyFileIds: [...visualNotReadyFileIds],
+    activeJobFileIds,
+    activeVideoSegments: segments.length,
+    segmentsWithoutFrames,
+    segmentsOver30Seconds,
+    activeVideoSegmentVectorRefs: segmentRefRows.length,
+    segmentsWithoutSceneCaptionV2,
+  }
+}
+
+export async function createVideoReindexJobs(db: Database, fileIds: string[]) {
+  if (!fileIds.length) {
+    return []
+  }
+  return db
+    .insert(jobs)
+    .values(
+      fileIds.map((fileId) => ({
+        id: randomUUID(),
+        jobType: 'index_media',
+        inputJson: {
+          file_id: fileId,
+          index_profile: 'balanced',
+          segment_strategy: 'scene_detection',
+        },
+      })),
+    )
+    .returning()
 }
 
 export async function resolveJobFilePaths(

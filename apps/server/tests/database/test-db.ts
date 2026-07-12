@@ -17,6 +17,7 @@ export async function createTestDatabase() {
 
   return {
     db,
+    client,
     close: () => client.close(),
   }
 }

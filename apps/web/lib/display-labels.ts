@@ -44,6 +44,7 @@ const statusLabels: Record<string, string> = {
   failed: '失败',
   indexed: '已索引',
   pending: '待处理',
+  probed: '已探测',
 }
 
 const assetTypeLabels: Record<string, string> = {

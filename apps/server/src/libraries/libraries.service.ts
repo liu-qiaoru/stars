@@ -6,6 +6,7 @@ import {
   createLibrary,
   getLibrary,
   getLibraryMediaCounts,
+  listLibraryMediaFiles,
   listLibraries,
   updateLibraryStatus,
   type Database,
@@ -52,6 +53,28 @@ export class LibrariesService {
       throw new NotFoundException('Library not found')
     }
     return this.toResponse(row)
+  }
+
+  async listMedia(id: string, input: { limit: number; offset: number }) {
+    const library = await getLibrary(this.db, id)
+    if (!library) {
+      throw new NotFoundException('Library not found')
+    }
+    const result = await listLibraryMediaFiles(this.db, {
+      libraryId: id,
+      ...input,
+    })
+    return {
+      items: result.items.map((file) => ({
+        id: file.id,
+        relative_path: file.relativePath,
+        media_type: file.mediaType,
+        index_status: file.indexStatus,
+      })),
+      total: result.total,
+      limit: input.limit,
+      offset: input.offset,
+    }
   }
 
   async disableLibrary(id: string) {

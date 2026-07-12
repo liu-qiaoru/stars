@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { DATABASE } from '../database/database.module.js'
 import {
   claimNextJob,
@@ -11,6 +11,8 @@ import {
   listPendingEmbeddingVectorRefs,
   markJobSucceeded,
   createJob,
+  createVideoReindexJobs,
+  getVideoReindexState,
   reclaimStaleJobs,
   resolveJobFilePaths,
   type Database,
@@ -38,6 +40,50 @@ export class JobsService {
     }
     const filePathsByJobId = await resolveJobFilePaths(this.db, [row])
     return this.toResponse(row, filePathsByJobId.get(row.id) ?? [])
+  }
+
+  async getVideoReindexReadiness(input: { libraryId?: string; fileId?: string } = {}) {
+    const state = await getVideoReindexState(this.db, input)
+    return {
+      ready: state.visualNotReadyFileIds.length === 0,
+      active_video_files: state.fileIds.length,
+      active_video_segments: state.activeVideoSegments,
+      segments_without_frames: state.segmentsWithoutFrames,
+      segments_over_30_seconds: state.segmentsOver30Seconds,
+      active_video_segment_vector_refs: state.activeVideoSegmentVectorRefs,
+      segments_without_scene_caption_v2: state.segmentsWithoutSceneCaptionV2,
+      missing_file_ids: state.notReadyFileIds,
+    }
+  }
+
+  async queueVideoReindexJobs(
+    input: {
+      libraryId?: string
+      fileId?: string
+      limit?: number
+      dryRun?: boolean
+      onlyNotReady?: boolean
+    } = {},
+  ) {
+    const limit = input.limit ?? 100
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      throw new BadRequestException('limit must be an integer between 1 and 1000')
+    }
+    const state = await getVideoReindexState(this.db, input)
+    const candidateIds = input.onlyNotReady === false ? state.fileIds : state.notReadyFileIds
+    const activeIds = candidateIds.filter((fileId) => state.activeJobFileIds.has(fileId))
+    const queueableIds = candidateIds
+      .filter((fileId) => !state.activeJobFileIds.has(fileId))
+      .slice(0, limit)
+    const created = input.dryRun ? [] : await createVideoReindexJobs(this.db, queueableIds)
+    return {
+      scanned: state.fileIds.length,
+      queueable: queueableIds.length,
+      created: created.length,
+      skipped_active: activeIds.length,
+      dry_run: input.dryRun ?? false,
+      file_ids: queueableIds,
+    }
   }
 
   async claimNextJob(workerId: string, now = new Date()) {

@@ -56,31 +56,35 @@ export class QueryExpansionService {
       throw new BadGatewayException('DEEPSEEK_API_KEY is required for query expansion')
     }
 
-    const response = await fetch(`${this.settings.deepseekBaseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${this.settings.deepseekApiKey}`,
-        'content-type': 'application/json',
+    const startedAt = performance.now()
+    const response = await fetch(
+      `${this.settings.deepseekBaseUrl.replace(/\/$/, '')}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.settings.deepseekApiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.settings.deepseekModel,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You expand short user queries for image and video semantic search. Return strict JSON only.',
+            },
+            {
+              role: 'user',
+              content: this.expansionPrompt(original.text),
+            },
+          ],
+          response_format: { type: 'json_object' },
+          stream: false,
+          temperature: 0.2,
+        }),
+        signal: AbortSignal.timeout(this.settings.queryExpansionTimeoutMs),
       },
-      body: JSON.stringify({
-        model: this.settings.deepseekModel,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You expand short user queries for image and video semantic search. Return strict JSON only.',
-          },
-          {
-            role: 'user',
-            content: this.expansionPrompt(original.text),
-          },
-        ],
-        response_format: { type: 'json_object' },
-        stream: false,
-        temperature: 0.2,
-      }),
-      signal: AbortSignal.timeout(this.settings.queryExpansionTimeoutMs),
-    })
+    )
     if (!response.ok) {
       throw new BadGatewayException(`DeepSeek query expansion failed with ${response.status}`)
     }
@@ -113,7 +117,7 @@ export class QueryExpansionService {
 
     const normalized = this.normalizeVariants(original, parsedPayload.data.variants)
     this.logger.log(
-      `provider=deepseek variants=${normalized
+      `provider=deepseek max_variants=${this.settings.queryExpansionMaxVariants} duration_ms=${Math.round(performance.now() - startedAt)} variants=${normalized
         .map((variant) => `"${variant.text}"@${variant.weight.toFixed(2)} ${variant.source}`)
         .join(', ')}`,
     )
@@ -148,7 +152,9 @@ export class QueryExpansionService {
       }
     }
 
-    return [...normalized.values()].sort((left, right) => right.weight - left.weight).slice(0, 5)
+    return [...normalized.values()]
+      .sort((left, right) => right.weight - left.weight)
+      .slice(0, this.settings.queryExpansionMaxVariants)
   }
 
   private expansionPrompt(query: string) {
@@ -156,7 +162,7 @@ export class QueryExpansionService {
       'Expand the user query into phrases suitable for image/video semantic search.',
       'Keep the original query.',
       'Include Chinese, English translation, and visual scene phrasing when useful.',
-      'Return at most 5 variants.',
+      `Return at most ${this.settings.queryExpansionMaxVariants} variants in total, including the original query.`,
       'Avoid overly broad phrases such as person, object, image, video.',
       'Return JSON with shape: {"variants":[{"text":"...","weight":1.0}]}',
       `User query: ${query}`,

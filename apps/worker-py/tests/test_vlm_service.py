@@ -18,8 +18,8 @@ class FakeCaptioner:
     def __init__(self):
         self.calls = []
 
-    def caption_image_path(self, image_path, prompt):
-        self.calls.append((image_path, prompt))
+    def caption_image_paths(self, image_paths, prompt):
+        self.calls.append((image_paths, prompt))
         return "一只猫坐在窗边"
 
 
@@ -40,7 +40,22 @@ class VlmServiceTest(unittest.TestCase):
             "prompt_version": "caption-v1",
             "caption": "一只猫坐在窗边",
         })
-        self.assertEqual(captioner.calls[0][0], "/tmp/frame.jpg")
+        self.assertEqual(captioner.calls[0][0], ["/tmp/frame.jpg"])
+
+    def test_scene_caption_request_passes_multiple_images_in_order(self):
+        captioner = FakeCaptioner()
+
+        response = handle_caption_request(captioner, {
+            "image_paths": ["/tmp/frame-1.jpg", "/tmp/frame-2.jpg", "/tmp/frame-3.jpg"],
+            "frame_times_seconds": [5.0, 15.0, 25.0],
+            "prompt_version": "scene-caption-v2",
+            "model_name": "Qwen/Qwen2.5-VL-7B-Instruct",
+            "model_version": "qwen2.5-vl-7b-instruct",
+        })
+
+        self.assertEqual(response["prompt_version"], "scene-caption-v2")
+        self.assertEqual(captioner.calls[0][0], ["/tmp/frame-1.jpg", "/tmp/frame-2.jpg", "/tmp/frame-3.jpg"])
+        self.assertIn("按时间", captioner.calls[0][1])
 
     def test_caption_request_rejects_wrong_model(self):
         with self.assertRaisesRegex(ValueError, "Unsupported model_name"):
@@ -78,7 +93,7 @@ class VlmServiceTest(unittest.TestCase):
                 urlopen=fake_urlopen,
             )
 
-            caption = captioner.caption_image_path(image_file.name, prompt="describe")
+            caption = captioner.caption_image_paths([image_file.name], prompt="describe")
 
         self.assertEqual(caption, "一只猫坐在窗边")
         self.assertEqual(calls[0][0].full_url, "http://ollama.local/api/generate")
@@ -109,7 +124,36 @@ class VlmServiceTest(unittest.TestCase):
             captioner = OllamaVlCaptioner(urlopen=fake_urlopen)
 
             with self.assertRaisesRegex(RuntimeError, "model not found"):
-                captioner.caption_image_path(image_file.name, prompt="describe")
+                captioner.caption_image_paths([image_file.name], prompt="describe")
+
+    def test_ollama_captioner_posts_multiple_images_to_generate_endpoint(self):
+        calls = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self):
+                return json.dumps({"response": "连续场景描述"}).encode("utf-8")
+
+        def fake_urlopen(request, timeout):
+            calls.append(request)
+            return FakeResponse()
+
+        with tempfile.NamedTemporaryFile() as first, tempfile.NamedTemporaryFile() as second:
+            first.write(b"first")
+            second.write(b"second")
+            first.flush()
+            second.flush()
+            captioner = OllamaVlCaptioner(urlopen=fake_urlopen)
+
+            captioner.caption_image_paths([first.name, second.name], prompt="describe scene")
+
+        payload = json.loads(calls[0].data.decode("utf-8"))
+        self.assertEqual([base64.b64decode(value) for value in payload["images"]], [b"first", b"second"])
 
     def test_build_captioner_defaults_to_ollama_backend(self):
         with patch.dict("os.environ", {}, clear=True):

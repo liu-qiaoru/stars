@@ -592,7 +592,10 @@
           },
           "prompt_version": {
             "type": "string",
-            "const": "caption-v1",
+            "enum": [
+              "caption-v1",
+              "scene-caption-v2"
+            ],
             "default": "caption-v1"
           },
           "model_name": {
