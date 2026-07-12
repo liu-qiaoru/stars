@@ -3,6 +3,72 @@ import { describe, expect, test, vi } from 'vitest'
 import { EvaluationWorkspace } from '../components/evaluation-workspace'
 
 describe('evaluation workspace', () => {
+  test('loads a random target batch and selects a previewed scene', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'version-1',
+          set_id: 'set-1',
+          version: 1,
+          status: 'draft',
+          frozen_at: null,
+          queries: [],
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          seed: 'seed-1',
+          items: [
+            {
+              target_key: 'file-1:scene:scene-1',
+              file_id: 'file-1',
+              scene_id: 'scene-1',
+              media_type: 'video',
+              relative_path: '聚餐.mp4',
+              start_time_seconds: 5,
+              end_time_seconds: 18,
+            },
+          ],
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <EvaluationWorkspace
+        initialSets={[
+          {
+            id: 'set-1',
+            name: '基线',
+            description: null,
+            latest_version: {
+              id: 'version-1',
+              set_id: 'set-1',
+              version: 1,
+              status: 'draft',
+              frozen_at: null,
+            },
+          },
+        ]}
+        libraries={[{ id: 'library-1', name: '主素材库', root_path: '/media', enabled: true }]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /基线/ }))
+    await waitFor(() => expect(screen.getByText('查询 v1')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('查询类型'), { target: { value: 'known_target' } })
+    fireEvent.click(screen.getByRole('button', { name: '随机抽取 20 个' }))
+    await waitFor(() =>
+      expect(screen.getByLabelText('随机场景预览 00:05–00:18')).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '选择此目标' }))
+
+    expect(screen.getByText(/已选择：聚餐.mp4 · 00:05–00:18/)).toBeInTheDocument()
+    expect(fetchMock.mock.calls[2]?.[0]).toContain('/evaluation/targets/random?')
+  })
+
   test('selects a known-target video scene without entering internal ids', async () => {
     const fetchMock = vi
       .fn()

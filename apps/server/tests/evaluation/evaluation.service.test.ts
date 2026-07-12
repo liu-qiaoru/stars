@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { createLibrary, createMediaFile } from '../../src/database/repositories.js'
+import { eq } from 'drizzle-orm'
+import {
+  createLibrary,
+  createMediaAsset,
+  createMediaFile,
+} from '../../src/database/repositories.js'
+import { mediaFiles } from '../../src/database/schema.js'
 import { EvaluationService } from '../../src/evaluation/evaluation.service.js'
 import type { SearchService } from '../../src/search/search.service.js'
 import { createTestDatabase } from '../database/test-db.js'
@@ -100,6 +106,64 @@ describe('evaluation service', () => {
     expect(secondCandidate?.source_evidence).toEqual(
       expect.arrayContaining([expect.objectContaining({ collection: 'image_vectors', rank: 2 })]),
     )
+  })
+
+  test('returns seeded image and video-scene targets without duplicate videos', async () => {
+    const library = await createLibrary(context.db, { name: '随机目标', rootPath: '/targets' })
+    const image = await createMediaFile(context.db, {
+      libraryId: library.id,
+      path: '/targets/photo.jpg',
+      relativePath: 'photo.jpg',
+      mediaType: 'image',
+      sizeBytes: 10,
+      mtimeMs: 1,
+    })
+    const video = await createMediaFile(context.db, {
+      libraryId: library.id,
+      path: '/targets/video.mp4',
+      relativePath: 'video.mp4',
+      mediaType: 'video',
+      sizeBytes: 10,
+      mtimeMs: 2,
+    })
+    await context.db
+      .update(mediaFiles)
+      .set({ indexStatus: 'indexed' })
+      .where(eq(mediaFiles.libraryId, library.id))
+    await createMediaAsset(context.db, {
+      fileId: video.id,
+      assetType: 'video_segment',
+      startTimeSeconds: '0',
+      endTimeSeconds: '10',
+      metadataJson: { scene_id: 'scene-a' },
+    })
+    await createMediaAsset(context.db, {
+      fileId: video.id,
+      assetType: 'video_segment',
+      startTimeSeconds: '10',
+      endTimeSeconds: '20',
+      metadataJson: { scene_id: 'scene-b' },
+    })
+    const service = new EvaluationService(context.db, {} as SearchService)
+
+    const result = await service.listRandomTargets({
+      libraryId: library.id,
+      limit: 20,
+      seed: 'fixed-seed',
+    })
+
+    expect(result.seed).toBe('fixed-seed')
+    expect(result.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ file_id: image.id, media_type: 'image', scene_id: null }),
+        expect.objectContaining({
+          file_id: video.id,
+          media_type: 'video',
+          scene_id: expect.stringMatching(/^scene-/),
+        }),
+      ]),
+    )
+    expect(result.items.filter((item) => item.file_id === video.id)).toHaveLength(1)
   })
 })
 

@@ -145,6 +145,16 @@ export interface EvaluationRun {
   candidates: EvaluationCandidate[]
 }
 
+export interface EvaluationRandomTarget {
+  target_key: string
+  file_id: string
+  scene_id: string | null
+  media_type: 'image' | 'video'
+  relative_path: string
+  start_time_seconds: number | null
+  end_time_seconds: number | null
+}
+
 export interface MediaAsset {
   id: string
   asset_type: string
@@ -292,6 +302,16 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<SearchResponse>('/search', { method: 'POST', body: JSON.stringify(input) }),
     listEvaluationSets: () =>
       request<{ items: EvaluationSetSummary[] }>('/evaluation/sets', { method: 'GET' }),
+    listRandomEvaluationTargets: (input: { libraryId?: string; limit?: number; seed?: string }) => {
+      const params = new URLSearchParams()
+      if (input.libraryId) params.set('library_id', input.libraryId)
+      if (input.limit) params.set('limit', String(input.limit))
+      if (input.seed) params.set('seed', input.seed)
+      return request<{ seed: string; items: EvaluationRandomTarget[] }>(
+        `/evaluation/targets/random?${params.toString()}`,
+        { method: 'GET' },
+      )
+    },
     createEvaluationSet: (input: { name: string; description?: string }) =>
       request<EvaluationSetSummary & { version_id: string }>('/evaluation/sets', {
         method: 'POST',

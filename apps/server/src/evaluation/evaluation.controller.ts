@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common'
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common'
 import { EvaluationService } from './evaluation.service.js'
 
 @Controller('evaluation')
@@ -7,6 +16,16 @@ export class EvaluationController {
 
   @Get('sets') listSets() {
     return this.service.listSets()
+  }
+  @Get('targets/random') listRandomTargets(
+    @Query('library_id') libraryId?: string,
+    @Query('limit') limit = '20',
+    @Query('seed') seed?: string,
+  ) {
+    const parsedLimit = Number(limit)
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 20)
+      throw new BadRequestException('limit must be an integer in range 1-20')
+    return this.service.listRandomTargets({ libraryId, limit: parsedLimit, seed })
   }
   @Post('sets') createSet(@Body() body: { name: string; description?: string }) {
     return this.service.createSet(body)

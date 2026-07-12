@@ -621,6 +621,7 @@ Response（`ALLOW_EXTERNAL_LLM=false`）：
 `/evaluation` 是仅供本地维护者使用的评测域，不改变普通 `/search` 的生产排序。
 
 - `GET /evaluation/sets`：列出评测集及最新版本。
+- `GET /evaluation/targets/random`：按可选 `library_id`、`limit`（最大 20）和 `seed` 返回已索引图片与稳定视频 scene 的随机目标。相同 seed 返回稳定顺序；响应只含媒体身份、路径与时间范围，不返回 Caption、OCR 或 Transcript。同一视频一批最多返回一个 scene。
 - `POST /evaluation/sets`：创建评测集和首个草稿版本。
 - `GET /evaluation/versions/{id}`：读取版本与查询。
 - `POST /evaluation/versions/{id}/queries`：向草稿版本添加查询。必须提供查询文本、类型、意图分类和非空的必须满足条件。

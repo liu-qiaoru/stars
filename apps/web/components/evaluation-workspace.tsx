@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 import {
   createApiClient,
   type EvaluationRun,
+  type EvaluationRandomTarget,
   type EvaluationSetSummary,
   type EvaluationVersionSummary,
   type LibraryMediaItem,
@@ -35,6 +36,7 @@ export function EvaluationWorkspace({
     sceneId: string | null
     label: string
   } | null>(null)
+  const [randomTargets, setRandomTargets] = useState<EvaluationRandomTarget[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -141,6 +143,19 @@ export function EvaluationWorkspace({
       }
       setSelectedTarget(null)
       setSelectedMedia(await client.getMedia(item.id))
+    })
+  }
+
+  async function loadRandomTargets() {
+    await guard(async () => {
+      const result = await client.listRandomEvaluationTargets({
+        libraryId: pickerLibraryId || undefined,
+        limit: 20,
+        seed: crypto.randomUUID(),
+      })
+      setRandomTargets(result.items)
+      setSelectedMedia(null)
+      setSelectedTarget(null)
     })
   }
 
@@ -256,111 +271,180 @@ export function EvaluationWorkspace({
                     {queryType === 'known_target' ? (
                       <div className="space-y-3 rounded-lg border bg-slate-50 p-3">
                         <p className="text-sm font-medium">选择目标媒体</p>
-                        <div className="grid gap-2 sm:grid-cols-[180px_1fr_auto]">
-                          <select
-                            aria-label="目标素材库"
-                            value={pickerLibraryId}
-                            onChange={(event) => setPickerLibraryId(event.target.value)}
-                            className="rounded border p-2"
-                          >
-                            {libraries.map((library) => (
-                              <option key={library.id} value={library.id}>
-                                {library.name}
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            value={pickerQuery}
-                            onChange={(event) => setPickerQuery(event.target.value)}
-                            placeholder="按文件名或路径筛选"
-                            className="rounded border p-2"
-                          />
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm text-[var(--muted)]">
+                            随机抽取已索引的图片和视频场景，选择后再描述查询。
+                          </p>
                           <button
                             type="button"
-                            className="rounded border bg-white px-3"
-                            onClick={() => void searchPicker()}
+                            className="rounded border bg-white px-3 py-2 text-sm"
+                            onClick={() => void loadRandomTargets()}
                           >
-                            查找媒体
+                            {randomTargets.length ? '换一批' : '随机抽取 20 个'}
                           </button>
                         </div>
-                        <div className="grid max-h-80 gap-2 overflow-auto sm:grid-cols-2">
-                          {pickerItems.map((item) => (
+                        {randomTargets.length ? (
+                          <div className="grid max-h-[36rem] gap-3 overflow-auto sm:grid-cols-2">
+                            {randomTargets.map((target) => {
+                              const sceneLabel =
+                                target.media_type === 'video'
+                                  ? `${formatTime(target.start_time_seconds)}–${formatTime(target.end_time_seconds)}`
+                                  : null
+                              return (
+                                <div
+                                  key={target.target_key}
+                                  className="overflow-hidden rounded border bg-white"
+                                >
+                                  {target.media_type === 'image' ? (
+                                    <img
+                                      alt={target.relative_path}
+                                      className="h-40 w-full bg-slate-100 object-contain"
+                                      src={client.mediaContentUrl(target.file_id)}
+                                    />
+                                  ) : (
+                                    <video
+                                      aria-label={`随机场景预览 ${sceneLabel}`}
+                                      className="h-40 w-full bg-black object-contain"
+                                      controls
+                                      preload="metadata"
+                                      src={client.mediaContentUrl(target.file_id, {
+                                        startTimeSeconds: target.start_time_seconds,
+                                        endTimeSeconds: target.end_time_seconds,
+                                      })}
+                                    />
+                                  )}
+                                  <div className="space-y-2 p-3">
+                                    <p className="truncate text-sm">{target.relative_path}</p>
+                                    {sceneLabel ? (
+                                      <p className="text-xs text-[var(--muted)]">{sceneLabel}</p>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      className="w-full rounded border px-3 py-2 text-sm"
+                                      onClick={() =>
+                                        setSelectedTarget({
+                                          fileId: target.file_id,
+                                          sceneId: target.scene_id,
+                                          label: `${target.relative_path}${sceneLabel ? ` · ${sceneLabel}` : ''}`,
+                                        })
+                                      }
+                                    >
+                                      选择此目标
+                                    </button>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                        <details>
+                          <summary className="cursor-pointer text-sm">按文件名查找目标</summary>
+                          <div className="grid gap-2 sm:grid-cols-[180px_1fr_auto]">
+                            <select
+                              aria-label="目标素材库"
+                              value={pickerLibraryId}
+                              onChange={(event) => setPickerLibraryId(event.target.value)}
+                              className="rounded border p-2"
+                            >
+                              {libraries.map((library) => (
+                                <option key={library.id} value={library.id}>
+                                  {library.name}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              value={pickerQuery}
+                              onChange={(event) => setPickerQuery(event.target.value)}
+                              placeholder="按文件名或路径筛选"
+                              className="rounded border p-2"
+                            />
                             <button
                               type="button"
-                              key={item.id}
-                              className="overflow-hidden rounded border bg-white text-left text-sm"
-                              onClick={() => void chooseMedia(item)}
+                              className="rounded border bg-white px-3"
+                              onClick={() => void searchPicker()}
                             >
-                              {item.media_type === 'image' ? (
-                                <img
-                                  alt={item.relative_path}
-                                  className="h-28 w-full bg-slate-100 object-contain"
-                                  src={client.mediaContentUrl(item.id)}
-                                />
-                              ) : (
-                                <video
-                                  aria-label={`${item.relative_path} 视频预览`}
-                                  className="h-28 w-full bg-black object-contain"
-                                  muted
-                                  preload="metadata"
-                                  src={client.mediaContentUrl(item.id)}
-                                />
-                              )}
-                              <span className="block truncate p-2">{item.relative_path}</span>
+                              查找媒体
                             </button>
-                          ))}
-                        </div>
+                          </div>
+                          <div className="grid max-h-80 gap-2 overflow-auto sm:grid-cols-2">
+                            {pickerItems.map((item) => (
+                              <button
+                                type="button"
+                                key={item.id}
+                                className="overflow-hidden rounded border bg-white text-left text-sm"
+                                onClick={() => void chooseMedia(item)}
+                              >
+                                {item.media_type === 'image' ? (
+                                  <img
+                                    alt={item.relative_path}
+                                    className="h-28 w-full bg-slate-100 object-contain"
+                                    src={client.mediaContentUrl(item.id)}
+                                  />
+                                ) : (
+                                  <video
+                                    aria-label={`${item.relative_path} 视频预览`}
+                                    className="h-28 w-full bg-black object-contain"
+                                    muted
+                                    preload="metadata"
+                                    src={client.mediaContentUrl(item.id)}
+                                  />
+                                )}
+                                <span className="block truncate p-2">{item.relative_path}</span>
+                              </button>
+                            ))}
+                          </div>
+                          {selectedMedia ? (
+                            <div className="space-y-2">
+                              <p className="text-sm">请选择视频场景：</p>
+                              {selectableScenes.length ? (
+                                selectableScenes.map((scene) => {
+                                  const label = `${formatTime(scene.start_time_seconds)}–${formatTime(scene.end_time_seconds)}`
+                                  return (
+                                    <div
+                                      key={scene.sceneId}
+                                      className="overflow-hidden rounded border bg-white"
+                                    >
+                                      <video
+                                        aria-label={`场景预览 ${label}`}
+                                        className="max-h-64 w-full bg-black"
+                                        controls
+                                        preload="metadata"
+                                        src={client.mediaContentUrl(selectedMedia.id, {
+                                          startTimeSeconds: scene.start_time_seconds,
+                                          endTimeSeconds: scene.end_time_seconds,
+                                        })}
+                                      />
+                                      <div className="flex items-center justify-between gap-3 p-3">
+                                        <span className="text-sm">{label}</span>
+                                        <button
+                                          type="button"
+                                          className="rounded border px-3 py-2 text-sm"
+                                          onClick={() =>
+                                            setSelectedTarget({
+                                              fileId: selectedMedia.id,
+                                              sceneId: scene.sceneId,
+                                              label: `${selectedMedia.path} · ${label}`,
+                                            })
+                                          }
+                                        >
+                                          选择此场景
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )
+                                })
+                              ) : (
+                                <p className="text-sm text-amber-700">
+                                  该视频没有可选择的稳定 scene_id。
+                                </p>
+                              )}
+                            </div>
+                          ) : null}
+                        </details>
                         {selectedTarget ? (
                           <p className="rounded bg-emerald-50 p-2 text-sm text-emerald-800">
                             已选择：{selectedTarget.label}
                           </p>
-                        ) : null}
-                        {selectedMedia ? (
-                          <div className="space-y-2">
-                            <p className="text-sm">请选择视频场景：</p>
-                            {selectableScenes.length ? (
-                              selectableScenes.map((scene) => {
-                                const label = `${formatTime(scene.start_time_seconds)}–${formatTime(scene.end_time_seconds)}`
-                                return (
-                                  <div
-                                    key={scene.sceneId}
-                                    className="overflow-hidden rounded border bg-white"
-                                  >
-                                    <video
-                                      aria-label={`场景预览 ${label}`}
-                                      className="max-h-64 w-full bg-black"
-                                      controls
-                                      preload="metadata"
-                                      src={client.mediaContentUrl(selectedMedia.id, {
-                                        startTimeSeconds: scene.start_time_seconds,
-                                        endTimeSeconds: scene.end_time_seconds,
-                                      })}
-                                    />
-                                    <div className="flex items-center justify-between gap-3 p-3">
-                                      <span className="text-sm">{label}</span>
-                                      <button
-                                        type="button"
-                                        className="rounded border px-3 py-2 text-sm"
-                                        onClick={() =>
-                                          setSelectedTarget({
-                                            fileId: selectedMedia.id,
-                                            sceneId: scene.sceneId,
-                                            label: `${selectedMedia.path} · ${label}`,
-                                          })
-                                        }
-                                      >
-                                        选择此场景
-                                      </button>
-                                    </div>
-                                  </div>
-                                )
-                              })
-                            ) : (
-                              <p className="text-sm text-amber-700">
-                                该视频没有可选择的稳定 scene_id。
-                              </p>
-                            )}
-                          </div>
                         ) : null}
                       </div>
                     ) : null}

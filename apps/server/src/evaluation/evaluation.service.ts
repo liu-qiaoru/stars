@@ -236,6 +236,81 @@ export class EvaluationService {
     }
   }
 
+  async listRandomTargets(input: { libraryId?: string; limit?: number; seed?: string }) {
+    const limit = Math.min(20, Math.max(1, input.limit ?? 20))
+    const seed = input.seed?.trim() || new Date().toISOString().slice(0, 10)
+    const imageLimit = Math.ceil(limit / 2)
+    const videoLimit = limit - imageLimit
+    const libraryFilter = input.libraryId ? eq(mediaFiles.libraryId, input.libraryId) : undefined
+    const images = await this.db
+      .select({ id: mediaFiles.id, path: mediaFiles.relativePath })
+      .from(mediaFiles)
+      .where(
+        and(
+          libraryFilter,
+          eq(mediaFiles.mediaType, 'image'),
+          eq(mediaFiles.indexStatus, 'indexed'),
+          sql`${mediaFiles.deletedAt} is null`,
+        ),
+      )
+      .orderBy(sql`md5(cast(${mediaFiles.id} as text) || ${seed})`)
+      .limit(imageLimit)
+    const videoRows = await this.db
+      .select({
+        fileId: mediaFiles.id,
+        path: mediaFiles.relativePath,
+        sceneId: sql<string>`${mediaAssets.metadataJson}->>'scene_id'`,
+        start: mediaAssets.startTimeSeconds,
+        end: mediaAssets.endTimeSeconds,
+      })
+      .from(mediaAssets)
+      .innerJoin(mediaFiles, eq(mediaAssets.fileId, mediaFiles.id))
+      .where(
+        and(
+          libraryFilter,
+          eq(mediaFiles.mediaType, 'video'),
+          eq(mediaFiles.indexStatus, 'indexed'),
+          sql`${mediaFiles.deletedAt} is null`,
+          eq(mediaAssets.assetType, 'video_segment'),
+          sql`${mediaAssets.metadataJson}->>'scene_id' is not null`,
+          sql`COALESCE(${mediaAssets.metadataJson}->>'stale', 'false') <> 'true'`,
+        ),
+      )
+      .orderBy(sql`md5(cast(${mediaAssets.id} as text) || ${seed})`)
+      .limit(Math.max(videoLimit * 5, videoLimit))
+    const seenVideoFiles = new Set<string>()
+    const videos = videoRows.filter((row) => {
+      if (seenVideoFiles.has(row.fileId) || seenVideoFiles.size >= videoLimit) return false
+      seenVideoFiles.add(row.fileId)
+      return true
+    })
+    const items = [
+      ...images.map((row) => ({
+        target_key: `${row.id}:file`,
+        file_id: row.id,
+        scene_id: null,
+        media_type: 'image',
+        relative_path: row.path,
+        start_time_seconds: null,
+        end_time_seconds: null,
+      })),
+      ...videos.map((row) => ({
+        target_key: `${row.fileId}:scene:${row.sceneId}`,
+        file_id: row.fileId,
+        scene_id: row.sceneId,
+        media_type: 'video',
+        relative_path: row.path,
+        start_time_seconds: row.start === null ? null : Number(row.start),
+        end_time_seconds: row.end === null ? null : Number(row.end),
+      })),
+    ].sort((left, right) =>
+      this.blindOrderKey(seed, 'targets', left.target_key).localeCompare(
+        this.blindOrderKey(seed, 'targets', right.target_key),
+      ),
+    )
+    return { seed, items }
+  }
+
   async freezeVersion(versionId: string) {
     await this.requireDraftVersion(versionId)
     const [queryTotal] = await this.db
