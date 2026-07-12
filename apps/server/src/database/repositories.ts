@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, count, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import {
@@ -529,9 +529,13 @@ export async function getLibraryMediaCounts(db: Database, libraryId: string) {
 
 export async function listLibraryMediaFiles(
   db: Database,
-  input: { libraryId: string; limit: number; offset: number },
+  input: { libraryId: string; limit: number; offset: number; query?: string },
 ) {
-  const conditions = and(eq(mediaFiles.libraryId, input.libraryId), isNull(mediaFiles.deletedAt))
+  const conditions = and(
+    eq(mediaFiles.libraryId, input.libraryId),
+    isNull(mediaFiles.deletedAt),
+    input.query ? ilike(mediaFiles.relativePath, `%${input.query}%`) : undefined,
+  )
   const [items, totalRows] = await Promise.all([
     db
       .select({

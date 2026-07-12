@@ -35,10 +35,16 @@ export class LibrariesController {
   }
 
   @Get(':id/media')
-  listMedia(@Param('id') id: string, @Query('limit') limit = '25', @Query('offset') offset = '0') {
+  listMedia(
+    @Param('id') id: string,
+    @Query('limit') limit = '25',
+    @Query('offset') offset = '0',
+    @Query('query') query = '',
+  ) {
     return this.librariesService.listMedia(id, {
       limit: this.parseInteger(limit, 'limit', { min: 1, max: 100 }),
       offset: this.parseInteger(offset, 'offset', { min: 0 }),
+      query: query.trim() || undefined,
     })
   }
 

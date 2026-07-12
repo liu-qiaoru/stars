@@ -152,6 +152,7 @@ export interface MediaAsset {
   end_time_seconds: number | null
   cache_path: string | null
   text_content: string | null
+  metadata_json?: Record<string, unknown>
 }
 
 export interface ExportClipRequest {
@@ -243,7 +244,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
     return (await response.json()) as T
   }
 
-  function withQuery(path: string, input: Record<string, number | undefined>) {
+  function withQuery(path: string, input: Record<string, number | string | undefined>) {
     const params = new URLSearchParams()
     for (const [key, value] of Object.entries(input)) {
       if (value !== undefined) {
@@ -261,7 +262,10 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<LibrarySummary>('/libraries', { method: 'POST', body: JSON.stringify(input) }),
     scanLibrary: (id: string) =>
       request<{ job_id: string; status: string }>(`/libraries/${id}/scan`, { method: 'POST' }),
-    listLibraryMedia: (id: string, input: { limit?: number; offset?: number } = {}) =>
+    listLibraryMedia: (
+      id: string,
+      input: { limit?: number; offset?: number; query?: string } = {},
+    ) =>
       request<LibraryMediaListResponse>(withQuery(`/libraries/${id}/media`, input), {
         method: 'GET',
       }),

@@ -6,7 +6,9 @@ import {
   type EvaluationRun,
   type EvaluationSetSummary,
   type EvaluationVersionSummary,
+  type LibraryMediaItem,
   type LibrarySummary,
+  type MediaDetail,
 } from '../lib/api-client'
 
 export function EvaluationWorkspace({
@@ -24,6 +26,15 @@ export function EvaluationWorkspace({
   const [run, setRun] = useState<EvaluationRun | null>(null)
   const [runs, setRuns] = useState<Array<{ id: string; status: string; created_at: string }>>([])
   const [queryType, setQueryType] = useState<'discovery' | 'known_target'>('discovery')
+  const [pickerLibraryId, setPickerLibraryId] = useState(libraries[0]?.id ?? '')
+  const [pickerQuery, setPickerQuery] = useState('')
+  const [pickerItems, setPickerItems] = useState<LibraryMediaItem[]>([])
+  const [selectedMedia, setSelectedMedia] = useState<MediaDetail | null>(null)
+  const [selectedTarget, setSelectedTarget] = useState<{
+    fileId: string
+    sceneId: string | null
+    label: string
+  } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,6 +85,10 @@ export function EvaluationWorkspace({
     if (!selected) return
     const form = event.currentTarget
     const data = new FormData(form)
+    if (queryType === 'known_target' && !selectedTarget) {
+      setError('请先选择目标图片或视频场景')
+      return
+    }
     await guard(async () => {
       await client.addEvaluationQuery(selected.id, {
         query_text: String(data.get('query_text')),
@@ -91,16 +106,50 @@ export function EvaluationWorkspace({
           .split('\n')
           .map((item) => item.trim())
           .filter(Boolean),
-        target_file_id: queryType === 'known_target' ? String(data.get('target_file_id')) : null,
-        target_scene_id:
-          queryType === 'known_target' && data.get('target_scene_id')
-            ? String(data.get('target_scene_id'))
-            : null,
+        target_file_id: queryType === 'known_target' ? selectedTarget!.fileId : null,
+        target_scene_id: queryType === 'known_target' ? selectedTarget!.sceneId : null,
       })
       setSelected(await client.getEvaluationVersion(selected.id))
       form.reset()
+      setSelectedMedia(null)
+      setSelectedTarget(null)
     })
   }
+
+  async function searchPicker() {
+    if (!pickerLibraryId) return
+    await guard(async () => {
+      const response = await client.listLibraryMedia(pickerLibraryId, {
+        limit: 50,
+        offset: 0,
+        query: pickerQuery.trim() || undefined,
+      })
+      setPickerItems(
+        response.items.filter((item) => item.media_type === 'image' || item.media_type === 'video'),
+      )
+      setSelectedMedia(null)
+      setSelectedTarget(null)
+    })
+  }
+
+  async function chooseMedia(item: LibraryMediaItem) {
+    await guard(async () => {
+      if (item.media_type === 'image') {
+        setSelectedMedia(null)
+        setSelectedTarget({ fileId: item.id, sceneId: null, label: item.relative_path })
+        return
+      }
+      setSelectedTarget(null)
+      setSelectedMedia(await client.getMedia(item.id))
+    })
+  }
+
+  const selectableScenes = (selectedMedia?.assets ?? []).flatMap((asset) => {
+    const sceneId = asset.metadata_json?.scene_id
+    return asset.asset_type === 'video_segment' && typeof sceneId === 'string'
+      ? [{ ...asset, sceneId }]
+      : []
+  })
 
   const nextCandidate = run?.candidates.find((candidate) => !candidate.judgment)
   async function exportRun() {
@@ -205,19 +254,84 @@ export function EvaluationWorkspace({
                       className="rounded border p-2"
                     />
                     {queryType === 'known_target' ? (
-                      <>
-                        <input
-                          name="target_file_id"
-                          required
-                          placeholder="目标 file UUID"
-                          className="rounded border p-2"
-                        />
-                        <input
-                          name="target_scene_id"
-                          placeholder="视频 scene_id（图片留空）"
-                          className="rounded border p-2"
-                        />
-                      </>
+                      <div className="space-y-3 rounded-lg border bg-slate-50 p-3">
+                        <p className="text-sm font-medium">选择目标媒体</p>
+                        <div className="grid gap-2 sm:grid-cols-[180px_1fr_auto]">
+                          <select
+                            aria-label="目标素材库"
+                            value={pickerLibraryId}
+                            onChange={(event) => setPickerLibraryId(event.target.value)}
+                            className="rounded border p-2"
+                          >
+                            {libraries.map((library) => (
+                              <option key={library.id} value={library.id}>
+                                {library.name}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            value={pickerQuery}
+                            onChange={(event) => setPickerQuery(event.target.value)}
+                            placeholder="按文件名或路径筛选"
+                            className="rounded border p-2"
+                          />
+                          <button
+                            type="button"
+                            className="rounded border bg-white px-3"
+                            onClick={() => void searchPicker()}
+                          >
+                            查找媒体
+                          </button>
+                        </div>
+                        <div className="max-h-56 space-y-1 overflow-auto">
+                          {pickerItems.map((item) => (
+                            <button
+                              type="button"
+                              key={item.id}
+                              className="block w-full rounded border bg-white p-2 text-left text-sm"
+                              onClick={() => void chooseMedia(item)}
+                            >
+                              {item.relative_path}
+                              <span className="ml-2 text-xs text-[var(--muted)]">
+                                {item.media_type}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        {selectedTarget ? (
+                          <p className="rounded bg-emerald-50 p-2 text-sm text-emerald-800">
+                            已选择：{selectedTarget.label}
+                          </p>
+                        ) : null}
+                        {selectedMedia ? (
+                          <div className="space-y-2">
+                            <p className="text-sm">请选择视频场景：</p>
+                            {selectableScenes.length ? (
+                              selectableScenes.map((scene) => (
+                                <button
+                                  type="button"
+                                  key={scene.sceneId}
+                                  className="block w-full rounded border bg-white p-3 text-left text-sm"
+                                  onClick={() =>
+                                    setSelectedTarget({
+                                      fileId: selectedMedia.id,
+                                      sceneId: scene.sceneId,
+                                      label: `${selectedMedia.path} · ${formatTime(scene.start_time_seconds)}–${formatTime(scene.end_time_seconds)}`,
+                                    })
+                                  }
+                                >
+                                  {formatTime(scene.start_time_seconds)}–
+                                  {formatTime(scene.end_time_seconds)}
+                                </button>
+                              ))
+                            ) : (
+                              <p className="text-sm text-amber-700">
+                                该视频没有可选择的稳定 scene_id。
+                              </p>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
                     ) : null}
                     <textarea
                       name="must_have"
@@ -235,7 +349,10 @@ export function EvaluationWorkspace({
                       placeholder="明确排除，每行一项"
                       className="rounded border p-2"
                     />
-                    <button disabled={busy} className="primary-action justify-center">
+                    <button
+                      disabled={busy || (queryType === 'known_target' && !selectedTarget)}
+                      className="primary-action justify-center"
+                    >
                       添加查询
                     </button>
                   </form>
@@ -403,4 +520,11 @@ export function EvaluationWorkspace({
       </div>
     </section>
   )
+}
+
+function formatTime(value: number | null) {
+  if (value === null) return '--:--'
+  const minutes = Math.floor(value / 60)
+  const seconds = Math.floor(value % 60)
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }

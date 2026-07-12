@@ -109,7 +109,7 @@ Response：
 
 ## GET /libraries/{id}/media
 
-按素材库分页返回 active media files。`limit` 默认 25、范围 1～100；`offset` 默认 0，必须为非负整数。结果按 `relative_path`、`id` 稳定升序，供素材库卡片按需展开和“加载更多”。
+按素材库分页返回 active media files。`limit` 默认 25、范围 1～100；`offset` 默认 0，必须为非负整数；可选 `query` 按 `relative_path` 做不区分大小写的包含筛选。结果按 `relative_path`、`id` 稳定升序，供素材库浏览和评测目标选择器复用。
 
 Response：
 

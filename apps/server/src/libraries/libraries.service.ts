@@ -55,7 +55,7 @@ export class LibrariesService {
     return this.toResponse(row)
   }
 
-  async listMedia(id: string, input: { limit: number; offset: number }) {
+  async listMedia(id: string, input: { limit: number; offset: number; query?: string }) {
     const library = await getLibrary(this.db, id)
     if (!library) {
       throw new NotFoundException('Library not found')

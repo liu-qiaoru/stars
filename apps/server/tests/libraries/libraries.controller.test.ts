@@ -230,6 +230,12 @@ describe('libraries API', () => {
       total: 3,
       items: [{ relative_path: 'z-last.mp4' }],
     })
+    await expect(
+      librariesController.listMedia(library.id, '25', '0', 'LAST'),
+    ).resolves.toMatchObject({
+      total: 1,
+      items: [{ relative_path: 'z-last.mp4' }],
+    })
   })
 
   test('素材库文件分页拒绝非法参数并对缺失 library 返回 404', async () => {
