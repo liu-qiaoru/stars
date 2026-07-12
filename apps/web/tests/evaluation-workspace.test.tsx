@@ -23,13 +23,19 @@ describe('evaluation workspace', () => {
         json: async () => ({
           items: [
             {
+              id: 'image-1',
+              relative_path: '旅行/海边.jpg',
+              media_type: 'image',
+              index_status: 'indexed',
+            },
+            {
               id: 'file-1',
               relative_path: '旅行/海边.mp4',
               media_type: 'video',
               index_status: 'indexed',
             },
           ],
-          total: 1,
+          total: 2,
           limit: 50,
           offset: 0,
         }),
@@ -88,11 +94,23 @@ describe('evaluation workspace', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '查找媒体' }))
     await waitFor(() => expect(screen.getByText('旅行/海边.mp4')).toBeInTheDocument())
+    expect(screen.getByAltText('旅行/海边.jpg')).toHaveAttribute(
+      'src',
+      'http://127.0.0.1:4000/media/image-1/content',
+    )
+    expect(screen.getByLabelText('旅行/海边.mp4 视频预览')).toHaveAttribute(
+      'src',
+      'http://127.0.0.1:4000/media/file-1/content',
+    )
     fireEvent.click(screen.getByText('旅行/海边.mp4'))
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '00:12–00:34' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: '选择此场景' })).toBeInTheDocument(),
     )
-    fireEvent.click(screen.getByRole('button', { name: '00:12–00:34' }))
+    expect(screen.getByLabelText('场景预览 00:12–00:34')).toHaveAttribute(
+      'src',
+      'http://127.0.0.1:4000/media/file-1/content#t=12,34',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '选择此场景' }))
 
     expect(screen.getByText(/已选择：.*00:12–00:34/)).toBeInTheDocument()
     expect(screen.queryByPlaceholderText(/UUID|scene_id/)).not.toBeInTheDocument()

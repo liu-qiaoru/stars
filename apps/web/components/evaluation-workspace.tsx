@@ -283,18 +283,30 @@ export function EvaluationWorkspace({
                             查找媒体
                           </button>
                         </div>
-                        <div className="max-h-56 space-y-1 overflow-auto">
+                        <div className="grid max-h-80 gap-2 overflow-auto sm:grid-cols-2">
                           {pickerItems.map((item) => (
                             <button
                               type="button"
                               key={item.id}
-                              className="block w-full rounded border bg-white p-2 text-left text-sm"
+                              className="overflow-hidden rounded border bg-white text-left text-sm"
                               onClick={() => void chooseMedia(item)}
                             >
-                              {item.relative_path}
-                              <span className="ml-2 text-xs text-[var(--muted)]">
-                                {item.media_type}
-                              </span>
+                              {item.media_type === 'image' ? (
+                                <img
+                                  alt={item.relative_path}
+                                  className="h-28 w-full bg-slate-100 object-contain"
+                                  src={client.mediaContentUrl(item.id)}
+                                />
+                              ) : (
+                                <video
+                                  aria-label={`${item.relative_path} 视频预览`}
+                                  className="h-28 w-full bg-black object-contain"
+                                  muted
+                                  preload="metadata"
+                                  src={client.mediaContentUrl(item.id)}
+                                />
+                              )}
+                              <span className="block truncate p-2">{item.relative_path}</span>
                             </button>
                           ))}
                         </div>
@@ -307,23 +319,42 @@ export function EvaluationWorkspace({
                           <div className="space-y-2">
                             <p className="text-sm">请选择视频场景：</p>
                             {selectableScenes.length ? (
-                              selectableScenes.map((scene) => (
-                                <button
-                                  type="button"
-                                  key={scene.sceneId}
-                                  className="block w-full rounded border bg-white p-3 text-left text-sm"
-                                  onClick={() =>
-                                    setSelectedTarget({
-                                      fileId: selectedMedia.id,
-                                      sceneId: scene.sceneId,
-                                      label: `${selectedMedia.path} · ${formatTime(scene.start_time_seconds)}–${formatTime(scene.end_time_seconds)}`,
-                                    })
-                                  }
-                                >
-                                  {formatTime(scene.start_time_seconds)}–
-                                  {formatTime(scene.end_time_seconds)}
-                                </button>
-                              ))
+                              selectableScenes.map((scene) => {
+                                const label = `${formatTime(scene.start_time_seconds)}–${formatTime(scene.end_time_seconds)}`
+                                return (
+                                  <div
+                                    key={scene.sceneId}
+                                    className="overflow-hidden rounded border bg-white"
+                                  >
+                                    <video
+                                      aria-label={`场景预览 ${label}`}
+                                      className="max-h-64 w-full bg-black"
+                                      controls
+                                      preload="metadata"
+                                      src={client.mediaContentUrl(selectedMedia.id, {
+                                        startTimeSeconds: scene.start_time_seconds,
+                                        endTimeSeconds: scene.end_time_seconds,
+                                      })}
+                                    />
+                                    <div className="flex items-center justify-between gap-3 p-3">
+                                      <span className="text-sm">{label}</span>
+                                      <button
+                                        type="button"
+                                        className="rounded border px-3 py-2 text-sm"
+                                        onClick={() =>
+                                          setSelectedTarget({
+                                            fileId: selectedMedia.id,
+                                            sceneId: scene.sceneId,
+                                            label: `${selectedMedia.path} · ${label}`,
+                                          })
+                                        }
+                                      >
+                                        选择此场景
+                                      </button>
+                                    </div>
+                                  </div>
+                                )
+                              })
                             ) : (
                               <p className="text-sm text-amber-700">
                                 该视频没有可选择的稳定 scene_id。
