@@ -52,7 +52,8 @@ export function EvaluationWorkspace({
 
   async function createSet(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const data = new FormData(event.currentTarget)
+    const form = event.currentTarget
+    const data = new FormData(form)
     await guard(async () => {
       const created = await client.createEvaluationSet({ name: String(data.get('name')) })
       const latest = {
@@ -64,14 +65,15 @@ export function EvaluationWorkspace({
       }
       setSets((items) => [...items, { ...created, latest_version: latest }])
       await openVersion(created.version_id)
-      event.currentTarget.reset()
+      form.reset()
     })
   }
 
   async function addQuery(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!selected) return
-    const data = new FormData(event.currentTarget)
+    const form = event.currentTarget
+    const data = new FormData(form)
     await guard(async () => {
       await client.addEvaluationQuery(selected.id, {
         query_text: String(data.get('query_text')),
@@ -96,7 +98,7 @@ export function EvaluationWorkspace({
             : null,
       })
       setSelected(await client.getEvaluationVersion(selected.id))
-      event.currentTarget.reset()
+      form.reset()
     })
   }
 
