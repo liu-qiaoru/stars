@@ -3,6 +3,7 @@ import { AgentModule } from './agent/agent.module.js'
 import { ClipsModule } from './clips/clips.module.js'
 import { ConfigModule } from './config/config.module.js'
 import { DatabaseModule } from './database/database.module.js'
+import { EvaluationModule } from './evaluation/evaluation.module.js'
 import { HealthModule } from './health/health.module.js'
 import { JobsModule } from './jobs/jobs.module.js'
 import { LibrariesModule } from './libraries/libraries.module.js'
@@ -24,6 +25,7 @@ import { SearchModule } from './search/search.module.js'
     AgentModule,
     QdrantModule,
     SearchModule,
+    EvaluationModule,
   ],
 })
 export class AppModule {}

@@ -85,13 +85,18 @@ export class SearchService {
     @Inject(SETTINGS) private readonly settings: Settings,
   ) {}
 
-  async search(input: SearchRequest) {
+  async search(
+    input: SearchRequest,
+    options: { evaluationBaseline?: boolean; sourceLimit?: number } = {},
+  ) {
     const searchStartedAt = performance.now()
     const request = this.parseRequest(input)
-    const sourceLimit = this.sourceLimit(request)
+    const sourceLimit = options.sourceLimit ?? this.sourceLimit(request)
     const availableCollections = [
       baseSearchCollections[0],
-      ...(this.settings.videoSegmentSearchEnabled !== false ? [videoSegmentSearchCollection] : []),
+      ...(this.settings.videoSegmentSearchEnabled !== false && !options.evaluationBaseline
+        ? [videoSegmentSearchCollection]
+        : []),
       baseSearchCollections[1],
       ...(this.settings.captionSearchEnabled ? [captionSearchCollection] : []),
     ]
@@ -114,7 +119,9 @@ export class SearchService {
     }
     const expansionStartedAt = performance.now()
     const queryVariants = selectedCollections.length
-      ? await this.queryExpansionService.expand(request.query)
+      ? options.evaluationBaseline
+        ? [{ text: request.query, source: 'original' as const, weight: 1 }]
+        : await this.queryExpansionService.expand(request.query)
       : []
     const expansionDurationMs = performance.now() - expansionStartedAt
 
@@ -165,7 +172,17 @@ export class SearchService {
       offset: request.offset,
       results,
       groups,
+      ...(options.evaluationBaseline
+        ? { executed_collections: selectedCollections.map((entry) => entry.collection) }
+        : {}),
     }
+  }
+
+  searchForEvaluation(input: Omit<SearchRequest, 'limit' | 'offset'>, sourceLimit = 20) {
+    return this.search(
+      { ...input, limit: sourceLimit, offset: 0 },
+      { evaluationBaseline: true, sourceLimit },
+    )
   }
 
   private parseRequest(input: SearchRequest): ParsedSearchRequest {

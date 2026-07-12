@@ -22,6 +22,13 @@
       "when": 1783731600000,
       "tag": "0002_backfill_indexed_media_files",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783864412445,
+      "tag": "0003_dark_blizzard",
+      "breakpoints": true
     }
   ]
 }

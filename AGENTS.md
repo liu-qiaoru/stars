@@ -91,6 +91,8 @@ End-to-end retrieval needs **five** things running; caption indexing/rerank need
 
 **Query expansion is bounded.** When `QUERY_EXPANSION_PROVIDER=deepseek`, `QUERY_EXPANSION_MAX_VARIANTS` defaults to `3` and includes the original query. Both the DeepSeek prompt and server-side normalization enforce the limit; never rely on the provider response alone. Search timing logs expose expansion, vector, FTS, hybrid, and total milliseconds without logging vectors, API keys, or local media content.
 
+**Retrieval evaluation is isolated from production ranking.** The internal `/evaluation` workflow persists frozen queries, blind judgments, source evidence, current hybrid rank, and experimental unweighted RRF rank in PostgreSQL. Baseline evaluation disables query expansion and `video_segment_vectors`, uses scene-collapsed frame retrieval, and treats visual/caption/lexical as independent signals with `k=60` and unit weights. Raw cosine scores remain source-local diagnostics; RRF scores are ordering values, never probabilities. Required-source or integrity failures fail the evaluation run instead of producing partial metrics.
+
 **NestJS module structure.** Each domain is a standalone module (config, health, database, libraries, jobs, media, search, clips, agent, qdrant, model-gateway). DI via Symbol tokens: `DATABASE` (Drizzle), `SETTINGS` (parsed env), `QDRANT_CLIENT`, `PG_POOL`. No direct imports of infrastructure.
 
 **Cross-language point_id parity.** Qdrant point IDs are deterministic UUIDv5 (namespace `f3f4e35a-...`, inputs joined with `|`). TS `deterministicPointId` and Python `uuid.uuid5` must produce identical IDs — both are the source of truth for idempotent upserts.
@@ -126,6 +128,20 @@ End-to-end retrieval needs **five** things running; caption indexing/rerank need
 - `docs/superpowers/plans/2026-07-08-vlm-caption-rerank.md` — Phase 15A/15B caption retrieval and VLM rerank plan.
 - `docs/tasks/todo.md` — phase tracking with checkboxes and review notes.
 - `docs/tasks/lessons.md` — architectural decisions and reasoning.
+
+## Agent skills
+
+### Issue tracker
+
+需求、规格与实施 issues 使用仓库内 `.scratch/` 本地 Markdown 管理，不使用外部 PR 作为需求入口。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+使用默认状态词汇：`needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix`。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+本仓库采用 single-context 领域文档布局，共享根目录 `CONTEXT.md` 与 `docs/adr/`。详见 `docs/agents/domain.md`。
 
 
 1. Fail Fast / Errors Never Pass Silently：不要在代码里藏兜底逻辑来吞掉错误、隐藏问题。出了问题就应该让它爆出来，否则你永远找不到真实问题。

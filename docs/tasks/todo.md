@@ -525,3 +525,22 @@ Review：
 - [x] 增加视频批量重建与 readiness API，兼容开关验证通过后才关闭旧 segment 在线召回。
 - [x] 搜索页增加 loading/错误反馈；任务页每页 25 条、每 5 秒可见时自动刷新，并修复卡片粘连。
 - [x] 新增 Obsidian 笔记 `docs/知识库/RAG在当前项目中的应用.md` 和现有数据升级步骤。
+
+## Phase 19：检索评测与无权重 RRF 基线
+
+- Start：2026-07-12，目标是建立可复现的检索评测闭环，在不改变生产排序的前提下，对同一召回快照比较 current hybrid 与 visual/caption/lexical 无权重 RRF。
+- 假设：首轮固定关闭查询扩展与 `video_segment_vectors`，RRF `k=60` 且各信号权重为 1；RRF score 只用于排序，不表示相关概率。
+- 验证计划：以 PGlite + mock 召回完成冻结查询、运行、盲标和报告高层测试；补 RRF/指标纯函数测试与 Web 盲标测试；运行仓库级 check、lint、format check 和独立双轴代码审查。
+
+- [x] 建立评测集、不可变版本、查询、运行、候选快照与可复用判断的 PostgreSQL Schema 和正式 Drizzle migration。
+- [x] 实现来源内连续 rank、场景折叠、lexical 时间窗对齐、动态诊断深度和无权重 RRF。
+- [x] 实现 current/RRF 同快照排序、盲标证据隐藏、幂等判断和 Precision/nDCG/Hit/MRR 报告。
+- [x] 实现评测 API、版本续建、运行历史、JSON 导出和 fail-fast 来源检查。
+- [x] 实现 Web 查询编写、指定目标、冻结、运行、盲标、恢复、报告与证据诊断入口。
+- [x] 更新 API、架构、向量设计和 Living Documentation。
+- [x] 完成审查修复后的最终全量验证与提交。
+
+Review：
+
+- Result：评测 MVP 已形成数据库、server、web 与文档闭环；生产 `/search` 排序保持不变。独立代码审查发现的深层候选、scene 对齐、current rank、盲标绕过、版本与恢复入口问题已在提交前修正。
+- Notes：独立 Standards/Spec 双轴审查先发现来源状态、深层候选、scene 对齐、current 对照、盲标绕过和版本/恢复入口问题，修复后 Spec 复核无阻塞项。最终 `corepack pnpm check` 通过：shared 5、web 36、server 88 个测试及 Next 生产构建成功；`corepack pnpm lint` 通过。Oxfmt 已格式化本次涉及文件；全仓 `format:check` 仍报告 18 个未改动既有文件的历史格式差异，未扩大范围重写。真实 PostgreSQL migration 由维护者按既有手动流程执行，本次未直接修改本机数据库。

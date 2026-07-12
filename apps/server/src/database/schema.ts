@@ -188,6 +188,132 @@ export const agentToolCalls = pgTable(
   ],
 )
 
+// evaluation_* 是检索质量评测的事实来源：版本冻结查询语义，run 冻结一次召回证据，
+// candidate 同时保存 current/RRF 排名，judgment 按 query + semantic candidate 跨兼容运行复用。
+// RRF score 是排序值而非概率；primary_pool 区分必须盲标的 top-20 与只用于截断诊断的深层候选。
+export const evaluationSets = pgTable('evaluation_sets', {
+  id: uuid('id').primaryKey().notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  ...timestamps,
+})
+
+export const evaluationVersions = pgTable(
+  'evaluation_versions',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    setId: uuid('set_id')
+      .notNull()
+      .references(() => evaluationSets.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    status: text('status').notNull().default('draft'),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex('evaluation_versions_set_version_unique').on(table.setId, table.version)],
+)
+
+export const evaluationQueries = pgTable(
+  'evaluation_queries',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => evaluationVersions.id, { onDelete: 'cascade' }),
+    queryText: text('query_text').notNull(),
+    queryType: text('query_type').notNull(),
+    intentCategory: text('intent_category').notNull(),
+    mustHaveJson: jsonb('must_have_json').notNull().default([]),
+    optionalJson: jsonb('optional_json').notNull().default([]),
+    exclusionsJson: jsonb('exclusions_json').notNull().default([]),
+    targetFileId: uuid('target_file_id').references(() => mediaFiles.id),
+    targetSceneId: text('target_scene_id'),
+    ...timestamps,
+  },
+  (table) => [index('evaluation_queries_version_idx').on(table.versionId)],
+)
+
+export const evaluationRuns = pgTable(
+  'evaluation_runs',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => evaluationVersions.id),
+    status: text('status').notNull().default('pending'),
+    libraryIdsJson: jsonb('library_ids_json').notNull().default([]),
+    configJson: jsonb('config_json').notNull(),
+    corpusJson: jsonb('corpus_json').notNull().default({}),
+    reportJson: jsonb('report_json'),
+    errorStage: text('error_stage'),
+    errorMessage: text('error_message'),
+    ...timestamps,
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [index('evaluation_runs_version_idx').on(table.versionId)],
+)
+
+export const evaluationCandidates = pgTable(
+  'evaluation_candidates',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => evaluationRuns.id, { onDelete: 'cascade' }),
+    queryId: uuid('query_id')
+      .notNull()
+      .references(() => evaluationQueries.id, { onDelete: 'cascade' }),
+    candidateKey: text('candidate_key').notNull(),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => mediaFiles.id),
+    sceneId: text('scene_id'),
+    mediaType: text('media_type').notNull(),
+    startTimeSeconds: numeric('start_time_seconds'),
+    endTimeSeconds: numeric('end_time_seconds'),
+    displayOrder: integer('display_order').notNull(),
+    primaryPool: boolean('primary_pool').notNull().default(true),
+    sourceEvidenceJson: jsonb('source_evidence_json').notNull(),
+    currentRank: integer('current_rank').notNull(),
+    currentScore: numeric('current_score').notNull(),
+    currentIncluded: boolean('current_included').notNull().default(true),
+    rrfRank: integer('rrf_rank').notNull(),
+    rrfScore: numeric('rrf_score').notNull(),
+    rrfContributionsJson: jsonb('rrf_contributions_json').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('evaluation_candidates_run_query_key_unique').on(
+      table.runId,
+      table.queryId,
+      table.candidateKey,
+    ),
+    index('evaluation_candidates_run_idx').on(table.runId),
+  ],
+)
+
+export const evaluationJudgments = pgTable(
+  'evaluation_judgments',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    queryId: uuid('query_id')
+      .notNull()
+      .references(() => evaluationQueries.id, { onDelete: 'cascade' }),
+    candidateKey: text('candidate_key').notNull(),
+    relevance: integer('relevance'),
+    unjudgeable: boolean('unjudgeable').notNull().default(false),
+    diagnosis: text('diagnosis'),
+    notes: text('notes'),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('evaluation_judgments_query_candidate_unique').on(
+      table.queryId,
+      table.candidateKey,
+    ),
+  ],
+)
+
 export const librariesRelations = relations(libraries, ({ many }) => ({
   mediaFiles: many(mediaFiles),
   vectorRefs: many(vectorRefs),

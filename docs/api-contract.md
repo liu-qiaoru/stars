@@ -615,3 +615,19 @@ Response（`ALLOW_EXTERNAL_LLM=false`）：
 `POST /jobs/video/reindex` 为现有 active 视频分批创建 `index_media` 任务。body 支持 `library_id`、`file_id`、`limit`（1～1000）、`dry_run` 和 `only_not_ready`；已有 queued/running `index_media` 的文件会计入 `skipped_active`，不会重复创建。
 
 `GET /jobs/video/reindex-readiness` 返回视觉切换门槛：`segments_without_frames`、`segments_over_30_seconds`、`active_video_segment_vector_refs` 均为 0 时 `ready=true`。`segments_without_scene_caption_v2` 单独表示 caption 完整度；它会让默认 reindex 继续选中该文件，但不阻断 frame MaxSim 的视觉切换。
+
+## 检索评测 API
+
+`/evaluation` 是仅供本地维护者使用的评测域，不改变普通 `/search` 的生产排序。
+
+- `GET /evaluation/sets`：列出评测集及最新版本。
+- `POST /evaluation/sets`：创建评测集和首个草稿版本。
+- `GET /evaluation/versions/{id}`：读取版本与查询。
+- `POST /evaluation/versions/{id}/queries`：向草稿版本添加查询。必须提供查询文本、类型、意图分类和非空的必须满足条件。
+- `POST /evaluation/versions/{id}/freeze`：冻结非空版本；冻结后不可修改。
+- `POST /evaluation/versions/{id}/runs`：使用 `library_ids` 启动基线运行。基线固定关闭查询扩展和 `video_segment_vectors`，每路深度为 20，RRF `k=60`，visual/caption/lexical 权重均为 1。
+- `GET /evaluation/runs/{id}`：读取运行与盲标候选。未标候选默认不返回来源证据、分数和排名；诊断读取可传 `reveal_evidence=true`。
+- `POST /evaluation/runs/{run_id}/candidates/{candidate_id}/judgment`：幂等保存 `relevance=0|1|2` 或 `unjudgeable=true`，可附加诊断与备注。
+- `POST /evaluation/runs/{id}/finalize`：全部主池候选完成判断后计算 current/RRF 报告。
+
+运行状态为 `pending | retrieving | ready_for_labeling | labeled | reported | failed`。所需来源、元数据或场景边界失败时必须进入 `failed`，不得省略来源后生成成功报告。RRF score 只是排序值，不是概率或百分比。

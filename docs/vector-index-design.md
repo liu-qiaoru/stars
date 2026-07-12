@@ -12,6 +12,8 @@
 - point id 必须可重复生成，支持幂等 upsert。
 - 模型名称、模型版本、向量维度和距离算法必须被记录，方便后续重建索引。
 
+不同模型的 raw cosine 分布不可跨 collection 直接比较。SigLIP visual cosine 与 Caption 文本 Embedding cosine 都只在各自来源内部用于排序，不是统一相关概率。实验评测使用来源内 rank 计算无权重 RRF，同时保留 raw score、source rank 和逐信号贡献用于诊断。
+
 ## Qdrant Collection 划分
 
 第一版按模态和用途拆 collection：
