@@ -1,40 +1,41 @@
-# 素材库重设计 Design QA
+# 搜索设置浮层 Design QA
 
-- Source visual truth: `/Users/qiao/.codex/generated_images/019f4ab5-b805-78b3-b815-2cddc895d301/exec-a266b64f-fe2e-4dc6-bbb8-31ff2b322e4f.png`
-- Implementation screenshot: `docs/design-qa/2026-07-11-library-redesign/05-expanded-final.png`
-- Full-view comparison: `docs/design-qa/2026-07-11-library-redesign/06-source-vs-final.png`
-- Viewport: 1440 × 1024
-- State: `/libraries`，一个素材库展开，8 个真实视频文件可见，添加表单关闭
+- Source visual truth: `docs/design-qa/2026-07-14-search-settings/00-source-option-2.png`
+- Default implementation screenshot: `docs/design-qa/2026-07-14-search-settings/01-default.png`
+- Open-state implementation screenshot: `docs/design-qa/2026-07-14-search-settings/02-settings-open.jpeg`
+- Full-view comparison: `docs/design-qa/2026-07-14-search-settings/03-source-vs-implementation.png`
+- Viewport: 1224 × 768（对比图去除了实现截图顶部 98px 的浏览器界面）
+- State: `/search` 空结果页，搜索设置浮层打开
 
 ## Full-view comparison evidence
 
-修订稿和实现使用相同的单列目录结构：页面标题与添加操作位于首部，汇总数据位于分隔线之前，素材库身份、计数和扫描操作处于同一行，文件列表只显示图标、文件名与右侧状态。实现遵循项目既有 1280px 主容器，因此左右边距略大于生成稿；这是与全站 AppShell 保持一致的有意差异，不影响层级或可用空间。
+对比图左侧为用户选择的第二个设计方向，右侧为实际实现。两者都把查询方式和诊断开关从普通筛选行移入搜索框右侧的单一设置入口；浮层锚定在入口下方，结果区保持可见，没有增加新的页面区域或卡片嵌套。实际页面沿用全站既有主容器宽度和紧凑密度，因此标题区比生成稿略矮；这是为了避免只修改搜索页而破坏全站一致性。
 
 ## Focused region comparison evidence
 
-文件区域已单独检查：不存在表头和类型文字；视频文件使用 Lucide 视频图标；文件名列为 `minmax(0, 1fr)`，状态列靠右；真实长文件名没有覆盖状态。素材库折叠按钮、扫描按钮和添加表单均通过真实浏览器交互验证。
+没有额外裁切图。全尺寸对比图中的两个浮层文字、单选圆点、分隔线和开关均可读，已经足以检查本次唯一新增区域；实现截图原图同时保留在 `02-settings-open.jpeg`，可用于查看像素级细节。
 
 ## Required fidelity surfaces
 
-- Fonts and typography: 沿用项目系统字体；首轮实现标题偏大，已从 2.5rem 调整为 2rem，与修订稿应用界面层级一致。
-- Spacing and layout rhythm: 目录行、56px 文件行、细分隔线和单列信息节奏与修订稿一致；没有卡片嵌套。
-- Colors and visual tokens: 继续使用项目现有黑、白、灰 token；状态使用低对比中性色，扫描与添加保留清晰操作层级。
-- Image quality and asset fidelity: 页面没有栅格内容资产；全部界面图标来自项目已有 Lucide 图标库，没有自制 SVG、CSS 图形或占位资源。
-- Copy and content: 使用真实素材库名称、路径、数量、文件名和状态；用户要求删除的“文件名”表头、“类型”表头与类型文字均不存在。
+- Fonts and typography: 沿用项目现有 Inter/系统字体栈；标题、选项标题和 13px 辅助说明形成与设计稿一致的三级层级，没有文本截断。
+- Spacing and layout rhythm: 搜索框与 48px 设置按钮保持 12px 间距；浮层宽 360px，选项采用纵向节奏，诊断开关通过单条分隔线与查询方式区分。
+- Colors and visual tokens: 完全复用项目黑、白、灰、hairline 和 focus token；只有浮层使用一次必要的阴影，未新增配色体系。
+- Image quality and asset fidelity: 该界面没有栅格内容资产；搜索、调节和媒体图标均来自项目已经使用的 Lucide 图标库，没有占位图或自制 SVG。
+- Copy and content: “仅原查询”“忠实翻译”“完整扩展”和“显示检索诊断”与实际 API 行为对应；辅助文案解释了每个模式会做什么。
 
 ## Interaction and runtime checks
 
-- 展开与收起素材库文件：通过。
-- 添加素材库表单展开与取消：通过。
-- 文件详情链接保留：通过 DOM 检查。
-- 扫描操作保留：通过 DOM 检查；未实际触发任务，避免改变运行数据。
-- Browser console errors/warnings: 0。
+- 设置按钮打开浮层：真实 Chrome 中通过。
+- 查询方式从“完整扩展”切换到“忠实翻译”：真实 Chrome 中通过，辅助功能树确认选中值由 0 变为 1。
+- “显示检索诊断”开关：真实 Chrome 中通过，辅助功能树确认值由 0 变为 1。
+- Escape 关闭与请求参数传递：由 Vitest 自动化测试覆盖。
+- 搜索请求未在浏览器中实际提交，避免触发外部查询扩展调用；请求字段由测试验证。
+- 浏览器未出现 Next.js 错误覆盖层；控制台面板没有作为本次视觉验收的通过依据。
 
 ## Comparison history
 
-1. 首轮实现：信息结构通过，但标题字号和添加按钮尺寸相对修订稿偏大/偏小，记录为 P2。
-2. 修复：素材库页标题改为 2rem；添加按钮改为 40px 高、8px 圆角。
-3. 复验：最终截图中没有残留 P0、P1 或 P2 差异。
+1. 首次实现截图与选中设计并排检查：信息层级、浮层位置、宽度、控件顺序和黑白视觉语言一致，没有发现 P0、P1 或 P2 差异。
+2. 有意保留的产品差异：实现默认选择“完整扩展”，而生成稿示例选择“仅原查询”；这是保留现有搜索默认行为，不是视觉缺陷。
 
 ## Findings
 
@@ -42,6 +43,6 @@
 
 ## Follow-up polish
 
-- P3：未来出现图片和视频混合素材库时，可再次核对不同图标在真实密集列表中的视觉平衡。
+- P3：生成稿的标题区更高，但实现继续遵循现有应用密度；如果未来统一放大所有页面标题区，应在全站设计调整中处理。
 
 final result: passed

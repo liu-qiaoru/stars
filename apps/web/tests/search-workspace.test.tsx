@@ -14,9 +14,10 @@ describe('SearchWorkspace', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('查询扩展模式'), {
-      target: { value: 'translate' },
-    })
+    expect(screen.queryByRole('dialog', { name: '搜索设置' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '搜索设置' }))
+    const settings = screen.getByRole('dialog', { name: '搜索设置' })
+    fireEvent.click(within(settings).getByRole('radio', { name: /忠实翻译/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: '显示检索诊断' }))
     fireEvent.change(screen.getByLabelText('搜索关键词'), {
       target: { value: '一个人靠着石头' },
@@ -32,6 +33,21 @@ describe('SearchWorkspace', () => {
         }),
       ),
     )
+  })
+
+  test('closes search settings with Escape', () => {
+    render(
+      <SearchWorkspace
+        libraries={[]}
+        initialQuery=""
+        initialResults={{ limit: 20, offset: 0, results: [], groups: [] }}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '搜索设置' }))
+    expect(screen.getByRole('dialog', { name: '搜索设置' })).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: '搜索设置' })).not.toBeInTheDocument()
   })
 
   test('renders caption and winning query variant diagnostics', () => {

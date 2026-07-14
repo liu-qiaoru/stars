@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { FileAudio, Filter, Search, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { FileAudio, Filter, Search, SlidersHorizontal, X } from 'lucide-react'
 import type {
   LibrarySummary,
   QueryExpansionMode,
@@ -27,10 +27,26 @@ interface SearchWorkspaceProps {
 
 const mediaFilters = ['image', 'video', 'audio'] as const
 const queryExpansionOptions = [
-  { value: 'original', label: '仅原查询' },
-  { value: 'translate', label: '原查询 + 忠实翻译' },
-  { value: 'expand', label: '完整扩展' },
-] as const satisfies ReadonlyArray<{ value: QueryExpansionMode; label: string }>
+  {
+    value: 'original',
+    label: '仅原查询',
+    description: '仅使用您输入的原始查询进行检索。',
+  },
+  {
+    value: 'translate',
+    label: '忠实翻译',
+    description: '保留原意并补充忠实翻译，不扩展概念。',
+  },
+  {
+    value: 'expand',
+    label: '完整扩展',
+    description: '翻译并扩展相关概念，尽可能提升召回率。',
+  },
+] as const satisfies ReadonlyArray<{
+  value: QueryExpansionMode
+  label: string
+  description: string
+}>
 
 export function SearchWorkspace({
   libraries,
@@ -47,14 +63,41 @@ export function SearchWorkspace({
   const [results, setResults] = useState(initialResults)
   const [queryExpansionMode, setQueryExpansionMode] = useState<QueryExpansionMode>('expand')
   const [includeDiagnostics, setIncludeDiagnostics] = useState(false)
+  const [isSearchSettingsOpen, setIsSearchSettingsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [previewItem, setPreviewItem] = useState<SearchResultItem | null>(null)
+  const searchSettingsRef = useRef<HTMLDivElement>(null)
   // 新 API 优先展示 top-level hybrid results；旧 groups 响应仍可通过 visibleResults fallback 渲染。
   const primaryResults = useMemo(() => visibleResults(results), [results])
   const totalResults = useMemo(() => primaryResults.length, [primaryResults])
   const allResultsLowConfidence =
     primaryResults.length > 0 && primaryResults.every((item) => item.confidence === 'low')
+
+  useEffect(() => {
+    if (!isSearchSettingsOpen) {
+      return
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!searchSettingsRef.current?.contains(event.target as Node)) {
+        setIsSearchSettingsOpen(false)
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsSearchSettingsOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isSearchSettingsOpen])
 
   async function submitSearch(formData: FormData) {
     const nextQuery = String(formData.get('query') ?? '').trim()
@@ -97,19 +140,79 @@ export function SearchWorkspace({
           <p className="eyebrow">向量检索</p>
           <h1 className="page-title">搜索本地媒体</h1>
         </div>
-        <form
-          className="search-shell"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void submitSearch(new FormData(event.currentTarget))
-          }}
-        >
-          <Search aria-hidden="true" size={18} />
-          <input name="query" defaultValue={query} aria-label="搜索关键词" disabled={isLoading} />
-          <button type="submit" className="primary-action" disabled={isLoading}>
-            {isLoading ? '搜索中' : '搜索'}
+        <div className="search-controls" ref={searchSettingsRef}>
+          <form
+            className="search-shell"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitSearch(new FormData(event.currentTarget))
+            }}
+          >
+            <Search aria-hidden="true" size={18} />
+            <input
+              name="query"
+              defaultValue={query}
+              aria-label="搜索关键词"
+              disabled={isLoading}
+            />
+            <button type="submit" className="primary-action" disabled={isLoading}>
+              {isLoading ? '搜索中' : '搜索'}
+            </button>
+          </form>
+          <button
+            type="button"
+            className="search-settings-trigger"
+            aria-label="搜索设置"
+            aria-expanded={isSearchSettingsOpen}
+            aria-controls="search-settings-popover"
+            onClick={() => setIsSearchSettingsOpen((current) => !current)}
+            disabled={isLoading}
+          >
+            <SlidersHorizontal aria-hidden="true" size={20} />
           </button>
-        </form>
+          {isSearchSettingsOpen ? (
+            <div
+              id="search-settings-popover"
+              className="search-settings-popover"
+              role="dialog"
+              aria-label="搜索设置"
+            >
+              <fieldset className="search-mode-options">
+                <legend>查询方式</legend>
+                {queryExpansionOptions.map((option) => (
+                  <label key={option.value} className="search-mode-option">
+                    <input
+                      type="radio"
+                      name="query-expansion-mode"
+                      value={option.value}
+                      checked={queryExpansionMode === option.value}
+                      onChange={() => setQueryExpansionMode(option.value)}
+                    />
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{option.description}</small>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+              <label className="search-diagnostics-option">
+                <span>
+                  <strong>显示检索诊断</strong>
+                  <small>返回查询版本、通道名次和 Caption 等排查信息。</small>
+                </span>
+                <span className="search-toggle">
+                  <input
+                    type="checkbox"
+                    aria-label="显示检索诊断"
+                    checked={includeDiagnostics}
+                    onChange={(event) => setIncludeDiagnostics(event.target.checked)}
+                  />
+                  <span aria-hidden="true" />
+                </span>
+              </label>
+            </div>
+          ) : null}
+        </div>
       </section>
 
       {isLoading ? (
@@ -145,33 +248,6 @@ export function SearchWorkspace({
             {library.name}
           </span>
         ))}
-        <label className="ml-auto inline-flex items-center gap-2 text-sm font-medium">
-          查询扩展
-          <select
-            aria-label="查询扩展模式"
-            className="rounded border bg-white px-2 py-1"
-            value={queryExpansionMode}
-            onChange={(event) =>
-              setQueryExpansionMode(event.target.value as typeof queryExpansionMode)
-            }
-            disabled={isLoading}
-          >
-            {queryExpansionOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="inline-flex items-center gap-2 text-sm font-medium">
-          <input
-            type="checkbox"
-            checked={includeDiagnostics}
-            onChange={(event) => setIncludeDiagnostics(event.target.checked)}
-            disabled={isLoading}
-          />
-          显示检索诊断
-        </label>
       </section>
 
       <div className="space-y-8">

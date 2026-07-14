@@ -201,7 +201,6 @@ button:disabled {
 .toolbar-band {
   position: relative;
   display: grid;
-  overflow: hidden;
   grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
   padding: 2rem;
@@ -215,6 +214,7 @@ button:disabled {
   position: absolute;
   inset: 0;
   height: 3px;
+  border-radius: 12px 12px 0 0;
   background: linear-gradient(90deg, #007cf0, #00dfd8, #7928ca, #ff0080, #ff4d4d, #f9cb28);
   content: '';
 }
@@ -230,8 +230,17 @@ button:disabled {
   padding: 1.5rem;
 }
 
+.search-controls {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
 .search-shell {
   display: flex;
+  flex: 1;
   min-width: 0;
   min-height: 48px;
   align-items: center;
@@ -260,6 +269,170 @@ button:disabled {
 
 .search-shell .primary-action {
   flex: 0 0 auto;
+}
+
+.search-settings-trigger {
+  display: inline-grid;
+  width: 48px;
+  min-width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--canvas);
+  color: var(--ink);
+  box-shadow: 0 1px 1px #00000005;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.search-settings-trigger:hover,
+.search-settings-trigger[aria-expanded='true'] {
+  border-color: var(--hairline-strong);
+  background: var(--canvas-soft);
+}
+
+.search-settings-trigger:focus-visible {
+  outline: 3px solid var(--success-soft);
+  outline-offset: 2px;
+}
+
+.search-settings-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.75rem);
+  right: 0;
+  width: min(360px, calc(100vw - 2rem));
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--canvas);
+  padding: 1rem;
+  box-shadow: 0 16px 40px #0000001f;
+}
+
+.search-mode-options {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.search-mode-options legend {
+  margin-bottom: 0.625rem;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.search-mode-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  border-radius: 8px;
+  padding: 0.75rem;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.search-mode-option:hover {
+  background: var(--canvas-soft);
+}
+
+.search-mode-option:has(input:focus-visible) {
+  outline: 3px solid var(--success-soft);
+  outline-offset: -1px;
+}
+
+.search-mode-option input {
+  width: 18px;
+  height: 18px;
+  margin: 0.125rem 0 0;
+  accent-color: var(--primary);
+}
+
+.search-mode-option span,
+.search-diagnostics-option > span:first-child {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.search-mode-option strong,
+.search-diagnostics-option strong {
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.search-mode-option small,
+.search-diagnostics-option small {
+  color: var(--mute);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.search-diagnostics-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--hairline);
+  padding: 1rem 0.75rem 0.25rem;
+  cursor: pointer;
+}
+
+.search-toggle {
+  position: relative;
+  display: inline-flex;
+}
+
+.search-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.search-toggle > span {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 9999px;
+  background: var(--hairline-strong);
+  transition: background 160ms ease;
+}
+
+.search-toggle > span::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--canvas);
+  box-shadow: 0 1px 2px #00000029;
+  content: '';
+  transition: transform 160ms ease;
+}
+
+.search-toggle input:checked + span {
+  background: var(--primary);
+}
+
+.search-toggle input:checked + span::after {
+  transform: translateX(16px);
+}
+
+.search-toggle input:focus-visible + span {
+  outline: 3px solid var(--success-soft);
+  outline-offset: 2px;
 }
 
 .search-progress,
@@ -304,6 +477,11 @@ button:disabled {
     padding: 1rem;
   }
 
+  .search-controls {
+    align-items: start;
+    gap: 0.5rem;
+  }
+
   .search-shell {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -321,6 +499,18 @@ button:disabled {
     grid-column: 1 / -1;
     width: 100%;
     padding-inline: 0.75rem;
+  }
+
+  .search-settings-trigger {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .search-settings-popover {
+    top: calc(100% + 0.5rem);
+    width: min(360px, calc(100vw - 2rem));
   }
 }
 
