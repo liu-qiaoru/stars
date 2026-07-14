@@ -3,6 +3,99 @@ import { describe, expect, test, vi } from 'vitest'
 import { SearchWorkspace } from '../components/search-workspace'
 
 describe('SearchWorkspace', () => {
+  test('sends the selected query expansion mode and diagnostics option', async () => {
+    const searchMedia = vi.fn().mockResolvedValue({ limit: 20, offset: 0, results: [], groups: [] })
+    render(
+      <SearchWorkspace
+        libraries={[]}
+        initialQuery="旧查询"
+        initialResults={{ limit: 20, offset: 0, results: [], groups: [] }}
+        apiClient={{ searchMedia }}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('查询扩展模式'), {
+      target: { value: 'translate' },
+    })
+    fireEvent.click(screen.getByRole('checkbox', { name: '显示检索诊断' }))
+    fireEvent.change(screen.getByLabelText('搜索关键词'), {
+      target: { value: '一个人靠着石头' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+
+    await waitFor(() =>
+      expect(searchMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          query: '一个人靠着石头',
+          query_expansion_mode: 'translate',
+          include_diagnostics: true,
+        }),
+      ),
+    )
+  })
+
+  test('renders caption and winning query variant diagnostics', () => {
+    render(
+      <SearchWorkspace
+        libraries={[]}
+        initialQuery="一个人靠着石头"
+        initialResults={{
+          limit: 20,
+          offset: 0,
+          results: [],
+          query_diagnostics: {
+            query_expansion_mode: 'translate',
+            query_variants: [
+              { text: '一个人靠着石头', weight: 1, source: 'original' },
+              { text: 'a person leaning against a rock', weight: 0.9, source: 'deepseek' },
+            ],
+          },
+          groups: [
+            {
+              collection: 'caption_text_vectors',
+              score_kind: 'cosine_similarity',
+              results: [
+                {
+                  asset_id: 'caption-1',
+                  file_id: 'file-1',
+                  media_type: 'video',
+                  path: '/media/scene.mp4',
+                  start_time_seconds: 10,
+                  end_time_seconds: 20,
+                  scene_id: 'scene-1',
+                  score: 0.63,
+                  reason: 'caption_match',
+                  diagnostics: {
+                    source_rank: 1,
+                    caption: {
+                      text: '一个人背靠岩石站立。',
+                      prompt_version: 'scene-caption-v2',
+                    },
+                    query_variant_hits: [
+                      {
+                        text: 'a person leaning against a rock',
+                        source: 'deepseek',
+                        weight: 0.9,
+                        raw_score: 0.7,
+                        weighted_score: 0.63,
+                        winning: true,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    )
+
+    const region = screen.getByRole('region', { name: '检索诊断' })
+    expect(within(region).getByText('一个人背靠岩石站立。')).toBeInTheDocument()
+    expect(within(region).getByText('scene-caption-v2')).toBeInTheDocument()
+    expect(within(region).getByText(/胜出 · 加权 0.6300/)).toBeInTheDocument()
+  })
+
   test('shows a visible loading state and preserves results when search fails', async () => {
     let rejectSearch!: (reason: Error) => void
     const searchMedia = vi.fn(

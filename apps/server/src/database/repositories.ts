@@ -396,6 +396,7 @@ export async function listSearchResultMetadata(
       startTimeSeconds: mediaAssets.startTimeSeconds,
       endTimeSeconds: mediaAssets.endTimeSeconds,
       frameTimeSeconds: mediaAssets.frameTimeSeconds,
+      textContent: mediaAssets.textContent,
       metadataJson: mediaAssets.metadataJson,
     })
     .from(vectorRefs)

@@ -294,7 +294,9 @@ Request：
   "media_types": ["image", "video"],
   "library_ids": [],
   "limit": 20,
-  "offset": 0
+  "offset": 0,
+  "query_expansion_mode": "translate",
+  "include_diagnostics": false
 }
 ```
 
@@ -384,7 +386,8 @@ Response：
 向量 group 来自 Qdrant。`video_frame_vectors` 在 top-level `results` 中按 `(file_id, scene_id)` 做 MaxSim，最大 cosine 的帧作为代表证据，时间边界来自 PostgreSQL `video_segment`；原始 `groups` 继续保留逐帧结果。`video_segment_vectors` 仅由 `VIDEO_SEGMENT_SEARCH_ENABLED=true` 的迁移兼容期开启，新索引不再创建该 ref。`text_search` group 来自 `media_assets.text_tsv`：`text_chunk` 为 transcript 命中，`image`/`video_frame` 为 OCR 命中。
 
 - top-level result 使用 `primary_reason`、`confidence`、`reasons`、`source_scores` 和 `merged_asset_ids` 表达命中解释。`confidence='low'` 表示当前只找到弱视觉向量候选，前端应提示“相关性较弱”；带 transcript/OCR 的文本命中或较强视觉向量命中返回 `confidence='high'`。跨 asset 合并时，`asset_id` 是代表命中的 asset，`merged_asset_ids` 总是包含代表 asset，长度至少为 1。
-- 视觉搜索默认不扩展搜索词；`QUERY_EXPANSION_PROVIDER=deepseek` 且配置 `DEEPSEEK_API_KEY` 后，服务端会把用户原始 query 发送给 DeepSeek。`QUERY_EXPANSION_MAX_VARIANTS` 默认是 3，表示“原始 query + 最多两个扩展短语”；prompt 和服务端归一化都会执行该上限，不能因模型返回超量候选而放大 embedding/Qdrant 查询次数。同一 point 多次命中时保留加权后的最高分；扩展词权重低于原始 query，且不会把本地媒体路径或搜索结果发送给 DeepSeek。
+- `query_expansion_mode` 支持 `original | translate | expand`，默认 `expand`。`original` 只使用原查询并完全跳过外部扩展 Provider；`translate` 保留原查询并最多增加一个忠实英文翻译，Prompt 明确禁止改变人物、物体、动作和关系；`expand` 使用完整查询扩展。`translate`/`expand` 仍受 `QUERY_EXPANSION_PROVIDER` 控制：Provider 为 `none` 时实际只使用原查询。`QUERY_EXPANSION_MAX_VARIANTS` 默认是 3，包含原始 query；Prompt 和 Server 标准化都强制该上限。同一 Point 多次命中时保留加权后的最高分；扩展词权重低于原始 query，且不会把本地媒体路径或搜索结果发送给 DeepSeek。
+- `include_diagnostics` 默认 `false`。显式设为 `true` 时，响应增加顶层 `query_diagnostics`，并在每个向量 group result 增加 `diagnostics`：`source_rank` 是该来源过滤无效 PostgreSQL 记录后的名次；`query_variant_hits` 保留每个实际查询版本的 `raw_score`、`weight`、`weighted_score` 和唯一 `winning` 标记；Caption 结果还返回 `caption.text` 与 `caption.prompt_version`。Caption 原文属于本地媒体派生内容，只能出现在显式诊断响应中，不得写入普通搜索日志或默认响应。
 - 转写命中使用 `transcript_match`，OCR 使用 `ocr_match`，向量使用 `vector_match`。`document_match` 预留给 document pipeline，Phase 14 不主动产生。
 - `source_scores` key 使用固定 source key：当前为 `image_vectors`、`video_segment_vectors`、`video_frame_vectors`、`text_search`；后续新增向量来源时使用 Qdrant collection 名。同 source 多次命中时保留最大分数；启用 query expansion 时，向量来源分数会先乘以 query variant 权重。`source_scores` 不能跨 source 直接比较。
 - 纯向量弱相关候选不会被静默丢弃；系统会保留候选并标记 `confidence='low'`，避免搜索结果变成空数组又不给用户任何线索。带 transcript/OCR 的文本命中不受该向量置信度阈值影响。

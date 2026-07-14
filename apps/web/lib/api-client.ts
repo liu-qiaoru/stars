@@ -48,6 +48,8 @@ export interface SearchRequest {
   library_ids: string[]
   limit: number
   offset: number
+  query_expansion_mode?: 'original' | 'translate' | 'expand'
+  include_diagnostics?: boolean
 }
 
 export interface SearchResultItem {
@@ -66,6 +68,21 @@ export interface SearchResultItem {
   reason?: 'vector_match' | string
   reasons?: string[]
   source_scores?: Record<string, number>
+  diagnostics?: {
+    source_rank: number
+    caption?: {
+      text: string
+      prompt_version: string | null
+    }
+    query_variant_hits: Array<{
+      text: string
+      source: 'original' | 'deepseek'
+      weight: number
+      raw_score: number
+      weighted_score: number
+      winning: boolean
+    }>
+  }
 }
 
 export interface SearchResultGroup {
@@ -80,6 +97,14 @@ export interface SearchResponse {
   // Phase 14 后 results 是主展示列表；groups 保留给旧响应兼容和召回调试。
   results?: SearchResultItem[]
   groups: SearchResultGroup[]
+  query_diagnostics?: {
+    query_expansion_mode: 'original' | 'translate' | 'expand'
+    query_variants: Array<{
+      text: string
+      weight: number
+      source: 'original' | 'deepseek'
+    }>
+  }
 }
 
 export interface EvaluationSetSummary {

@@ -361,7 +361,9 @@ describe('search service', () => {
       modelVersion: 'siglip-base-patch16-224',
       vectorDim: 768,
     })
-    expect(logSpy).toHaveBeenCalledWith('provider=none api_key=unset query_expansion=disabled')
+    expect(logSpy).toHaveBeenCalledWith(
+      'query_expansion_mode=expand provider=none query_expansion=disabled',
+    )
     expect(result.results).toEqual([
       expect.objectContaining({
         asset_id: asset.id,

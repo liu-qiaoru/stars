@@ -35,6 +35,10 @@ export function SearchWorkspace({
     'audio',
   ])
   const [results, setResults] = useState(initialResults)
+  const [queryExpansionMode, setQueryExpansionMode] = useState<'original' | 'translate' | 'expand'>(
+    'expand',
+  )
+  const [includeDiagnostics, setIncludeDiagnostics] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [previewItem, setPreviewItem] = useState<SearchResultItem | null>(null)
@@ -59,6 +63,8 @@ export function SearchWorkspace({
         library_ids: [],
         limit: 20,
         offset: 0,
+        query_expansion_mode: queryExpansionMode,
+        include_diagnostics: includeDiagnostics,
       })
       setResults(response)
     } catch (error) {
@@ -131,6 +137,31 @@ export function SearchWorkspace({
             {library.name}
           </span>
         ))}
+        <label className="ml-auto inline-flex items-center gap-2 text-sm font-medium">
+          查询扩展
+          <select
+            aria-label="查询扩展模式"
+            className="rounded border bg-white px-2 py-1"
+            value={queryExpansionMode}
+            onChange={(event) =>
+              setQueryExpansionMode(event.target.value as typeof queryExpansionMode)
+            }
+            disabled={isLoading}
+          >
+            <option value="original">仅原查询</option>
+            <option value="translate">原查询 + 忠实翻译</option>
+            <option value="expand">完整扩展</option>
+          </select>
+        </label>
+        <label className="inline-flex items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            checked={includeDiagnostics}
+            onChange={(event) => setIncludeDiagnostics(event.target.checked)}
+            disabled={isLoading}
+          />
+          显示检索诊断
+        </label>
       </section>
 
       <div className="space-y-8">
@@ -194,11 +225,80 @@ export function SearchWorkspace({
             ))
           : null}
       </div>
+      {results.query_diagnostics ? <SearchDiagnosticsPanel results={results} /> : null}
       {previewItem ? (
         <MediaPreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />
       ) : null}
     </div>
   )
+}
+
+function SearchDiagnosticsPanel({ results }: { results: SearchResponse }) {
+  const diagnostics = results.query_diagnostics
+  if (!diagnostics) {
+    return null
+  }
+  const sourceResults = results.groups.flatMap((group) =>
+    group.results.flatMap((item) =>
+      item.diagnostics ? [{ collection: group.collection, item }] : [],
+    ),
+  )
+  return (
+    <section aria-label="检索诊断" className="space-y-3 rounded-lg border bg-slate-50 p-4">
+      <div>
+        <h2 className="section-title">检索诊断</h2>
+        <p className="muted">
+          当前模式：{formatQueryExpansionMode(diagnostics.query_expansion_mode)}。Caption
+          原文只在本次显式开启诊断时返回。
+        </p>
+      </div>
+      <div className="space-y-1 text-sm">
+        <p className="font-medium">实际查询版本</p>
+        <ol className="list-decimal space-y-1 pl-5">
+          {diagnostics.query_variants.map((variant) => (
+            <li key={`${variant.source}-${variant.text}`}>
+              {variant.text} · 权重 {variant.weight.toFixed(2)} · {variant.source}
+            </li>
+          ))}
+        </ol>
+      </div>
+      <div className="space-y-2">
+        {sourceResults.map(({ collection, item }) => (
+          <details
+            key={`${collection}-${item.asset_id}`}
+            className="rounded border bg-white p-3 text-sm"
+          >
+            <summary className="cursor-pointer font-medium">
+              {formatCollection(collection)} #{item.diagnostics!.source_rank} ·{' '}
+              {item.scene_id ?? item.asset_id} · {item.score.toFixed(4)}
+            </summary>
+            {item.diagnostics!.caption ? (
+              <div className="mt-3 space-y-1">
+                <p>{item.diagnostics!.caption.text}</p>
+                <p className="muted">
+                  {item.diagnostics!.caption.prompt_version ?? 'Prompt 版本缺失'}
+                </p>
+              </div>
+            ) : null}
+            <ul className="mt-3 space-y-1">
+              {item.diagnostics!.query_variant_hits.map((hit) => (
+                <li key={`${hit.source}-${hit.text}`}>
+                  {hit.text} · 原始 {hit.raw_score.toFixed(4)} · 权重 {hit.weight.toFixed(2)} ·{' '}
+                  {hit.winning ? '胜出 · ' : ''}加权 {hit.weighted_score.toFixed(4)}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function formatQueryExpansionMode(mode: 'original' | 'translate' | 'expand') {
+  if (mode === 'original') return '仅原查询'
+  if (mode === 'translate') return '原查询 + 忠实翻译'
+  return '完整扩展'
 }
 
 function visibleResults(results: SearchResponse): SearchResultItem[] {

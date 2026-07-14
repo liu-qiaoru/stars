@@ -8,6 +8,8 @@ export interface QueryVariant {
   source: 'original' | 'deepseek'
 }
 
+export type QueryExpansionMode = 'original' | 'translate' | 'expand'
+
 const deepseekResponseSchema = z.object({
   choices: z.array(
     z.object({
@@ -33,17 +35,21 @@ export class QueryExpansionService {
 
   constructor(@Inject(SETTINGS) private readonly settings: Settings) {}
 
-  async expand(query: string): Promise<QueryVariant[]> {
+  async expand(query: string, mode: QueryExpansionMode = 'expand'): Promise<QueryVariant[]> {
     const original = this.originalVariant(query)
+    if (mode === 'original') {
+      this.logger.log('query_expansion_mode=original provider=skipped variants=1')
+      return [original]
+    }
     if (this.settings.queryExpansionProvider === 'none') {
-      this.logger.log('provider=none api_key=unset query_expansion=disabled')
+      this.logger.log(`query_expansion_mode=${mode} provider=none query_expansion=disabled`)
       return [original]
     }
     if (this.settings.queryExpansionProvider === 'deepseek') {
       this.logger.log(
-        `provider=deepseek api_key=${this.settings.deepseekApiKey ? 'set' : 'unset'} query_expansion=enabled model=${this.settings.deepseekModel}`,
+        `query_expansion_mode=${mode} provider=deepseek api_key=${this.settings.deepseekApiKey ? 'set' : 'unset'} query_expansion=enabled model=${this.settings.deepseekModel}`,
       )
-      return this.expandWithDeepSeek(original)
+      return this.expandWithDeepSeek(original, mode)
     }
     this.logger.log(
       `provider=${this.settings.queryExpansionProvider} api_key=unset query_expansion=unsupported`,
@@ -51,7 +57,10 @@ export class QueryExpansionService {
     return [original]
   }
 
-  private async expandWithDeepSeek(original: QueryVariant) {
+  private async expandWithDeepSeek(
+    original: QueryVariant,
+    mode: Exclude<QueryExpansionMode, 'original'>,
+  ) {
     if (!this.settings.deepseekApiKey) {
       throw new BadGatewayException('DEEPSEEK_API_KEY is required for query expansion')
     }
@@ -71,11 +80,16 @@ export class QueryExpansionService {
             {
               role: 'system',
               content:
-                'You expand short user queries for image and video semantic search. Return strict JSON only.',
+                mode === 'translate'
+                  ? 'You faithfully translate short media-search queries. Return strict JSON only.'
+                  : 'You expand short user queries for image and video semantic search. Return strict JSON only.',
             },
             {
               role: 'user',
-              content: this.expansionPrompt(original.text),
+              content:
+                mode === 'translate'
+                  ? this.translationPrompt(original.text)
+                  : this.expansionPrompt(original.text),
             },
           ],
           response_format: { type: 'json_object' },
@@ -115,9 +129,13 @@ export class QueryExpansionService {
       )
     }
 
-    const normalized = this.normalizeVariants(original, parsedPayload.data.variants)
+    const maxVariants =
+      mode === 'translate'
+        ? Math.min(2, this.settings.queryExpansionMaxVariants)
+        : this.settings.queryExpansionMaxVariants
+    const normalized = this.normalizeVariants(original, parsedPayload.data.variants, maxVariants)
     this.logger.log(
-      `provider=deepseek max_variants=${this.settings.queryExpansionMaxVariants} duration_ms=${Math.round(performance.now() - startedAt)} variants=${normalized
+      `query_expansion_mode=${mode} provider=deepseek max_variants=${maxVariants} duration_ms=${Math.round(performance.now() - startedAt)} variants=${normalized
         .map((variant) => `"${variant.text}"@${variant.weight.toFixed(2)} ${variant.source}`)
         .join(', ')}`,
     )
@@ -131,6 +149,7 @@ export class QueryExpansionService {
   private normalizeVariants(
     original: QueryVariant,
     variants: Array<{ text: string; weight?: number }>,
+    maxVariants: number,
   ): QueryVariant[] {
     const normalized = new Map<string, QueryVariant>()
     normalized.set(original.text, original)
@@ -154,7 +173,19 @@ export class QueryExpansionService {
 
     return [...normalized.values()]
       .sort((left, right) => right.weight - left.weight)
-      .slice(0, this.settings.queryExpansionMaxVariants)
+      .slice(0, maxVariants)
+  }
+
+  private translationPrompt(query: string) {
+    return [
+      'Translate the user query into natural English for image/video semantic search.',
+      'Preserve every object, action, and relationship from the original query.',
+      'Do not add a location, intent, object property, or inferred activity.',
+      'For example, do not change leaning against into resting on or standing near.',
+      'Return exactly one translated variant.',
+      'Return JSON with shape: {"variants":[{"text":"...","weight":0.9}]}',
+      `User query: ${query}`,
+    ].join('\n')
   }
 
   private expansionPrompt(query: string) {

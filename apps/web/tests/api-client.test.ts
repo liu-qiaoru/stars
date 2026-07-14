@@ -55,6 +55,8 @@ describe('typed API client', () => {
       library_ids: ['library-1'],
       limit: 12,
       offset: 24,
+      query_expansion_mode: 'translate',
+      include_diagnostics: true,
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -67,6 +69,8 @@ describe('typed API client', () => {
           library_ids: ['library-1'],
           limit: 12,
           offset: 24,
+          query_expansion_mode: 'translate',
+          include_diagnostics: true,
         }),
       }),
     )

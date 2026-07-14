@@ -16,7 +16,11 @@ import {
   type VectorCollectionName,
 } from '../qdrant/vector-collections.js'
 import { SETTINGS, type Settings } from '../config/settings.js'
-import { QueryExpansionService, type QueryVariant } from './query-expansion.service.js'
+import {
+  QueryExpansionService,
+  type QueryExpansionMode,
+  type QueryVariant,
+} from './query-expansion.service.js'
 import {
   buildHybridResults,
   type HybridCandidateInput,
@@ -61,6 +65,8 @@ const searchRequestSchema = z.object({
   library_ids: z.array(z.string().uuid()).optional().default([]),
   limit: z.number().int().min(1).max(100).optional().default(20),
   offset: z.number().int().min(0).optional().default(0),
+  query_expansion_mode: z.enum(['original', 'translate', 'expand']).optional().default('expand'),
+  include_diagnostics: z.boolean().optional().default(false),
 })
 
 export type SearchRequest = z.input<typeof searchRequestSchema>
@@ -71,6 +77,15 @@ type SearchResultGroup = {
   collection: string
   score_kind: string
   results: SearchResultItem[]
+}
+
+type QueryVariantHitDiagnostic = {
+  text: string
+  source: QueryVariant['source']
+  weight: number
+  raw_score: number
+  weighted_score: number
+  winning: boolean
 }
 
 @Injectable()
@@ -121,7 +136,7 @@ export class SearchService {
     const queryVariants = selectedCollections.length
       ? options.evaluationBaseline
         ? [{ text: request.query, source: 'original' as const, weight: 1 }]
-        : await this.queryExpansionService.expand(request.query)
+        : await this.queryExpansionService.expand(request.query, request.query_expansion_mode)
       : []
     const expansionDurationMs = performance.now() - expansionStartedAt
 
@@ -129,17 +144,26 @@ export class SearchService {
     const vectorGroups = await Promise.all(
       selectedCollections.map(async ({ collection }) => {
         const config = VECTOR_COLLECTIONS[collection]
-        const points = await this.searchCollection(collection, {
+        const collectionResult = await this.searchCollection(collection, {
           queryVariants,
           vectorConfig: config,
           libraryIds: request.library_ids,
           limit: sourceLimit,
           embedQuery,
+          includeDiagnostics: request.include_diagnostics,
         })
-        const results = await this.hydrateResults(collection, points, {
-          mediaTypes: vectorMediaTypes,
-          libraryIds: request.library_ids,
-        })
+        const results = await this.hydrateResults(
+          collection,
+          collectionResult.points,
+          {
+            mediaTypes: vectorMediaTypes,
+            libraryIds: request.library_ids,
+          },
+          {
+            includeDiagnostics: request.include_diagnostics,
+            queryVariantHitsByPointId: collectionResult.queryVariantHitsByPointId,
+          },
+        )
 
         return {
           collection,
@@ -172,6 +196,16 @@ export class SearchService {
       offset: request.offset,
       results,
       groups,
+      ...(request.include_diagnostics
+        ? {
+            query_diagnostics: {
+              query_expansion_mode: (options.evaluationBaseline
+                ? 'original'
+                : request.query_expansion_mode) as QueryExpansionMode,
+              query_variants: queryVariants,
+            },
+          }
+        : {}),
       ...(options.evaluationBaseline
         ? { executed_collections: selectedCollections.map((entry) => entry.collection) }
         : {}),
@@ -209,9 +243,15 @@ export class SearchService {
       libraryIds: string[]
       limit: number
       embedQuery: (query: string, config: VectorCollectionConfig) => Promise<number[]>
+      includeDiagnostics: boolean
     },
   ) {
     const byPointId = new Map<string, Schemas['ScoredPoint']>()
+    const variantHitsByPointId = new Map<
+      string,
+      Array<Omit<QueryVariantHitDiagnostic, 'winning'>>
+    >()
+    const winningVariantTextByPointId = new Map<string, string>()
     for (const variant of input.queryVariants) {
       const points = await this.qdrantClient.search(collection, {
         // Search API 只读取 Qdrant；query embedding 由本地 model service 同步生成，批量媒体 embedding 仍走 worker job。
@@ -239,16 +279,39 @@ export class SearchService {
           continue
         }
         const weightedScore = point.score * variant.weight
+        if (input.includeDiagnostics) {
+          const hits = variantHitsByPointId.get(point.id) ?? []
+          hits.push({
+            text: variant.text,
+            source: variant.source,
+            weight: variant.weight,
+            raw_score: point.score,
+            weighted_score: weightedScore,
+          })
+          variantHitsByPointId.set(point.id, hits)
+        }
         const existing = byPointId.get(point.id)
         if (!existing || weightedScore > existing.score) {
           byPointId.set(point.id, { ...point, score: weightedScore })
+          winningVariantTextByPointId.set(point.id, variant.text)
         }
       }
     }
 
-    return [...byPointId.values()]
-      .sort((left, right) => right.score - left.score)
-      .slice(0, input.limit)
+    return {
+      points: [...byPointId.values()]
+        .sort((left, right) => right.score - left.score)
+        .slice(0, input.limit),
+      queryVariantHitsByPointId: new Map(
+        [...variantHitsByPointId.entries()].map(([pointId, hits]) => [
+          pointId,
+          hits.map((hit) => ({
+            ...hit,
+            winning: hit.text === winningVariantTextByPointId.get(pointId),
+          })),
+        ]),
+      ),
+    }
   }
 
   private sourceLimit(request: ParsedSearchRequest) {
@@ -261,6 +324,10 @@ export class SearchService {
     collection: VectorCollectionName,
     points: Schemas['ScoredPoint'][],
     filters: { mediaTypes: string[]; libraryIds: string[] },
+    diagnostics: {
+      includeDiagnostics: boolean
+      queryVariantHitsByPointId: Map<string, QueryVariantHitDiagnostic[]>
+    },
   ) {
     const pointIds = points
       .map((point) => point.id)
@@ -269,7 +336,7 @@ export class SearchService {
     const metadataByPointId = new Map(rows.map((row) => [row.pointId, row]))
 
     // Qdrant 决定 collection 内排序；PostgreSQL 只补事实字段，所以这里按 Qdrant 返回顺序重组。
-    return points.flatMap((point) => {
+    const hydrated = points.flatMap((point) => {
       if (typeof point.id !== 'string') {
         return []
       }
@@ -293,8 +360,27 @@ export class SearchService {
           scene_id: this.sceneId(row.metadataJson),
           score: point.score,
           reason: this.vectorReason(collection),
+          _point_id: point.id,
+          _caption_text: row.assetType === 'caption' ? row.textContent : null,
+          _prompt_version: this.promptVersion(row.metadataJson),
         },
       ]
+    })
+    return hydrated.map((item, index) => {
+      const { _point_id, _caption_text, _prompt_version, ...result } = item
+      if (!diagnostics.includeDiagnostics) {
+        return result
+      }
+      return {
+        ...result,
+        diagnostics: {
+          source_rank: index + 1,
+          ...(_caption_text
+            ? { caption: { text: _caption_text, prompt_version: _prompt_version } }
+            : {}),
+          query_variant_hits: diagnostics.queryVariantHitsByPointId.get(_point_id) ?? [],
+        },
+      }
     })
   }
 
@@ -457,5 +543,12 @@ export class SearchService {
     }
     const sceneId = metadata.scene_id
     return typeof sceneId === 'string' ? sceneId : null
+  }
+
+  private promptVersion(metadata: unknown) {
+    if (typeof metadata !== 'object' || metadata === null || !('prompt_version' in metadata)) {
+      return null
+    }
+    return typeof metadata.prompt_version === 'string' ? metadata.prompt_version : null
   }
 }
