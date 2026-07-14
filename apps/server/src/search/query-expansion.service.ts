@@ -8,7 +8,8 @@ export interface QueryVariant {
   source: 'original' | 'deepseek'
 }
 
-export type QueryExpansionMode = 'original' | 'translate' | 'expand'
+export const queryExpansionModes = ['original', 'translate', 'expand'] as const
+export type QueryExpansionMode = (typeof queryExpansionModes)[number]
 
 const deepseekResponseSchema = z.object({
   choices: z.array(
@@ -27,6 +28,11 @@ const expansionPayloadSchema = z.object({
       weight: z.number().optional(),
     }),
   ),
+})
+
+const translationValidationSchema = z.object({
+  equivalent: z.boolean(),
+  issues: z.array(z.string()).default([]),
 })
 
 @Injectable()
@@ -66,61 +72,18 @@ export class QueryExpansionService {
     }
 
     const startedAt = performance.now()
-    const response = await fetch(
-      `${this.settings.deepseekBaseUrl.replace(/\/$/, '')}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.settings.deepseekApiKey}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.settings.deepseekModel,
-          messages: [
-            {
-              role: 'system',
-              content:
-                mode === 'translate'
-                  ? 'You faithfully translate short media-search queries. Return strict JSON only.'
-                  : 'You expand short user queries for image and video semantic search. Return strict JSON only.',
-            },
-            {
-              role: 'user',
-              content:
-                mode === 'translate'
-                  ? this.translationPrompt(original.text)
-                  : this.expansionPrompt(original.text),
-            },
-          ],
-          response_format: { type: 'json_object' },
-          stream: false,
-          temperature: 0.2,
-        }),
-        signal: AbortSignal.timeout(this.settings.queryExpansionTimeoutMs),
-      },
-    )
-    if (!response.ok) {
-      throw new BadGatewayException(`DeepSeek query expansion failed with ${response.status}`)
-    }
-
-    const parsedResponse = deepseekResponseSchema.safeParse(await response.json())
-    if (!parsedResponse.success) {
-      throw new BadGatewayException(
-        `DeepSeek query expansion returned invalid response: ${parsedResponse.error.message}`,
-      )
-    }
-
-    const content = parsedResponse.data.choices[0]?.message.content
-    if (!content) {
-      return [original]
-    }
-
-    let payload: unknown
-    try {
-      payload = JSON.parse(content)
-    } catch {
-      throw new BadGatewayException('DeepSeek query expansion returned non-JSON content')
-    }
+    const payload = await this.requestDeepSeekJson({
+      operation: 'query expansion',
+      system:
+        mode === 'translate'
+          ? 'You faithfully translate short media-search queries. Return strict JSON only.'
+          : 'You expand short user queries for image and video semantic search. Return strict JSON only.',
+      user:
+        mode === 'translate'
+          ? this.translationPrompt(original.text)
+          : this.expansionPrompt(original.text),
+      temperature: 0.2,
+    })
 
     const parsedPayload = expansionPayloadSchema.safeParse(payload)
     if (!parsedPayload.success) {
@@ -134,12 +97,96 @@ export class QueryExpansionService {
         ? Math.min(2, this.settings.queryExpansionMaxVariants)
         : this.settings.queryExpansionMaxVariants
     const normalized = this.normalizeVariants(original, parsedPayload.data.variants, maxVariants)
+    if (mode === 'translate') {
+      const translation = normalized.find((variant) => variant.source === 'deepseek')
+      if (!translation) {
+        throw new BadGatewayException('DeepSeek faithful translation returned no translation')
+      }
+      // “忠实翻译”是评测变量，不允许只靠生成 Prompt 自我约束：第二次独立判断会比较
+      // 原文与译文是否保留相同人物、物体、动作和关系，失败时明确中止本次搜索。
+      await this.validateFaithfulTranslation(original.text, translation.text)
+    }
     this.logger.log(
       `query_expansion_mode=${mode} provider=deepseek max_variants=${maxVariants} duration_ms=${Math.round(performance.now() - startedAt)} variants=${normalized
         .map((variant) => `"${variant.text}"@${variant.weight.toFixed(2)} ${variant.source}`)
         .join(', ')}`,
     )
     return normalized
+  }
+
+  private async validateFaithfulTranslation(original: string, translation: string) {
+    const payload = await this.requestDeepSeekJson({
+      operation: 'faithful translation validation',
+      system:
+        'You verify semantic equivalence between a source media-search query and its translation. Return strict JSON only.',
+      user: [
+        'Check whether the English translation preserves every object, action, relationship, and constraint.',
+        'Reject additions such as a new location, activity, object property, or changed spatial relationship.',
+        'Return JSON with shape: {"equivalent":true,"issues":[]}',
+        `Source query: ${original}`,
+        `English translation: ${translation}`,
+      ].join('\n'),
+      temperature: 0,
+    })
+    const parsed = translationValidationSchema.safeParse(payload)
+    if (!parsed.success) {
+      throw new BadGatewayException(
+        `DeepSeek faithful translation validation returned invalid payload: ${parsed.error.message}`,
+      )
+    }
+    if (!parsed.data.equivalent) {
+      // 不把模型返回的 issues 拼进异常，避免日志再次记录用户查询内容；失败类型已经足够排查。
+      throw new BadGatewayException(
+        'DeepSeek faithful translation validation rejected the translation',
+      )
+    }
+  }
+
+  private async requestDeepSeekJson(input: {
+    operation: string
+    system: string
+    user: string
+    temperature: number
+  }): Promise<unknown> {
+    const response = await fetch(
+      `${this.settings.deepseekBaseUrl.replace(/\/$/, '')}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.settings.deepseekApiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.settings.deepseekModel,
+          messages: [
+            { role: 'system', content: input.system },
+            { role: 'user', content: input.user },
+          ],
+          response_format: { type: 'json_object' },
+          stream: false,
+          temperature: input.temperature,
+        }),
+        signal: AbortSignal.timeout(this.settings.queryExpansionTimeoutMs),
+      },
+    )
+    if (!response.ok) {
+      throw new BadGatewayException(`DeepSeek ${input.operation} failed with ${response.status}`)
+    }
+    const parsedResponse = deepseekResponseSchema.safeParse(await response.json())
+    if (!parsedResponse.success) {
+      throw new BadGatewayException(
+        `DeepSeek ${input.operation} returned invalid response: ${parsedResponse.error.message}`,
+      )
+    }
+    const content = parsedResponse.data.choices[0]?.message.content
+    if (!content) {
+      throw new BadGatewayException(`DeepSeek ${input.operation} returned empty content`)
+    }
+    try {
+      return JSON.parse(content)
+    } catch {
+      throw new BadGatewayException(`DeepSeek ${input.operation} returned non-JSON content`)
+    }
   }
 
   private originalVariant(query: string): QueryVariant {

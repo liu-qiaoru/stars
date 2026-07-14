@@ -1,5 +1,8 @@
 export type MediaType = 'image' | 'video' | 'audio' | 'document' | 'unknown'
 
+export const queryExpansionModes = ['original', 'translate', 'expand'] as const
+export type QueryExpansionMode = (typeof queryExpansionModes)[number]
+
 export interface LibrarySummary {
   id: string
   name: string
@@ -48,7 +51,7 @@ export interface SearchRequest {
   library_ids: string[]
   limit: number
   offset: number
-  query_expansion_mode?: 'original' | 'translate' | 'expand'
+  query_expansion_mode?: QueryExpansionMode
   include_diagnostics?: boolean
 }
 
@@ -98,7 +101,7 @@ export interface SearchResponse {
   results?: SearchResultItem[]
   groups: SearchResultGroup[]
   query_diagnostics?: {
-    query_expansion_mode: 'original' | 'translate' | 'expand'
+    query_expansion_mode: QueryExpansionMode
     query_variants: Array<{
       text: string
       weight: number

@@ -18,6 +18,7 @@ import {
 import { SETTINGS, type Settings } from '../config/settings.js'
 import {
   QueryExpansionService,
+  queryExpansionModes,
   type QueryExpansionMode,
   type QueryVariant,
 } from './query-expansion.service.js'
@@ -65,7 +66,7 @@ const searchRequestSchema = z.object({
   library_ids: z.array(z.string().uuid()).optional().default([]),
   limit: z.number().int().min(1).max(100).optional().default(20),
   offset: z.number().int().min(0).optional().default(0),
-  query_expansion_mode: z.enum(['original', 'translate', 'expand']).optional().default('expand'),
+  query_expansion_mode: z.enum(queryExpansionModes).optional().default('expand'),
   include_diagnostics: z.boolean().optional().default(false),
 })
 
@@ -196,6 +197,8 @@ export class SearchService {
       offset: request.offset,
       results,
       groups,
+      // Caption 原文属于本地媒体派生内容。只有调用方显式请求诊断时才返回实际
+      // 查询版本；逐 Point 证据也只会附加在对应 group result，默认响应保持原样。
       ...(request.include_diagnostics
         ? {
             query_diagnostics: {
@@ -247,6 +250,8 @@ export class SearchService {
     },
   ) {
     const byPointId = new Map<string, Schemas['ScoredPoint']>()
+    // 同一 Point 可能被原查询和多个扩展词命中。生产分数仍取最高 weighted_score；
+    // 诊断模式额外保留所有原始分数，帮助判断错误候选究竟由哪个查询版本推高。
     const variantHitsByPointId = new Map<
       string,
       Array<Omit<QueryVariantHitDiagnostic, 'winning'>>
@@ -293,12 +298,14 @@ export class SearchService {
         const existing = byPointId.get(point.id)
         if (!existing || weightedScore > existing.score) {
           byPointId.set(point.id, { ...point, score: weightedScore })
+          // 相同加权分数保留先执行的查询版本，因此每个 Point 始终只有一个 winning。
           winningVariantTextByPointId.set(point.id, variant.text)
         }
       }
     }
 
     return {
+      // 先跨查询版本去重，再执行来源内 Top-K 截断；否则一个 Point 可能重复占用深度。
       points: [...byPointId.values()]
         .sort((left, right) => right.score - left.score)
         .slice(0, input.limit),
@@ -369,11 +376,14 @@ export class SearchService {
     return hydrated.map((item, index) => {
       const { _point_id, _caption_text, _prompt_version, ...result } = item
       if (!diagnostics.includeDiagnostics) {
+        // 私有字段只用于构造显式诊断，必须在默认响应序列化前全部移除。
         return result
       }
       return {
         ...result,
         diagnostics: {
+          // 来源名次在 PostgreSQL 过滤 stale/软删除记录后重新连续编号，和用户实际看到的
+          // group 顺序一致；不能直接沿用可能包含无效 Point 的 Qdrant 原始下标。
           source_rank: index + 1,
           ...(_caption_text
             ? { caption: { text: _caption_text, prompt_version: _prompt_version } }

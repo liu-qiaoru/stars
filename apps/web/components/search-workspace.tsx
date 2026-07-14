@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { FileAudio, Filter, Search, X } from 'lucide-react'
-import type { LibrarySummary, SearchResponse, SearchResultItem } from '../lib/api-client'
+import type {
+  LibrarySummary,
+  QueryExpansionMode,
+  SearchResponse,
+  SearchResultItem,
+} from '../lib/api-client'
 import { createApiClient } from '../lib/api-client'
 import {
   formatCollection,
@@ -21,6 +26,11 @@ interface SearchWorkspaceProps {
 }
 
 const mediaFilters = ['image', 'video', 'audio'] as const
+const queryExpansionOptions = [
+  { value: 'original', label: '仅原查询' },
+  { value: 'translate', label: '原查询 + 忠实翻译' },
+  { value: 'expand', label: '完整扩展' },
+] as const satisfies ReadonlyArray<{ value: QueryExpansionMode; label: string }>
 
 export function SearchWorkspace({
   libraries,
@@ -35,9 +45,7 @@ export function SearchWorkspace({
     'audio',
   ])
   const [results, setResults] = useState(initialResults)
-  const [queryExpansionMode, setQueryExpansionMode] = useState<'original' | 'translate' | 'expand'>(
-    'expand',
-  )
+  const [queryExpansionMode, setQueryExpansionMode] = useState<QueryExpansionMode>('expand')
   const [includeDiagnostics, setIncludeDiagnostics] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
@@ -148,9 +156,11 @@ export function SearchWorkspace({
             }
             disabled={isLoading}
           >
-            <option value="original">仅原查询</option>
-            <option value="translate">原查询 + 忠实翻译</option>
-            <option value="expand">完整扩展</option>
+            {queryExpansionOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </label>
         <label className="inline-flex items-center gap-2 text-sm font-medium">
@@ -295,10 +305,8 @@ function SearchDiagnosticsPanel({ results }: { results: SearchResponse }) {
   )
 }
 
-function formatQueryExpansionMode(mode: 'original' | 'translate' | 'expand') {
-  if (mode === 'original') return '仅原查询'
-  if (mode === 'translate') return '原查询 + 忠实翻译'
-  return '完整扩展'
+function formatQueryExpansionMode(mode: QueryExpansionMode) {
+  return queryExpansionOptions.find((option) => option.value === mode)?.label ?? mode
 }
 
 function visibleResults(results: SearchResponse): SearchResultItem[] {
