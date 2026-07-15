@@ -95,35 +95,23 @@ class CaptioningWorkerTest(unittest.TestCase):
         self.assertEqual(repository.vector_refs[0]["asset_id"], "caption-1")
         self.assertEqual(vlm_client.calls[0]["image_paths"], ["/media/cat.jpg"])
 
-    def test_generate_video_caption_deletes_temporary_frame_after_success(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            frame_path = Path(tmp_dir) / "frame.jpg"
-            repository = FakeCaptionRepository()
-            repository.add_source_asset({
-                "id": "segment-1",
-                "file_id": "file-1",
-                "library_id": "library-1",
-                "asset_type": "video_segment",
-                "path": "/media/clip.mp4",
-                "start_time_seconds": 10.0,
-                "end_time_seconds": 20.0,
-                "frame_time_seconds": None,
-                "content_hash": "segment-hash",
-                "metadata_json": {},
-            })
+    def test_generate_video_caption_rejects_legacy_caption_v1(self):
+        repository = FakeCaptionRepository()
+        repository.add_source_asset({
+            "id": "segment-1",
+            "file_id": "file-1",
+            "library_id": "library-1",
+            "asset_type": "video_segment",
+            "path": "/media/clip.mp4",
+            "start_time_seconds": 10.0,
+            "end_time_seconds": 20.0,
+            "frame_time_seconds": None,
+            "content_hash": "segment-hash",
+            "metadata_json": {"scene_id": "scene-0001"},
+        })
+        handler = GenerateCaptionHandler(repository, vlm_client=FakeVlmClient())
 
-            def frame_extractor(source_path, frame_time_seconds):
-                self.assertEqual(source_path, "/media/clip.mp4")
-                self.assertEqual(frame_time_seconds, 15.0)
-                frame_path.write_bytes(b"frame")
-                return str(frame_path)
-
-            handler = GenerateCaptionHandler(
-                repository,
-                vlm_client=FakeVlmClient(),
-                frame_extractor=frame_extractor,
-            )
-
+        with self.assertRaisesRegex(ValueError, "video requires scene-caption-v2"):
             handler.handle({
                 "file_id": "file-1",
                 "source_asset_ids": ["segment-1"],
@@ -132,7 +120,7 @@ class CaptioningWorkerTest(unittest.TestCase):
                 "model_version": "qwen2.5-vl-7b-instruct",
             })
 
-            self.assertFalse(frame_path.exists())
+        self.assertEqual(repository.assets, [])
 
     def test_generate_caption_rejects_empty_vlm_caption(self):
         repository = FakeCaptionRepository()

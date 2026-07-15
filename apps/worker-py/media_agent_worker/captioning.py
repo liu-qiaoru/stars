@@ -188,6 +188,13 @@ class GenerateCaptionHandler:
 
     def _caption_sources(self, source, prompt_version):
         if prompt_version == "caption-v1":
+            # caption-v1 是单图描述协议。旧版本曾允许视频片段走该分支，
+            # 但生成的 Caption 没有稳定 scene_id，会和 scene-caption-v2 返回重复时间窗。
+            # 这里明确失败，防止历史队列或调用方再次写入不可合并的视频 Caption。
+            if source["asset_type"] != "image":
+                raise ValueError(
+                    f"caption-v1 only supports image sources; video requires scene-caption-v2: {source['id']}"
+                )
             return [source], [self._optional_frame_time(source)]
         if prompt_version != "scene-caption-v2":
             raise ValueError(f"Unsupported prompt_version: {prompt_version}")

@@ -607,20 +607,47 @@ export class EvaluationService {
       corpus.source_actual_depths[query.id] = Object.fromEntries(
         result.groups.map((group) => [group.collection, group.results.length]),
       )
-      const sceneWindows = result.groups
-        .flatMap((group) => group.results)
-        .flatMap((item) =>
-          item.scene_id && item.start_time_seconds !== null && item.end_time_seconds !== null
-            ? [
-                {
-                  fileId: item.file_id,
-                  sceneId: item.scene_id,
-                  start: item.start_time_seconds,
-                  end: item.end_time_seconds,
-                },
-              ]
-            : [],
-        )
+      const sceneFileIds = [
+        ...new Set(
+          result.groups.flatMap((group) =>
+            group.results.flatMap((item) => (item.scene_id ? [item.file_id] : [])),
+          ),
+        ),
+      ]
+      const sceneRows = sceneFileIds.length
+        ? await this.db
+            .select({
+              fileId: mediaAssets.fileId,
+              sceneId: sql<string>`${mediaAssets.metadataJson}->>'scene_id'`,
+              start: mediaAssets.startTimeSeconds,
+              end: mediaAssets.endTimeSeconds,
+            })
+            .from(mediaAssets)
+            .where(
+              and(
+                inArray(mediaAssets.fileId, sceneFileIds),
+                eq(mediaAssets.assetType, 'video_segment'),
+                sql`${mediaAssets.metadataJson}->>'scene_id' is not null`,
+                sql`COALESCE(${mediaAssets.metadataJson}->>'stale', 'false') <> 'true'`,
+              ),
+            )
+        : []
+      const sceneWindows = sceneRows.map((row) => {
+        if (row.start === null || row.end === null) {
+          throw new Error(
+            `evaluation scene boundary is null file_id=${row.fileId} scene_id=${row.sceneId}`,
+          )
+        }
+        return {
+          fileId: row.fileId,
+          sceneId: row.sceneId,
+          start: Number(row.start),
+          end: Number(row.end),
+        }
+      })
+      const sceneWindowByKey = new Map(
+        sceneWindows.map((scene) => [`${scene.fileId}|${scene.sceneId}`, scene]),
+      )
       const evidenceByKey = new Map<
         string,
         { item: (typeof result.groups)[number]['results'][number]; evidence: SourceEvidence[] }
@@ -638,13 +665,29 @@ export class EvaluationService {
                   sceneWindows,
                 )
               : (item.scene_id ?? null)
+          const sceneWindow = alignedSceneId
+            ? sceneWindowByKey.get(`${item.file_id}|${alignedSceneId}`)
+            : undefined
+          if (alignedSceneId && !sceneWindow) {
+            throw new Error(
+              `evaluation candidate has no active scene boundary file_id=${item.file_id} scene_id=${alignedSceneId}`,
+            )
+          }
+          const normalizedItem = sceneWindow
+            ? {
+                ...item,
+                scene_id: alignedSceneId,
+                start_time_seconds: sceneWindow.start,
+                end_time_seconds: sceneWindow.end,
+              }
+            : item
           const key = this.candidateKey(
-            item.file_id,
+            normalizedItem.file_id,
             alignedSceneId,
-            item.start_time_seconds,
-            item.end_time_seconds,
+            normalizedItem.start_time_seconds,
+            normalizedItem.end_time_seconds,
           )
-          if (!collapsedSourceResults.has(key)) collapsedSourceResults.set(key, item)
+          if (!collapsedSourceResults.has(key)) collapsedSourceResults.set(key, normalizedItem)
         }
         ;[...collapsedSourceResults.entries()].forEach(([key, item], index) => {
           const rank = index + 1

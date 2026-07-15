@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type SyntheticEvent } from 'react'
 import {
   createApiClient,
   type EvaluationRun,
@@ -167,6 +167,9 @@ export function EvaluationWorkspace({
   })
 
   const nextCandidate = run?.candidates.find((candidate) => !candidate.judgment)
+  const nextCandidateQuery = nextCandidate
+    ? selected?.queries.find((query) => query.id === nextCandidate.query_id)
+    : null
   async function exportRun() {
     if (!run) return
     await guard(async () => {
@@ -235,24 +238,48 @@ export function EvaluationWorkspace({
             <>
               <section className="rounded-xl border border-[var(--hairline)] bg-white p-5">
                 <div className="flex items-center justify-between">
-                  <h2 className="font-medium">查询 v{selected.version}</h2>
+                  <div>
+                    <h2 className="font-medium">评测集版本 v{selected.version}</h2>
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                      每条测试数据只包含一个独立查询；不同检索意图请分别添加。
+                    </p>
+                  </div>
                   <span className="text-sm">{selected.status}</span>
                 </div>
-                <ul className="mt-3 space-y-2">
-                  {selected.queries.map((query) => (
-                    <li key={query.id} className="rounded border p-2 text-sm">
-                      {query.query_text}
-                    </li>
-                  ))}
-                </ul>
+                <h3 className="mt-4 text-sm font-medium">
+                  已有测试数据（{selected.queries.length} 条）
+                </h3>
+                {selected.queries.length ? (
+                  <ol className="mt-2 space-y-2">
+                    {selected.queries.map((query, index) => (
+                      <li key={query.id} className="rounded border p-3 text-sm">
+                        <span className="mr-2 text-[var(--muted)]">#{index + 1}</span>
+                        <span className="font-medium">{query.query_text}</span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="mt-2 rounded border border-dashed p-3 text-sm text-[var(--muted)]">
+                    尚未添加测试数据。请在下方一次添加一个查询意图。
+                  </p>
+                )}
                 {selected.status === 'draft' ? (
-                  <form onSubmit={addQuery} className="mt-4 grid gap-2">
+                  <form onSubmit={addQuery} className="mt-5 grid gap-3 rounded-lg bg-slate-50 p-4">
+                    <div>
+                      <h3 className="font-medium">新建一条测试数据</h3>
+                      <p className="mt-1 text-sm text-[var(--muted)]">
+                        这里只填写一个查询，例如“小龙虾”。“戴帽子”等其他意图请保存后另建一条。
+                      </p>
+                    </div>
+                    <label className="grid gap-1 text-sm font-medium">
+                      查询文本
                     <input
                       name="query_text"
                       required
-                      placeholder="查询文本"
-                      className="rounded border p-2"
+                      placeholder="例如：小龙虾"
+                      className="rounded border bg-white p-2 font-normal"
                     />
+                    </label>
                     <select
                       aria-label="查询类型"
                       value={queryType}
@@ -468,7 +495,7 @@ export function EvaluationWorkspace({
                       disabled={busy || (queryType === 'known_target' && !selectedTarget)}
                       className="primary-action justify-center"
                     >
-                      添加查询
+                      保存这条测试数据
                     </button>
                   </form>
                 ) : null}
@@ -536,7 +563,23 @@ export function EvaluationWorkspace({
                   ) : null}
                   {nextCandidate ? (
                     <div className="mt-4 space-y-3">
-                      <p className="text-sm">请只根据媒体内容判断，来源证据将在标注后显示。</p>
+                      <div className="rounded-lg border bg-slate-50 p-3">
+                        <p className="text-xs text-[var(--muted)]">当前查询</p>
+                        <p className="mt-1 text-lg font-medium">
+                          {nextCandidateQuery?.query_text ?? '查询信息缺失'}
+                        </p>
+                        {nextCandidate.media_type === 'video' &&
+                        nextCandidate.start_time_seconds !== null &&
+                        nextCandidate.end_time_seconds !== null ? (
+                          <p className="mt-1 text-sm text-[var(--muted)]">
+                            待判断片段：{formatTime(nextCandidate.start_time_seconds)}–
+                            {formatTime(nextCandidate.end_time_seconds)}
+                          </p>
+                        ) : null}
+                      </div>
+                      <p className="text-sm">
+                        请判断当前媒体片段是否满足上面的查询。只根据媒体内容判断，来源证据将在标注后显示。
+                      </p>
                       {nextCandidate.media_type === 'image' ? (
                         <img
                           alt="待标注候选"
@@ -544,13 +587,13 @@ export function EvaluationWorkspace({
                           src={client.mediaContentUrl(nextCandidate.file_id)}
                         />
                       ) : (
-                        <video
+                        <SegmentVideo
+                          key={nextCandidate.id}
                           className="max-h-96 w-full rounded-lg"
-                          controls
-                          src={client.mediaContentUrl(nextCandidate.file_id, {
-                            startTimeSeconds: nextCandidate.start_time_seconds,
-                            endTimeSeconds: nextCandidate.end_time_seconds,
-                          })}
+                          label={`待标注片段 ${formatTime(nextCandidate.start_time_seconds)}–${formatTime(nextCandidate.end_time_seconds)}`}
+                          src={client.mediaContentUrl(nextCandidate.file_id)}
+                          startTimeSeconds={nextCandidate.start_time_seconds ?? 0}
+                          endTimeSeconds={nextCandidate.end_time_seconds}
                         />
                       )}
                       <div className="flex flex-wrap gap-2">
@@ -634,6 +677,43 @@ export function EvaluationWorkspace({
         </div>
       </div>
     </section>
+  )
+}
+
+function SegmentVideo({
+  src,
+  startTimeSeconds,
+  endTimeSeconds,
+  label,
+  className,
+}: {
+  src: string
+  startTimeSeconds: number
+  endTimeSeconds: number | null
+  label: string
+  className: string
+}) {
+  function seekToSegment(event: SyntheticEvent<HTMLVideoElement>) {
+    const video = event.currentTarget
+    video.currentTime = Math.min(Math.max(0, startTimeSeconds), video.duration || startTimeSeconds)
+  }
+
+  function stopAtSegmentEnd(event: SyntheticEvent<HTMLVideoElement>) {
+    if (endTimeSeconds === null || event.currentTarget.currentTime < endTimeSeconds) return
+    event.currentTarget.pause()
+  }
+
+  return (
+    <video
+      aria-label={label}
+      className={className}
+      controls
+      preload="metadata"
+      src={src}
+      onLoadedMetadata={seekToSegment}
+      onDurationChange={seekToSegment}
+      onTimeUpdate={stopAtSegmentEnd}
+    />
   )
 }
 

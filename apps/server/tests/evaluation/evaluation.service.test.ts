@@ -165,6 +165,70 @@ describe('evaluation service', () => {
     )
     expect(result.items.filter((item) => item.file_id === video.id)).toHaveLength(1)
   })
+
+  test('uses the canonical scene boundary instead of a matched frame timestamp', async () => {
+    const library = await createLibrary(context.db, { name: '视频评测', rootPath: '/videos' })
+    const video = await createMediaFile(context.db, {
+      libraryId: library.id,
+      path: '/videos/a.mp4',
+      relativePath: 'a.mp4',
+      mediaType: 'video',
+      sizeBytes: 10,
+      mtimeMs: 1,
+    })
+    await createMediaAsset(context.db, {
+      fileId: video.id,
+      assetType: 'video_segment',
+      startTimeSeconds: '100',
+      endTimeSeconds: '120',
+      metadataJson: { scene_id: 'scene-a' },
+    })
+    const frameResult = {
+      asset_id: 'frame-a',
+      file_id: video.id,
+      media_type: 'video' as const,
+      path: '/videos/a.mp4',
+      start_time_seconds: 109.4,
+      end_time_seconds: 109.4,
+      scene_id: 'scene-a',
+      score: 0.8,
+      reason: 'vector_match' as const,
+    }
+    const searchForEvaluation = vi.fn().mockResolvedValue({
+      limit: 20,
+      offset: 0,
+      executed_collections: ['image_vectors', 'video_frame_vectors', 'caption_text_vectors'],
+      groups: [
+        { collection: 'video_frame_vectors', score_kind: 'cosine_similarity', results: [frameResult] },
+        { collection: 'caption_text_vectors', score_kind: 'cosine_similarity', results: [] },
+        { collection: 'text_search', score_kind: 'ts_rank_cd', results: [] },
+      ],
+      results: [],
+    })
+    const service = new EvaluationService(context.db, {
+      searchForEvaluation,
+    } as unknown as SearchService)
+    const set = await service.createSet({ name: '视频边界' })
+    await service.addQuery(set.version_id, {
+      query_text: '靠着石头',
+      query_type: 'discovery',
+      intent_category: '动作',
+      must_have: ['靠着石头'],
+      optional: [],
+      exclusions: [],
+    })
+    await service.freezeVersion(set.version_id)
+
+    const run = await service.startRun(set.version_id, { library_ids: [library.id] })
+
+    expect(run.candidates).toEqual([
+      expect.objectContaining({
+        scene_id: 'scene-a',
+        start_time_seconds: 100,
+        end_time_seconds: 120,
+      }),
+    ])
+  })
 })
 
 function result(fileId: string, assetId: string, score: number) {

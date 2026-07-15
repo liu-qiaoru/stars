@@ -752,6 +752,31 @@ describe('search service', () => {
       sizeBytes: 100,
       mtimeMs: 1710000000000,
     })
+    const legacyCaptionAsset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: 'caption',
+      startTimeSeconds: '10.1',
+      endTimeSeconds: '20',
+      textContent: 'Legacy single-frame caption',
+      contentHash: 'legacy-caption-hash',
+      metadataJson: { prompt_version: 'caption-v1', source: 'vlm_caption' },
+    })
+    const legacyPointId = '13131313-1313-4313-8313-131313131313'
+    await createVectorRef(db, {
+      assetId: legacyCaptionAsset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: 'caption_text_vectors',
+      pointId: legacyPointId,
+      modelName: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+      modelVersion: 'paraphrase-multilingual-MiniLM-L12-v2',
+      vectorKind: 'vlm_caption_text_embedding',
+      vectorDim: 384,
+      distance: 'Cosine',
+      contentHash: 'legacy-caption-hash',
+      indexProfile: 'balanced',
+      status: 'indexed',
+    })
     const captionAsset = await createMediaAsset(db, {
       fileId: file.id,
       assetType: 'caption',
@@ -759,6 +784,11 @@ describe('search service', () => {
       endTimeSeconds: '20',
       textContent: 'A person cooks in a kitchen',
       contentHash: 'caption-hash',
+      metadataJson: {
+        prompt_version: 'scene-caption-v2',
+        source: 'vlm_scene_caption',
+        scene_id: 'scene-0001',
+      },
     })
     const pointId = '12121212-1212-4212-8212-121212121212'
     await createVectorRef(db, {
@@ -787,7 +817,10 @@ describe('search service', () => {
     })
     search.mockImplementation(async (collectionName: string) => {
       if (collectionName === 'caption_text_vectors') {
-        return [{ id: pointId, score: 0.86 }]
+        return [
+          { id: legacyPointId, score: 0.91 },
+          { id: pointId, score: 0.86 },
+        ]
       }
       return []
     })
@@ -812,7 +845,7 @@ describe('search service', () => {
               path: '/video/kitchen.mp4',
               start_time_seconds: 10,
               end_time_seconds: 20,
-              scene_id: null,
+              scene_id: 'scene-0001',
               score: 0.86,
               reason: 'caption_match',
             },
@@ -826,6 +859,8 @@ describe('search service', () => {
       reasons: ['caption_match'],
       source_scores: { caption_text_vectors: 0.86 },
     })
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0]?.asset_id).not.toBe(legacyCaptionAsset.id)
   })
 
   test('audio-only search returns transcript matches from PostgreSQL FTS', async () => {

@@ -29,6 +29,13 @@
       "when": 1783864412445,
       "tag": "0003_dark_blizzard",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783958400000,
+      "tag": "0004_stale_legacy_video_captions",
+      "breakpoints": true
     }
   ]
 }

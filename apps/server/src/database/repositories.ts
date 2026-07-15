@@ -377,6 +377,14 @@ export async function listSearchResultMetadata(
     eq(vectorRefs.status, 'indexed'),
     isNull(mediaFiles.deletedAt),
     isNull(libraries.deletedAt),
+    sql`COALESCE(${mediaAssets.metadataJson}->>'stale', 'false') <> 'true'`,
+    // 图片继续使用 caption-v1；视频检索只接受带稳定 scene_id 的 scene-caption-v2。
+    // 这条防御性约束避免历史视频 caption-v1 与新场景 Caption 同时返回重叠片段。
+    sql`NOT (
+      ${mediaFiles.mediaType} = 'video'
+      AND ${mediaAssets.assetType} = 'caption'
+      AND COALESCE(${mediaAssets.metadataJson}->>'prompt_version', '') <> 'scene-caption-v2'
+    )`,
   ]
   if (filters.mediaTypes?.length) {
     conditions.push(inArray(mediaFiles.mediaType, filters.mediaTypes))

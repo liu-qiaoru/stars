@@ -57,7 +57,7 @@ describe('evaluation workspace', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: /基线/ }))
-    await waitFor(() => expect(screen.getByText('查询 v1')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('评测集版本 v1')).toBeInTheDocument())
     fireEvent.change(screen.getByLabelText('查询类型'), { target: { value: 'known_target' } })
     fireEvent.click(screen.getByRole('button', { name: '随机抽取 20 个' }))
     await waitFor(() =>
@@ -153,7 +153,7 @@ describe('evaluation workspace', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: /基线/ }))
-    await waitFor(() => expect(screen.getByText('查询 v1')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('评测集版本 v1')).toBeInTheDocument())
     fireEvent.change(screen.getByLabelText('查询类型'), { target: { value: 'known_target' } })
     fireEvent.change(screen.getByPlaceholderText('按文件名或路径筛选'), {
       target: { value: '海边' },
@@ -213,7 +213,7 @@ describe('evaluation workspace', () => {
     fireEvent.change(input, { target: { value: '八份数据' } })
     fireEvent.submit(input.closest('form')!)
 
-    await waitFor(() => expect(screen.getByText('查询 v1')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('评测集版本 v1')).toBeInTheDocument())
     expect(input).toHaveValue('')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
@@ -260,5 +260,82 @@ describe('evaluation workspace', () => {
     expect(screen.queryByText(/RRF score/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/source_evidence/i)).not.toBeInTheDocument()
     expect(screen.getByText(/RRF 分数仅用于排序，不表示相关概率/)).toBeInTheDocument()
+  })
+
+  test('shows the current query and scene boundary while labeling', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'version-1',
+          set_id: 'set-1',
+          version: 1,
+          status: 'frozen',
+          frozen_at: '2026-07-12T00:00:00Z',
+          queries: [{ id: 'query-1', query_text: '戴帽子' }],
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ items: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'run-1',
+          version_id: 'version-1',
+          status: 'ready_for_labeling',
+          config: {},
+          corpus: {},
+          report: null,
+          error_stage: null,
+          error_message: null,
+          candidates: [
+            {
+              id: 'candidate-1',
+              query_id: 'query-1',
+              candidate_key: 'file-1:scene-1',
+              file_id: 'file-1',
+              scene_id: 'scene-1',
+              media_type: 'video',
+              start_time_seconds: 12,
+              end_time_seconds: 34,
+              primary_pool: true,
+              judgment: null,
+            },
+          ],
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <EvaluationWorkspace
+        initialSets={[
+          {
+            id: 'set-1',
+            name: '基线',
+            description: null,
+            latest_version: {
+              id: 'version-1',
+              set_id: 'set-1',
+              version: 1,
+              status: 'frozen',
+              frozen_at: '2026-07-12T00:00:00Z',
+            },
+          },
+        ]}
+        libraries={[]}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /基线/ }))
+    await waitFor(() => expect(screen.getByText('戴帽子')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '运行基线评测' }))
+
+    await waitFor(() => expect(screen.getByText('当前查询')).toBeInTheDocument())
+    expect(screen.getAllByText('戴帽子')).toHaveLength(2)
+    expect(screen.getByText('待判断片段：00:12–00:34')).toBeInTheDocument()
+    expect(screen.getByText(/请判断当前媒体片段是否满足上面的查询/)).toBeInTheDocument()
+    const video = screen.getByLabelText('待标注片段 00:12–00:34') as HTMLVideoElement
+    expect(video).toHaveAttribute('src', 'http://127.0.0.1:4000/media/file-1/content')
+    fireEvent.loadedMetadata(video)
+    expect(video.currentTime).toBe(12)
   })
 })
