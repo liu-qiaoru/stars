@@ -1,19 +1,24 @@
 import json
+from pathlib import Path
+import tempfile
 import time
 import unittest
 
 from media_agent_worker.video_vlm_feasibility import (
     InferenceTimeoutError,
+    _assert_non_empty_video_inputs,
     _inference_timeout,
+    apply_resource_gate,
     evaluate_feasibility_gate,
     parse_verification_response,
+    validate_output_path,
     validate_benchmark_manifest,
 )
 
 
 def build_manifest():
-    """Return the smallest valid matrix: 10 scenes, three durations, and both FPS values."""
-    durations = [5, 15, 30, 5, 15, 30, 5, 15, 30, 30]
+    """Return 10 scenes including a sub-second action and all target durations."""
+    durations = [0.5, 5, 15, 30, 5, 15, 30, 5, 15, 30]
     return {
         "fps_values": [1, 2],
         "cases": [
@@ -25,6 +30,15 @@ def build_manifest():
                 "query": "人物是否做出了指定动作？",
                 "expected_relevance": 2,
                 "transient_action": index == 1,
+                "coverage_tags": (
+                    ["transient_action", "single_hand_peace_sign"]
+                    if index == 1
+                    else ["person_relationship"]
+                    if index == 2
+                    else ["environment_constraint"]
+                    if index == 3
+                    else []
+                ),
             }
             for index, duration in enumerate(durations, start=1)
         ],
@@ -48,6 +62,28 @@ class VideoVlmFeasibilityManifestTests(unittest.TestCase):
             case["duration_seconds"] = 5
         with self.assertRaisesRegex(ValueError, "5, 15, and 30"):
             validate_benchmark_manifest(missing_duration, path_exists=lambda _path: True)
+
+    def test_rejects_unsafe_case_ids_and_missing_semantic_coverage(self):
+        unsafe_id = build_manifest()
+        unsafe_id["cases"][0]["id"] = "../source-video"
+        with self.assertRaisesRegex(ValueError, "safe filename"):
+            validate_benchmark_manifest(unsafe_id, path_exists=lambda _path: True)
+
+        missing_coverage = build_manifest()
+        for case in missing_coverage["cases"]:
+            case["coverage_tags"] = []
+        with self.assertRaisesRegex(ValueError, "coverage tags"):
+            validate_benchmark_manifest(missing_coverage, path_exists=lambda _path: True)
+
+    def test_rejects_an_output_path_that_aliases_source_media(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "source.mp4"
+            source_path.write_bytes(b"source")
+            output_symlink = Path(temp_dir) / "report.json"
+            output_symlink.symlink_to(source_path)
+
+            with self.assertRaisesRegex(ValueError, "source video"):
+                validate_output_path([str(source_path)], output_symlink)
 
 
 class VideoVlmStructuredOutputTests(unittest.TestCase):
@@ -131,6 +167,33 @@ class VideoVlmFeasibilityGateTests(unittest.TestCase):
         self.assertFalse(gate["automatic_gate_passed"])
         self.assertFalse(gate["all_30_second_inferences_within_60_seconds"])
         self.assertFalse(gate["one_fps_preserves_transient_actions"])
+
+    def test_swap_growth_is_part_of_the_automatic_gate(self):
+        gate = {"automatic_gate_passed": True}
+        apply_resource_gate(
+            gate,
+            {
+                "start_swap_used_bytes": 0,
+                "peak_swap_used_bytes": 5 * 1024**3,
+                "end_swap_used_bytes": 2 * 1024**3,
+            },
+        )
+
+        self.assertFalse(gate["swap_pressure_within_limit"])
+        self.assertFalse(gate["automatic_gate_passed"])
+
+    def test_rejects_processor_output_without_a_video_frame_sequence(self):
+        class FakeTensor:
+            def __init__(self, size):
+                self.size = size
+
+            def numel(self):
+                return self.size
+
+        with self.assertRaisesRegex(ValueError, "no video frames"):
+            _assert_non_empty_video_inputs({"pixel_values_videos": FakeTensor(0)})
+
+        _assert_non_empty_video_inputs({"pixel_values_videos": FakeTensor(1)})
 
 
 if __name__ == "__main__":

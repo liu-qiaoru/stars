@@ -11,6 +11,7 @@ from contextlib import contextmanager
 import json
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -23,6 +24,19 @@ from pathlib import Path
 DEFAULT_MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
 TARGET_DURATIONS_SECONDS = {5.0, 15.0, 30.0}
 TARGET_FPS_VALUES = [1.0, 2.0]
+REQUIRED_COVERAGE_TAGS = {
+    "transient_action",
+    "person_relationship",
+    "environment_constraint",
+    "single_hand_peace_sign",
+}
+SAFE_CASE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+GIBIBYTE = 1024**3
+# Swap is disk-backed emergency memory. A benchmark that adds more than 4 GiB at
+# peak, or leaves more than 1 GiB allocated at exit, would noticeably degrade this
+# 32 GiB development Mac even if model generation happened to finish in time.
+MAX_PEAK_SWAP_GROWTH_BYTES = 4 * GIBIBYTE
+MAX_END_SWAP_GROWTH_BYTES = 1 * GIBIBYTE
 STRICT_RESPONSE_KEYS = {
     "relevance",
     "matched_constraints",
@@ -50,8 +64,9 @@ def validate_benchmark_manifest(data, *, path_exists=os.path.isfile):
     """Validate and normalize the real-video benchmark matrix.
 
     The input must describe at least ten distinct scenes, include 5/15/30-second
-    clips, run both 1 and 2 frames per second (FPS), and mark at least one transient
-    action. Source paths are checked read-only; the function never creates clips.
+    clips plus one sub-second action, run both 1 and 2 frames per second (FPS), and
+    cover the product questions listed in ``REQUIRED_COVERAGE_TAGS``. Source paths
+    are checked read-only; the function never creates clips.
     """
     if not isinstance(data, dict):
         raise ValueError("Benchmark manifest must be a JSON object")
@@ -79,8 +94,15 @@ def validate_benchmark_manifest(data, *, path_exists=os.path.isfile):
         if not isinstance(raw_case, dict):
             raise ValueError(f"cases[{index}] must be a JSON object")
         case_id = raw_case.get("id")
-        if not isinstance(case_id, str) or not case_id.strip():
-            raise ValueError(f"cases[{index}].id must be a non-empty string")
+        if (
+            not isinstance(case_id, str)
+            or not SAFE_CASE_ID_PATTERN.fullmatch(case_id)
+            or case_id in (".", "..")
+        ):
+            raise ValueError(
+                f"cases[{index}].id must be a safe filename component using letters, "
+                "numbers, dot, underscore, or hyphen"
+            )
         if case_id in seen_ids:
             raise ValueError(f"Duplicate benchmark case id: {case_id}")
         seen_ids.add(case_id)
@@ -95,8 +117,8 @@ def validate_benchmark_manifest(data, *, path_exists=os.path.isfile):
         duration_seconds = _finite_positive_number(
             raw_case.get("duration_seconds"), f"{case_id}.duration_seconds"
         )
-        if duration_seconds not in TARGET_DURATIONS_SECONDS:
-            raise ValueError(f"{case_id}.duration_seconds must be 5, 15, or 30")
+        if duration_seconds > 30.0:
+            raise ValueError(f"{case_id}.duration_seconds must not exceed 30 seconds")
         seen_durations.add(duration_seconds)
 
         query = raw_case.get("query")
@@ -109,6 +131,12 @@ def validate_benchmark_manifest(data, *, path_exists=os.path.isfile):
         if type(transient_action) is not bool:
             raise ValueError(f"{case_id}.transient_action must be a boolean")
         has_transient_action = has_transient_action or transient_action
+        coverage_tags = raw_case.get("coverage_tags")
+        if not isinstance(coverage_tags, list) or any(
+            not isinstance(tag, str) or not tag.strip() for tag in coverage_tags
+        ):
+            raise ValueError(f"{case_id}.coverage_tags must be a list of non-empty strings")
+        normalized_coverage_tags = sorted({tag.strip() for tag in coverage_tags})
         scene_key = (str(Path(source_path).resolve()), start_seconds, duration_seconds)
         if scene_key in seen_scene_keys:
             raise ValueError(f"Duplicate real scene boundary: {case_id}")
@@ -123,13 +151,27 @@ def validate_benchmark_manifest(data, *, path_exists=os.path.isfile):
                 "query": query.strip(),
                 "expected_relevance": expected_relevance,
                 "transient_action": transient_action,
+                "coverage_tags": normalized_coverage_tags,
             }
         )
 
-    if seen_durations != TARGET_DURATIONS_SECONDS:
+    if not TARGET_DURATIONS_SECONDS.issubset(seen_durations):
         raise ValueError("Benchmark cases must collectively cover 5, 15, and 30 seconds")
     if not has_transient_action:
         raise ValueError("Benchmark must include at least one transient_action case")
+    if not any(case["duration_seconds"] < 1.0 for case in normalized_cases):
+        raise ValueError(
+            "Benchmark must include a sub-second action shorter than the 1 FPS sampling period"
+        )
+    present_coverage_tags = {
+        tag for case in normalized_cases for tag in case["coverage_tags"]
+    }
+    missing_coverage_tags = REQUIRED_COVERAGE_TAGS - present_coverage_tags
+    if missing_coverage_tags:
+        raise ValueError(
+            "Benchmark is missing required coverage tags: "
+            + ", ".join(sorted(missing_coverage_tags))
+        )
 
     return {
         "model_name": data.get("model_name", DEFAULT_MODEL_NAME),
@@ -168,8 +210,10 @@ def evaluate_feasibility_gate(results):
 
     A 30-second inference must finish within 60 seconds. The sum of the three slowest
     30-second inferences approximates the product's worst Top-3 wait and must remain
-    within 180 seconds. Accuracy still receives a separate human review because exact
-    relevance cannot be proven from latency or JSON shape alone.
+    within 180 seconds. Expected relevance is labeled before the run and compared
+    automatically. A human must still inspect each free-text reason against the visible
+    video, because matching a numeric label alone cannot prove that the model used the
+    correct evidence.
     """
     complete_results = [result for result in results if result.get("failure_type") is None]
     all_inferences_succeeded = len(complete_results) == len(results) and bool(results)
@@ -219,6 +263,48 @@ def evaluate_feasibility_gate(results):
         )
     )
     return gate
+
+
+def apply_resource_gate(gate, resource_metrics):
+    """Add sustained swap-pressure checks to an existing automatic gate.
+
+    Inputs and thresholds use bytes. The function mutates and returns ``gate`` so the
+    final report has one authoritative pass/fail object rather than a separate memory
+    decision that callers could accidentally ignore.
+    """
+    start_swap = int(resource_metrics["start_swap_used_bytes"])
+    peak_swap_growth = max(0, int(resource_metrics["peak_swap_used_bytes"]) - start_swap)
+    end_swap_growth = max(0, int(resource_metrics["end_swap_used_bytes"]) - start_swap)
+    swap_pressure_within_limit = (
+        peak_swap_growth <= MAX_PEAK_SWAP_GROWTH_BYTES
+        and end_swap_growth <= MAX_END_SWAP_GROWTH_BYTES
+    )
+    gate.update(
+        {
+            "peak_swap_growth_bytes": peak_swap_growth,
+            "end_swap_growth_bytes": end_swap_growth,
+            "max_peak_swap_growth_bytes": MAX_PEAK_SWAP_GROWTH_BYTES,
+            "max_end_swap_growth_bytes": MAX_END_SWAP_GROWTH_BYTES,
+            "swap_pressure_within_limit": swap_pressure_within_limit,
+        }
+    )
+    gate["automatic_gate_passed"] = bool(
+        gate.get("automatic_gate_passed") and swap_pressure_within_limit
+    )
+    return gate
+
+
+def validate_output_path(source_paths, output_path):
+    """Reject a report destination that resolves to any read-only source video.
+
+    ``Path.resolve`` follows an existing symbolic link. This matters because opening a
+    symlink with write mode would truncate its target before JSON serialization starts.
+    """
+    resolved_output = Path(output_path).resolve()
+    resolved_sources = {Path(source_path).resolve() for source_path in source_paths}
+    if resolved_output in resolved_sources:
+        raise ValueError("Benchmark output path must not resolve to a source video")
+    return resolved_output
 
 
 class ResourceMonitor:
@@ -361,7 +447,7 @@ class QwenVideoFeasibilityRunner:
                 for case in self.manifest["cases"]:
                     clip_path = Path(temp_dir) / f"{case['id']}.mp4"
                     try:
-                        _clip_video(case, clip_path)
+                        _clip_video(case, clip_path, temp_root=Path(temp_dir))
                     except Exception as error:
                         for fps in self.manifest["fps_values"]:
                             results.append(_failed_result(case, fps, error))
@@ -410,6 +496,7 @@ class QwenVideoFeasibilityRunner:
             and gate["benchmark_matrix_complete"]
             and gate["fatal_failure_absent"]
         )
+        apply_resource_gate(gate, resource_metrics)
         report = {
             "model": {
                 "name": self.manifest["model_name"],
@@ -466,6 +553,8 @@ class QwenVideoFeasibilityRunner:
     def _run_inference(self, case, clip_path, fps):
         """Run one synchronous video inference and preserve failures as report rows."""
         started_at = time.perf_counter()
+        inference_started_at = None
+        completed_inference_seconds = None
         try:
             conversation = [
                 {
@@ -483,7 +572,12 @@ class QwenVideoFeasibilityRunner:
                 tokenize=True,
                 return_dict=True,
                 return_tensors="pt",
-            ).to(self.device)
+            )
+            # Some decoder/processor combinations can return a text-only batch without
+            # raising. Treat that as a hard decode failure instead of benchmarking a query
+            # that never contained the source video's frames.
+            _assert_non_empty_video_inputs(inputs)
+            inputs = inputs.to(self.device)
             _synchronize_device(self.device, self.torch)
             inference_started_at = time.perf_counter()
             with _inference_timeout(self.inference_timeout_seconds):
@@ -491,6 +585,10 @@ class QwenVideoFeasibilityRunner:
                     output_ids = self.model.generate(**inputs, max_new_tokens=self.max_new_tokens)
             _synchronize_device(self.device, self.torch)
             inference_seconds = time.perf_counter() - inference_started_at
+            # Freeze the model-generation measurement before text decoding and JSON
+            # validation. If either post-processing step fails, the failure row must use
+            # this same latency boundary as a successful row.
+            completed_inference_seconds = inference_seconds
             trimmed_ids = [
                 output[len(input_ids):]
                 for input_ids, output in zip(inputs.input_ids, output_ids)
@@ -521,19 +619,37 @@ class QwenVideoFeasibilityRunner:
                 case,
                 fps,
                 error,
-                inference_seconds=time.perf_counter() - started_at,
+                inference_seconds=(
+                    completed_inference_seconds
+                    if completed_inference_seconds is not None
+                    else time.perf_counter() - inference_started_at
+                    if inference_started_at is not None
+                    else 0.0
+                ),
+                total_case_seconds=time.perf_counter() - started_at,
             )
         except KeyboardInterrupt as error:
             return _failed_result(
                 case,
                 fps,
                 error,
-                inference_seconds=time.perf_counter() - started_at,
+                inference_seconds=(
+                    completed_inference_seconds
+                    if completed_inference_seconds is not None
+                    else time.perf_counter() - inference_started_at
+                    if inference_started_at is not None
+                    else 0.0
+                ),
+                total_case_seconds=time.perf_counter() - started_at,
             )
 
 
-def _clip_video(case, destination):
+def _clip_video(case, destination, *, temp_root):
     """Create an exact temporary H.264 MP4; source media remains read-only."""
+    resolved_destination = Path(destination).resolve()
+    resolved_temp_root = Path(temp_root).resolve()
+    if resolved_destination.parent != resolved_temp_root:
+        raise ValueError("Temporary clip destination escaped the benchmark directory")
     command = [
         "ffmpeg",
         "-loglevel",
@@ -556,10 +672,14 @@ def _clip_video(case, destination):
         "yuv420p",
         "-movflags",
         "+faststart",
-        str(destination),
+        str(resolved_destination),
     ]
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
-    if completed.returncode != 0 or not destination.is_file() or destination.stat().st_size == 0:
+    if (
+        completed.returncode != 0
+        or not resolved_destination.is_file()
+        or resolved_destination.stat().st_size == 0
+    ):
         raise RuntimeError(
             f"FFmpeg failed to create {case['id']}: {completed.stderr.strip() or completed.returncode}"
         )
@@ -592,6 +712,12 @@ def _synchronize_device(device, torch_module):
 
 
 def _classify_failure(error):
+    """Map exceptions to stable report categories using strict precedence.
+
+    Typed timeout, interruption, and memory errors take priority. Text matching is only
+    a fallback for third-party libraries that expose no common exception type; therefore
+    an unknown message remains ``INFERENCE_FAILED`` instead of being over-classified.
+    """
     message = str(error).lower()
     if isinstance(error, InferenceTimeoutError):
         return "VLM_TIMEOUT"
@@ -632,7 +758,14 @@ def _inference_timeout(timeout_seconds):
         signal.signal(signal.SIGALRM, previous_handler)
 
 
-def _failed_result(case, fps, error, *, inference_seconds=0.0):
+def _failed_result(
+    case,
+    fps,
+    error,
+    *,
+    inference_seconds=0.0,
+    total_case_seconds=None,
+):
     """Build one stable failure row so every planned case/FPS pair remains auditable."""
     return {
         "case_id": case["id"],
@@ -644,10 +777,26 @@ def _failed_result(case, fps, error, *, inference_seconds=0.0):
         "expected_relevance": case["expected_relevance"],
         "transient_action": case["transient_action"],
         "inference_seconds": round(inference_seconds, 3),
+        "total_case_seconds": round(
+            inference_seconds if total_case_seconds is None else total_case_seconds,
+            3,
+        ),
         "failure_type": _classify_failure(error),
         "error_class": type(error).__name__,
         "error_message": str(error),
     }
+
+
+def _assert_non_empty_video_inputs(inputs):
+    """Require at least one decoded video value before expensive model generation.
+
+    Qwen's Processor stores decoded frames in ``pixel_values_videos``. A missing or
+    empty tensor means the request is effectively text-only, so any speed or relevance
+    result would not measure full-video understanding.
+    """
+    video_values = inputs.get("pixel_values_videos")
+    if video_values is None or video_values.numel() == 0:
+        raise ValueError("Processor produced no video frames")
 
 
 def _directory_size_bytes(path):
@@ -712,6 +861,10 @@ def main(argv=None):
     output_path = Path(args.output).resolve()
     with manifest_path.open("r", encoding="utf-8") as input_file:
         manifest = validate_benchmark_manifest(json.load(input_file))
+    output_path = validate_output_path(
+        [case["source_path"] for case in manifest["cases"]],
+        output_path,
+    )
 
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("FFmpeg is required to create isolated benchmark clips")

@@ -213,6 +213,19 @@ export function SearchWorkspace({
                   <span aria-hidden="true" />
                 </span>
               </label>
+              <label className="search-diagnostics-option" aria-disabled="true">
+                <span>
+                  <strong>VLM 高精度</strong>
+                  <small>
+                    不可用：VLM（视觉语言模型）在 32 GiB 本机未通过完整视频性能门槛；
+                    当前继续使用普通检索排序。
+                  </small>
+                </span>
+                <span className="search-toggle">
+                  <input type="checkbox" aria-label="VLM 高精度" disabled />
+                  <span aria-hidden="true" />
+                </span>
+              </label>
             </div>
           ) : null}
         </div>

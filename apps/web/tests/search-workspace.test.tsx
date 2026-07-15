@@ -17,6 +17,8 @@ describe('SearchWorkspace', () => {
     expect(screen.queryByRole('dialog', { name: '搜索设置' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '搜索设置' }))
     const settings = screen.getByRole('dialog', { name: '搜索设置' })
+    expect(within(settings).getByRole('checkbox', { name: 'VLM 高精度' })).toBeDisabled()
+    expect(within(settings).getByText(/32 GiB 本机未通过完整视频性能门槛/)).toBeInTheDocument()
     fireEvent.click(within(settings).getByRole('radio', { name: /忠实翻译/ }))
     fireEvent.click(screen.getByRole('checkbox', { name: '显示检索诊断' }))
     fireEvent.change(screen.getByLabelText('搜索关键词'), {

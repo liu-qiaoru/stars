@@ -1,7 +1,10 @@
 psycopg[binary]>=3.2,<4
 python-dotenv>=1,<2
 pillow>=10,<12
-torch>=2.3,<3
+# TorchCodec 0.13's official compatibility table starts at PyTorch 2.11. Keeping
+# these lower bounds aligned prevents installation from succeeding with a decoder
+# that cannot load against the selected tensor runtime.
+torch>=2.11,<3
 torchcodec>=0.13,<0.14
 torchvision>=0.18,<1
 transformers>=4.44,<5
