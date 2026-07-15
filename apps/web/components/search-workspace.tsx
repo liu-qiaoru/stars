@@ -351,7 +351,11 @@ function SearchDiagnosticsPanel({
         </p>
       </div>
       <div className="space-y-1 text-sm">
-        <p className="font-medium">实际查询版本</p>
+        <p className="font-medium">基础查询版本</p>
+        <p className="muted">
+          仅在忠实翻译模式下，英文译文在 SigLIP 视觉通道会提升到同等权重；下方逐 Point
+          数据展示通道实际权重。
+        </p>
         <ol className="list-decimal space-y-1 pl-5">
           {diagnostics.query_variants.map((variant) => (
             <li key={`${variant.source}-${variant.text}`}>

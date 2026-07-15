@@ -28,6 +28,7 @@ import {
   type HybridReason,
 } from './search-hybrid.js'
 import { SearchQueryVectorService } from './search-query-vector.service.js'
+import { routeQueryVariantsForCollection } from './search-query-routing.js'
 import {
   collapseVideoFramesByScene,
   type SceneBound,
@@ -145,8 +146,15 @@ export class SearchService {
     const vectorGroups = await Promise.all(
       selectedCollections.map(async ({ collection }) => {
         const config = VECTOR_COLLECTIONS[collection]
-        const collectionResult = await this.searchCollection(collection, {
+        // 查询扩展先生成与通道无关的基础版本，再在这里按目标模型调整权重。
+        // 逐 Point 诊断会记录调整后的真实权重，保证 UI 能解释视觉结果为何胜出。
+        const collectionQueryVariants = routeQueryVariantsForCollection(
           queryVariants,
+          collection,
+          request.query_expansion_mode,
+        )
+        const collectionResult = await this.searchCollection(collection, {
+          queryVariants: collectionQueryVariants,
           vectorConfig: config,
           libraryIds: request.library_ids,
           limit: sourceLimit,

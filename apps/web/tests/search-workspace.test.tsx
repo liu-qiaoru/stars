@@ -107,6 +107,8 @@ describe('SearchWorkspace', () => {
     )
 
     const region = screen.getByRole('region', { name: '检索诊断' })
+    expect(within(region).getByText('基础查询版本')).toBeInTheDocument()
+    expect(within(region).getByText(/视觉通道会提升到同等权重/)).toBeInTheDocument()
     expect(within(region).getByText('一个人背靠岩石站立。')).toBeInTheDocument()
     expect(within(region).getByText('scene-caption-v2')).toBeInTheDocument()
     expect(within(region).getByText(/胜出 · 加权 0.6300/)).toBeInTheDocument()

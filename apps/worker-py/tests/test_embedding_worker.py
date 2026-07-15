@@ -5,7 +5,7 @@ from pathlib import Path
 from media_agent_worker.__main__ import build_runner
 from media_agent_worker.embedding_worker import EmbedImageHandler, EmbedTextAssetHandler, EmbedVideoFrameHandler
 from media_agent_worker.embedding_worker import extract_video_frame
-from media_agent_worker.embeddings import normalize_vector, select_torch_device
+from media_agent_worker.embeddings import SiglipEmbedder, normalize_vector, select_torch_device
 from media_agent_worker.model_service import EmbeddingModelRouter, handle_embed_text_request
 from media_agent_worker.worker import WorkerRunner
 
@@ -57,12 +57,64 @@ class FakeEmbedder:
         return [0.4, 0.3, 0.2, 0.1]
 
 
+class FakeDeviceValue:
+    def to(self, _device):
+        return self
+
+
+class FakeSiglipProcessor:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"input_ids": FakeDeviceValue()}
+
+
+class FakeSiglipModel:
+    def get_text_features(self, **_inputs):
+        return [[3.0, 4.0]]
+
+
+class FakeNoGrad:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, _error_type, _error, _traceback):
+        return False
+
+
+class FakeTorch:
+    @staticmethod
+    def no_grad():
+        return FakeNoGrad()
+
+
 class EmbeddingWorkerTest(unittest.TestCase):
     def test_normalize_vector_returns_unit_length(self):
         self.assertEqual(normalize_vector([3.0, 4.0]), [0.6, 0.8])
 
     def test_select_torch_device_prefers_requested_cpu_without_importing_torch(self):
         self.assertEqual(select_torch_device("cpu", torch_module=None), "cpu")
+
+    def test_siglip_text_embedding_uses_training_compatible_fixed_length_padding(self):
+        # 绕过重量级模型初始化，只验证查询文本传给 Hugging Face Processor 的契约。
+        # 图片向量已经离线写入 Qdrant；查询预处理变化必须由此测试防止以后意外回退。
+        embedder = SiglipEmbedder.__new__(SiglipEmbedder)
+        embedder.processor = FakeSiglipProcessor()
+        embedder.model = FakeSiglipModel()
+        embedder.torch = FakeTorch()
+        embedder.device = "cpu"
+        embedder._finalize = lambda vector: vector
+
+        vector = embedder.embed_text("a person standing by the sea")
+
+        self.assertEqual(vector, [3.0, 4.0])
+        self.assertEqual(embedder.processor.calls, [{
+            "text": ["a person standing by the sea"],
+            "padding": "max_length",
+            "return_tensors": "pt",
+        }])
 
     def test_model_service_text_request_returns_vector_and_dimension(self):
         embedder = FakeEmbedder()

@@ -79,7 +79,10 @@ class SiglipEmbedder:
         self.vector_dim = expected_vector_dim
 
     def embed_text(self, text):
-        inputs = self.processor(text=[text], padding=True, return_tensors="pt")
+        # SigLIP 的文本塔按固定序列长度训练。查询时使用相同的 max_length 填充，
+        # 避免单条短查询因动态长度预处理而偏离图片向量所对应的训练分布。
+        # 这里只改变同步查询向量；已经写入 Qdrant 的图片/视频帧向量无需重建。
+        inputs = self.processor(text=[text], padding="max_length", return_tensors="pt")
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
         with self.torch.no_grad():
             if hasattr(self.model, "get_text_features"):
