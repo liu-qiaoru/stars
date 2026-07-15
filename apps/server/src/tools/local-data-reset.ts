@@ -1,4 +1,4 @@
-import { lstat } from 'node:fs/promises'
+import { lstat, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 
 type Env = Record<string, string | undefined>
@@ -14,7 +14,10 @@ export interface LocalResetTarget {
 export interface LocalResetInventory {
   sourceMediaPaths: string[]
   qdrantCollections: string[]
+  protectedQdrantCollections: string[]
 }
+
+export type LocalResetMode = 'dry-run' | 'confirmed-reset'
 
 export interface LocalResetOperations {
   resetPostgres: () => Promise<unknown>
@@ -27,6 +30,7 @@ const SYSTEM_DATABASES = new Set(['postgres', 'template0', 'template1'])
 
 /**
  * Parses and validates the reset target before the script opens a database connection.
+ * A URL (Uniform Resource Locator，统一资源定位符) identifies one network endpoint.
  * An explicit local environment plus loopback-only service URLs prevents a copied
  * production configuration from turning this developer convenience into a remote wipe.
  */
@@ -137,16 +141,73 @@ export async function assertNoSymlinkDeletionTarget(
 }
 
 /**
+ * Resolves existing filesystem paths before comparing them. This protects a source
+ * library whose configured path is a symbolic link into the derived cache; lexical
+ * comparison alone cannot see that relationship.
+ */
+export async function validateRealPathSeparation(input: {
+  derivedCachePath: string
+  sourceMediaPaths: string[]
+}): Promise<void> {
+  let realCachePath: string
+  try {
+    realCachePath = await realpath(input.derivedCachePath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return
+    }
+    throw error
+  }
+
+  for (const sourcePath of input.sourceMediaPaths) {
+    let realSourcePath: string
+    try {
+      realSourcePath = await realpath(sourcePath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        continue
+      }
+      throw error
+    }
+
+    if (
+      realSourcePath === realCachePath ||
+      isPathInside(realSourcePath, realCachePath) ||
+      isPathInside(realCachePath, realSourcePath)
+    ) {
+      throw new Error(`Derived cache real path overlaps source media: ${sourcePath}`)
+    }
+  }
+}
+
+/**
+ * Separates this project's known vector collections from unrelated collections on a
+ * shared local Qdrant endpoint. Unknown collections are reported but never deleted.
+ */
+export function partitionProjectCollections(
+  discoveredCollections: string[],
+  projectCollections: readonly string[],
+): Pick<LocalResetInventory, 'qdrantCollections' | 'protectedQdrantCollections'> {
+  const projectCollectionSet = new Set(projectCollections)
+  return {
+    qdrantCollections: discoveredCollections.filter((name) => projectCollectionSet.has(name)),
+    protectedQdrantCollections: discoveredCollections.filter(
+      (name) => !projectCollectionSet.has(name),
+    ),
+  }
+}
+
+/**
  * Executes the already-validated deletion plan. A dry-run is the default and performs
  * no writes. PostgreSQL is cleared first, then Qdrant collections, then derived files,
  * matching the rebuild plan's explicit cross-system order.
  */
 export async function executeLocalReset(
   inventory: LocalResetInventory,
-  confirmed: boolean,
+  mode: LocalResetMode,
   operations: LocalResetOperations,
 ): Promise<void> {
-  if (!confirmed) {
+  if (mode === 'dry-run') {
     return
   }
 
@@ -170,7 +231,8 @@ function parseRequiredUrl(value: string | undefined, name: string): URL {
 }
 
 function assertLoopback(url: URL, name: string): void {
-  if (!LOOPBACK_HOSTS.has(url.hostname)) {
+  const hostname = url.hostname.replace(/^\[(.*)\]$/u, '$1')
+  if (!LOOPBACK_HOSTS.has(hostname)) {
     throw new Error(`${name} must point to a loopback host (localhost, 127.0.0.1, or ::1)`)
   }
 }

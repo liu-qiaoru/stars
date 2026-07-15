@@ -1,16 +1,23 @@
+// 这是本地索引重置的 CLI（Command-Line Interface，命令行接口）入口。
+// 它先只读核对 PostgreSQL（结构化业务数据库）、Qdrant（向量数据库）、业务进程和磁盘路径，
+// 只有显式确认后才按固定顺序删除派生数据；注册的源素材目录始终只读。
 import { execFile } from 'node:child_process'
 import { rm } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { loadEnvFile } from 'node:process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+import { vectorCollectionNames } from '@local-media-agent/shared/constants'
 import { Pool } from 'pg'
 import {
   assertNoSymlinkDeletionTarget,
   buildLocalResetTarget,
   executeLocalReset,
+  partitionProjectCollections,
   validateDerivedCachePath,
+  validateRealPathSeparation,
   type LocalResetInventory,
+  type LocalResetMode,
 } from './local-data-reset.js'
 import { findFirstExistingPath } from '../env-file.js'
 
@@ -23,7 +30,9 @@ if (envFilePath) {
   loadEnvFile(envFilePath)
 }
 
-const confirmed = process.argv.slice(2).includes('--confirm-reset-local-data')
+const resetMode: LocalResetMode = process.argv.slice(2).includes('--confirm-reset-local-data')
+  ? 'confirmed-reset'
+  : 'dry-run'
 
 try {
   const target = buildLocalResetTarget(process.env, projectRoot)
@@ -39,8 +48,11 @@ try {
     // Source paths are read before any destructive action so filesystem guards can prove
     // that the derived-cache deletion cannot reach a registered media library.
     const sourceMediaPaths = await readSourceMediaPaths(pool)
-    const qdrantCollections = await readQdrantCollections(target.qdrantUrl)
-    const inventory: LocalResetInventory = { sourceMediaPaths, qdrantCollections }
+    const discoveredQdrantCollections = await readQdrantCollections(target.qdrantUrl)
+    const inventory: LocalResetInventory = {
+      sourceMediaPaths,
+      ...partitionProjectCollections(discoveredQdrantCollections, vectorCollectionNames),
+    }
 
     await assertNoSymlinkDeletionTarget(target.appHomePath, target.derivedCachePath)
     validateDerivedCachePath({
@@ -48,9 +60,13 @@ try {
       derivedCachePath: target.derivedCachePath,
       sourceMediaPaths,
     })
-    printResetPlan(target, inventory, confirmed)
+    await validateRealPathSeparation({
+      derivedCachePath: target.derivedCachePath,
+      sourceMediaPaths,
+    })
+    printResetPlan(target, inventory, resetMode)
 
-    await executeLocalReset(inventory, confirmed, {
+    await executeLocalReset(inventory, resetMode, {
       resetPostgres: async () => {
         // Dropping and recreating public in one PostgreSQL transaction removes app tables,
         // evaluation data, jobs, and Drizzle migration history as a single database change.
@@ -85,7 +101,7 @@ try {
     })
 
     console.log(
-      confirmed
+      resetMode === 'confirmed-reset'
         ? '\nLocal index data reset completed. Source media was not modified.'
         : '\nDry-run only. No PostgreSQL, Qdrant, or filesystem data was modified.',
     )
@@ -97,6 +113,10 @@ try {
   process.exitCode = 1
 }
 
+/**
+ * Reads active library roots from PostgreSQL without changing rows. The returned paths
+ * become a protection list before any cross-system deletion may start.
+ */
 async function readSourceMediaPaths(pool: Pool): Promise<string[]> {
   const result = await pool.query<{ root_path: string }>(
     'SELECT root_path FROM libraries WHERE deleted_at IS NULL ORDER BY root_path',
@@ -104,6 +124,11 @@ async function readSourceMediaPaths(pool: Pool): Promise<string[]> {
   return result.rows.map((row) => row.root_path)
 }
 
+/**
+ * Reads Qdrant's collection inventory over HTTP (Hypertext Transfer Protocol，超文本传输协议).
+ * Unexpected status codes or response shapes fail the preflight instead of producing a
+ * partial deletion list.
+ */
 async function readQdrantCollections(qdrantUrl: string): Promise<string[]> {
   const response = await fetch(new URL('/collections', qdrantUrl))
   if (!response.ok) {
@@ -123,6 +148,12 @@ async function readQdrantCollections(qdrantUrl: string): Promise<string[]> {
     .sort()
 }
 
+/**
+ * Detects Web, Server, model, VLM (Vision-Language Model，视觉语言模型), and Python
+ * Worker processes that could still write index state. Port probes wait at most
+ * 250 milliseconds each; an unverifiable process list fails closed so deletion cannot
+ * race an active writer.
+ */
 async function findRunningBusinessServices(env: NodeJS.ProcessEnv): Promise<string[]> {
   const endpoints = [
     ['Web', Number(env.WEB_PORT ?? 3000)],
@@ -156,6 +187,10 @@ async function findRunningBusinessServices(env: NodeJS.ProcessEnv): Promise<stri
   return detected
 }
 
+/**
+ * Performs a read-only TCP (Transmission Control Protocol，传输控制协议) connection probe.
+ * It returns true on connection and false after an error or 250-millisecond timeout.
+ */
 function isPortOpen(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = createConnection({ host: '127.0.0.1', port })
@@ -170,15 +205,19 @@ function isPortOpen(port: number): Promise<boolean> {
   })
 }
 
+/** Prints the complete deletion and protection inventory without exposing credentials. */
 function printResetPlan(
   target: ReturnType<typeof buildLocalResetTarget>,
   inventory: LocalResetInventory,
-  confirmed: boolean,
+  resetMode: LocalResetMode,
 ): void {
-  console.log(confirmed ? 'CONFIRMED LOCAL RESET' : 'LOCAL RESET DRY-RUN')
+  console.log(resetMode === 'confirmed-reset' ? 'CONFIRMED LOCAL RESET' : 'LOCAL RESET DRY-RUN')
   console.log(`PostgreSQL database to clear: ${target.databaseLabel}`)
   console.log(`Qdrant endpoint: ${target.qdrantUrl}`)
   console.log(`Qdrant collections to delete: ${inventory.qdrantCollections.join(', ') || '(none)'}`)
+  console.log(
+    `Unrelated Qdrant collections protected from deletion: ${inventory.protectedQdrantCollections.join(', ') || '(none)'}`,
+  )
   console.log(`Derived cache to delete: ${target.derivedCachePath}`)
   console.log('Source media paths that will NEVER be written or deleted:')
   for (const sourcePath of inventory.sourceMediaPaths) {
