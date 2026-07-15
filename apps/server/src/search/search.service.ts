@@ -59,6 +59,12 @@ const captionSearchCollection = {
   mediaTypes: readonly (typeof mediaTypes)[number][]
 }
 
+const videoSceneIdentityCollections = new Set<VectorCollectionName>([
+  'video_frame_vectors',
+  'video_segment_vectors',
+  'caption_text_vectors',
+])
+
 // SearchService 负责把多个召回来源统一成一个响应：
 // Qdrant 做视觉向量召回，PostgreSQL FTS 做 transcript/OCR 文本召回，最终在内存里合并 rerank。
 const searchRequestSchema = z.object({
@@ -351,12 +357,25 @@ export class SearchService {
     const metadataByPointId = new Map(rows.map((row) => [row.pointId, row]))
 
     // Qdrant 决定 collection 内排序；PostgreSQL 只补事实字段，所以这里按 Qdrant 返回顺序重组。
+    let rejectedMissingSceneId = 0
     const hydrated = points.flatMap((point) => {
       if (typeof point.id !== 'string') {
         return []
       }
       const row = metadataByPointId.get(point.id)
       if (!row) {
+        return []
+      }
+      const sceneId = this.sceneId(row.metadataJson)
+      // 当前视频检索的业务单元是稳定场景。Qdrant 中可能仍残留迁移前的无 scene_id Point，
+      // 回 PostgreSQL 后必须拒绝它们，避免旧帧/旧片段绕过场景合并规则进入 groups 和 results。
+      // 图片 Caption 也使用 caption_text_vectors，因此额外限定 mediaType=video，不能误伤图片。
+      if (
+        row.mediaType === 'video' &&
+        videoSceneIdentityCollections.has(collection) &&
+        sceneId === null
+      ) {
+        rejectedMissingSceneId += 1
         return []
       }
       const frameTimeSeconds = row.frameTimeSeconds === null ? null : Number(row.frameTimeSeconds)
@@ -372,7 +391,7 @@ export class SearchService {
           path: row.path,
           start_time_seconds: startTimeSeconds,
           end_time_seconds: endTimeSeconds,
-          scene_id: this.sceneId(row.metadataJson),
+          scene_id: sceneId,
           score: point.score,
           reason: this.vectorReason(collection),
           _point_id: point.id,
@@ -381,6 +400,13 @@ export class SearchService {
         },
       ]
     })
+    if (rejectedMissingSceneId > 0) {
+      // 只记录 collection 和数量，不记录本地路径、Caption 或查询文本。该日志用于区分
+      // “Qdrant 没有召回”与“召回了迁移前旧 Point，但被场景完整性规则拒绝”。
+      this.logger.warn(
+        `search_scene_identity_rejected collection=${collection} count=${rejectedMissingSceneId}`,
+      )
+    }
     return hydrated.map((item, index) => {
       const { _point_id, _caption_text, _prompt_version, ...result } = item
       if (!diagnostics.includeDiagnostics) {

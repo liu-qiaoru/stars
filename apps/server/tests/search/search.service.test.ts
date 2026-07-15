@@ -116,6 +116,7 @@ describe('search service', () => {
       assetType: 'video_segment',
       startTimeSeconds: '30',
       endTimeSeconds: '60',
+      metadataJson: { scene_id: 'scene-0001', stale: false },
     })
     const imagePointId = '11111111-1111-4111-8111-111111111111'
     const videoPointId = '22222222-2222-4222-8222-222222222222'
@@ -191,7 +192,7 @@ describe('search service', () => {
           path: '/Volumes/Media/clip.mp4',
           start_time_seconds: 30,
           end_time_seconds: 60,
-          scene_id: null,
+          scene_id: 'scene-0001',
           score: 0.82,
           score_kind: 'hybrid_score',
           primary_reason: 'vector_match',
@@ -228,7 +229,7 @@ describe('search service', () => {
               path: '/Volumes/Media/clip.mp4',
               start_time_seconds: 30,
               end_time_seconds: 60,
-              scene_id: null,
+              scene_id: 'scene-0001',
               score: 0.82,
               reason: 'vector_match',
             },
@@ -326,6 +327,7 @@ describe('search service', () => {
       assetType: 'video_segment',
       startTimeSeconds: '10',
       endTimeSeconds: '20',
+      metadataJson: { scene_id: 'scene-0001', stale: false },
     })
     const pointId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
     await createVectorRef(db, {
@@ -433,6 +435,7 @@ describe('search service', () => {
       assetType: 'video_segment',
       startTimeSeconds: '0',
       endTimeSeconds: '10',
+      metadataJson: { scene_id: 'scene-0001', stale: false },
     })
     const pointId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     await createVectorRef(db, {
@@ -516,7 +519,8 @@ describe('search service', () => {
     fetchMock.mockRestore()
   })
 
-  test('searches video frame vectors and merges frame hits with nearby segments', async () => {
+  test('filters legacy video vector hits without stable scene identity', async () => {
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
     const library = await createLibrary(db, { name: 'Video', rootPath: '/video' })
     const file = await createMediaFile(db, {
       libraryId: library.id,
@@ -587,18 +591,19 @@ describe('search service', () => {
       'video_frame_vectors',
       'text_search',
     ])
-    expect(result.results).toEqual([
-      expect.objectContaining({
-        asset_id: frameAsset.id,
-        merged_asset_ids: [segmentAsset.id, frameAsset.id],
-        start_time_seconds: 10,
-        end_time_seconds: 20,
-        source_scores: {
-          video_segment_vectors: 0.58,
-          video_frame_vectors: 0.81,
-        },
-      }),
-    ])
+    expect(result.results).toEqual([])
+    expect(
+      result.groups.find((group) => group.collection === 'video_segment_vectors')?.results,
+    ).toEqual([])
+    expect(
+      result.groups.find((group) => group.collection === 'video_frame_vectors')?.results,
+    ).toEqual([])
+    expect(warnSpy).toHaveBeenCalledWith(
+      'search_scene_identity_rejected collection=video_segment_vectors count=1',
+    )
+    expect(warnSpy).toHaveBeenCalledWith(
+      'search_scene_identity_rejected collection=video_frame_vectors count=1',
+    )
   })
 
   test('collapses distant frame hits from the same scene with MaxSim and PostgreSQL bounds', async () => {

@@ -122,6 +122,7 @@ describe("agent API", () => {
       assetType: "video_segment",
       startTimeSeconds: "30",
       endTimeSeconds: "60",
+      metadataJson: { scene_id: "scene-0001", stale: false },
     });
     const pointId = "22222222-2222-4222-8222-222222222222";
     await createVectorRef(db, {

@@ -250,6 +250,275 @@ describe("hybrid search ranking", () => {
     });
   });
 
+  test("merges Caption and visual evidence only inside the same video scene", () => {
+    const results = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "scene-1-caption",
+          scene_id: "scene-0001",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["caption_match"],
+          source_scores: { caption_text_vectors: 0.8 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "scene-1-frame",
+          scene_id: "scene-0001",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["vector_match"],
+          source_scores: { video_frame_vectors: 0.2 },
+        },
+        // 这个场景与前一个场景首尾相接。旧逻辑会在 scene-0001 已经混入视觉信号后
+        // 继续链式合并，最终产生跨越多个场景的超长结果。
+        {
+          ...baseCandidate,
+          asset_id: "scene-2-caption",
+          scene_id: "scene-0002",
+          start_time_seconds: 10,
+          end_time_seconds: 20,
+          reasons: ["caption_match"],
+          source_scores: { caption_text_vectors: 0.75 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scene_id: "scene-0001",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          merged_asset_ids: ["scene-1-caption", "scene-1-frame"],
+        }),
+        expect.objectContaining({
+          scene_id: "scene-0002",
+          start_time_seconds: 10,
+          end_time_seconds: 20,
+          merged_asset_ids: ["scene-2-caption"],
+        }),
+      ]),
+    );
+  });
+
+  test("does not let a weak visual signal lower a strong Caption score", () => {
+    const results = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "strong-caption",
+          scene_id: "scene-0046",
+          start_time_seconds: 468.5,
+          end_time_seconds: 473.466667,
+          reasons: ["caption_match"],
+          source_scores: { caption_text_vectors: 0.80291784 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "weak-frame",
+          scene_id: "scene-0046",
+          start_time_seconds: 468.5,
+          end_time_seconds: 473.466667,
+          reasons: ["vector_match"],
+          source_scores: { video_frame_vectors: 0.14920491 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "caption-rank-6",
+          scene_id: "scene-0001",
+          start_time_seconds: 0,
+          end_time_seconds: 9.533333,
+          reasons: ["caption_match"],
+          source_scores: { caption_text_vectors: 0.7354491 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    // 回归真实查询：旧公式会得到 0.556061375，使 Caption 第一名跌到最终第三名。
+    expect(results.map((result) => result.asset_id)).toEqual([
+      "strong-caption",
+      "caption-rank-6",
+    ]);
+    expect(results[0].score).toBeCloseTo(0.80291784, 8);
+    expect(results[0].primary_reason).toBe("caption_match");
+  });
+
+  test("still rewards two strong independent signals", () => {
+    const [result] = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "strong-caption",
+          scene_id: "scene-0001",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["caption_match"],
+          source_scores: { caption_text_vectors: 0.8 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "strong-frame",
+          scene_id: "scene-0001",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["vector_match"],
+          source_scores: { video_frame_vectors: 0.7 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(result.score).toBeCloseTo(0.83, 8);
+  });
+
+  test("does not merge scene-less windows that only touch at the boundary", () => {
+    const results = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "window-a",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["vector_match"],
+          source_scores: { video_segment_vectors: 0.8 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "window-b",
+          start_time_seconds: 10,
+          end_time_seconds: 20,
+          reasons: ["vector_match"],
+          source_scores: { video_segment_vectors: 0.7 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(results).toHaveLength(2);
+    expect(results.map((result) => result.asset_id)).toEqual(["window-a", "window-b"]);
+  });
+
+  test("does not treat a scene-less time point as a positive-duration overlap", () => {
+    const results = buildHybridResults(
+      [
+        {
+          ...baseCandidate,
+          asset_id: "window",
+          start_time_seconds: 0,
+          end_time_seconds: 10,
+          reasons: ["vector_match"],
+          source_scores: { video_segment_vectors: 0.8 },
+        },
+        {
+          ...baseCandidate,
+          asset_id: "time-point",
+          start_time_seconds: 5,
+          end_time_seconds: 5,
+          reasons: ["ocr_match"],
+          source_scores: { text_search: 0.7 },
+        },
+      ],
+      { limit: 10, offset: 0 },
+    );
+
+    expect(results).toHaveLength(2);
+  });
+
+  test("fails on a reversed video time range", () => {
+    expect(() =>
+      buildHybridResults(
+        [
+          {
+            ...baseCandidate,
+            asset_id: "invalid-window",
+            start_time_seconds: 10,
+            end_time_seconds: 5,
+            reasons: ["vector_match"],
+            source_scores: { video_segment_vectors: 0.8 },
+          },
+        ],
+        { limit: 10, offset: 0 },
+      ),
+    ).toThrow("Invalid video time range for asset_id=invalid-window");
+  });
+
+  test("validates reversed ranges before weak-source filtering", () => {
+    expect(() =>
+      buildHybridResults(
+        [
+          {
+            ...baseCandidate,
+            asset_id: "weak-invalid-window",
+            start_time_seconds: 10,
+            end_time_seconds: 5,
+            reasons: ["vector_match"],
+            source_scores: { video_segment_vectors: 0.02 },
+          },
+        ],
+        { limit: 10, offset: 0 },
+      ),
+    ).toThrow("Invalid video time range for asset_id=weak-invalid-window");
+  });
+
+  test("validates reversed ranges before same-asset merging can hide them", () => {
+    expect(() =>
+      buildHybridResults(
+        [
+          {
+            ...baseCandidate,
+            asset_id: "shared-asset",
+            start_time_seconds: 10,
+            end_time_seconds: 5,
+            reasons: ["vector_match"],
+            source_scores: { video_segment_vectors: 0.8 },
+          },
+          {
+            ...baseCandidate,
+            asset_id: "shared-asset",
+            start_time_seconds: 0,
+            end_time_seconds: 20,
+            reasons: ["caption_match"],
+            source_scores: { caption_text_vectors: 0.7 },
+          },
+        ],
+        { limit: 10, offset: 0 },
+      ),
+    ).toThrow("Invalid video time range for asset_id=shared-asset");
+  });
+
+  test("fails when the same scene carries conflicting canonical boundaries", () => {
+    expect(() =>
+      buildHybridResults(
+        [
+          {
+            ...baseCandidate,
+            asset_id: "scene-caption",
+            scene_id: "scene-0001",
+            start_time_seconds: 0,
+            end_time_seconds: 10,
+            reasons: ["caption_match"],
+            source_scores: { caption_text_vectors: 0.8 },
+          },
+          {
+            ...baseCandidate,
+            asset_id: "scene-frame",
+            scene_id: "scene-0001",
+            start_time_seconds: 0,
+            end_time_seconds: 12,
+            reasons: ["vector_match"],
+            source_scores: { video_frame_vectors: 0.7 },
+          },
+        ],
+        { limit: 10, offset: 0 },
+      ),
+    ).toThrow("Conflicting boundaries for file_id=file-1 scene_id=scene-0001");
+  });
+
   test("applies offset and limit after adjacent windows are merged", () => {
     const results = buildHybridResults(
       [
@@ -264,7 +533,8 @@ describe("hybrid search ranking", () => {
         {
           ...baseCandidate,
           asset_id: "merged-b",
-          start_time_seconds: 11,
+          // 无 scene_id 的历史窗口必须有正数时长的真实重叠，首尾相接也不能合并。
+          start_time_seconds: 9,
           end_time_seconds: 20,
           reasons: ["vector_match"],
           source_scores: { video_segment_vectors: 0.85 },
