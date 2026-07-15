@@ -9,27 +9,37 @@ import type {
 } from './query-expansion.service.js'
 
 /**
- * 根据目标向量模型调整查询版本权重。
+ * 按目标向量模型选择真正参与检索的查询版本。
  *
- * SigLIP 视觉集合使用英文为主的图文模型。`translate` 已经过独立语义等价校验，
- * 因此英文译文可以与中文原文同权竞争；否则 0.9 的基础权重会抵消译文较小但真实的
- * 原始余弦优势。`expand` 中的版本可能包含视觉改写或推断，仍保留 Provider 给出的降权，
- * Caption 等文本集合也保持原权重，避免这条视觉规则改变其他召回通道。
+ * `translate` 模式已经验证中英文语义等价，因此可以把语言适配交给各通道：
+ * SigLIP 是英文图文模型，只接收英文译文；Caption 由 VLM（视觉语言模型）按中文 Prompt
+ * 生成，只接收中文原文。这样错误候选不会再因为“不适合该模型的语言版本”获得高分。
+ * `original` 和 `expand` 是独立的消融/实验模式，必须保持原行为，便于继续做可比评测。
  */
 export function routeQueryVariantsForCollection(
   variants: QueryVariant[],
   collection: VectorCollectionName,
   mode: QueryExpansionMode,
 ): QueryVariant[] {
+  if (mode !== 'translate') {
+    return variants
+  }
+
+  if (collection === 'caption_text_vectors') {
+    return variants.filter((variant) => variant.source === 'original')
+  }
+
   const config = VECTOR_COLLECTIONS[collection]
   const isSiglipVisualCollection =
     config.modelName === SIGLIP_MODEL_NAME &&
     (config.modality === 'image' || config.modality === 'video')
-  if (mode !== 'translate' || !isSiglipVisualCollection) {
+  if (!isSiglipVisualCollection) {
     return variants
   }
 
-  return variants.map((variant) =>
-    variant.source === 'deepseek' ? { ...variant, weight: 1 } : variant,
-  )
+  // translate 模式最多只有一个经过忠实性校验的 Provider 版本；恢复为 1.0 后，
+  // 视觉分数只反映 SigLIP 的原始余弦相似度，不再被基础扩展权重二次压低。
+  return variants
+    .filter((variant) => variant.source === 'deepseek')
+    .map((variant) => ({ ...variant, weight: 1 }))
 }

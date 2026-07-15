@@ -48,6 +48,13 @@ export class QueryExpansionService {
       return [original]
     }
     if (this.settings.queryExpansionProvider === 'none') {
+      if (mode === 'translate') {
+        // 忠实翻译模式的 SigLIP 通道只允许英文译文。若这里返回中文原文，后续路由只能
+        // 静默跳过整个视觉通道，因此直接暴露配置错误，避免把“未检索”误判成“召回差”。
+        throw new BadGatewayException(
+          'Faithful translation requires QUERY_EXPANSION_PROVIDER=deepseek',
+        )
+      }
       this.logger.log(`query_expansion_mode=${mode} provider=none query_expansion=disabled`)
       return [original]
     }

@@ -11,25 +11,25 @@ const variants = [
 ]
 
 describe('collection-specific query routing', () => {
-  test('gives a faithful translation equal weight only in SigLIP visual collections', () => {
+  test('uses only the faithful English translation in SigLIP visual collections', () => {
     expect(routeQueryVariantsForCollection(variants, 'video_frame_vectors', 'translate')).toEqual([
-      variants[0],
       { ...variants[1], weight: 1 },
     ])
     expect(routeQueryVariantsForCollection(variants, 'image_vectors', 'translate')).toEqual([
-      variants[0],
       { ...variants[1], weight: 1 },
     ])
     expect(routeQueryVariantsForCollection(variants, 'video_segment_vectors', 'translate')).toEqual([
-      variants[0],
       { ...variants[1], weight: 1 },
     ])
   })
 
-  test('keeps Caption translation weights and full expansion weights unchanged', () => {
+  test('uses only the original Chinese query in the Caption collection', () => {
     expect(routeQueryVariantsForCollection(variants, 'caption_text_vectors', 'translate')).toEqual(
-      variants,
+      [variants[0]],
     )
+  })
+
+  test('keeps full expansion and original-only experiments unchanged', () => {
     expect(routeQueryVariantsForCollection(variants, 'video_frame_vectors', 'expand')).toEqual(
       variants,
     )

@@ -146,8 +146,8 @@ export class SearchService {
     const vectorGroups = await Promise.all(
       selectedCollections.map(async ({ collection }) => {
         const config = VECTOR_COLLECTIONS[collection]
-        // 查询扩展先生成与通道无关的基础版本，再在这里按目标模型调整权重。
-        // 逐 Point 诊断会记录调整后的真实权重，保证 UI 能解释视觉结果为何胜出。
+        // 查询扩展先生成与通道无关的基础版本，再按目标模型选择实际查询语言。
+        // 逐 Point 诊断只记录该通道真正执行的版本，避免 UI 把未参与检索的版本标成候选。
         const collectionQueryVariants = routeQueryVariantsForCollection(
           queryVariants,
           collection,

@@ -353,8 +353,8 @@ function SearchDiagnosticsPanel({
       <div className="space-y-1 text-sm">
         <p className="font-medium">基础查询版本</p>
         <p className="muted">
-          仅在忠实翻译模式下，英文译文在 SigLIP 视觉通道会提升到同等权重；下方逐 Point
-          数据展示通道实际权重。
+          忠实翻译模式会按模型分流：SigLIP 视觉通道只使用英文译文，Caption
+          通道只使用中文原文；下方逐 Point 数据展示各通道实际执行的版本。
         </p>
         <ol className="list-decimal space-y-1 pl-5">
           {diagnostics.query_variants.map((variant) => (

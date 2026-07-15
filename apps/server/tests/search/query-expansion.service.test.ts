@@ -78,6 +78,20 @@ describe('QueryExpansionService modes', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2)
   })
 
+  test('translate mode fails instead of silently skipping visual retrieval without a provider', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const service = new QueryExpansionService({
+      ...baseSettings,
+      queryExpansionProvider: 'none',
+      deepseekApiKey: undefined,
+    })
+
+    await expect(service.expand('一个人靠着石头', 'translate')).rejects.toThrow(
+      'Faithful translation requires QUERY_EXPANSION_PROVIDER=deepseek',
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   test('translate mode fails when the independent semantic check rejects drift', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
