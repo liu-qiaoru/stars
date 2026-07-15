@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "db:migrate": "drizzle-kit migrate",
+    "reset:local": "tsx src/tools/reset-local-data.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm test"

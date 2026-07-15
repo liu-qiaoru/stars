@@ -14,6 +14,7 @@
     "infra:redis": "docker compose --env-file .env -f infra/docker-compose.yml --profile realtime up -d redis",
     "infra:config": "docker compose --env-file .env -f infra/docker-compose.yml config",
     "db:migrate": "pnpm --dir apps/server db:migrate",
+    "reset:local": "pnpm --filter @local-media-agent/server reset:local",
     "py:venv": "python3.12 -m venv .venv",
     "py:install": ".venv/bin/python -m pip install -r apps/worker-py/requirements.txt",
     "py:test": "PYTHONPATH=apps/worker-py .venv/bin/python -m unittest discover apps/worker-py/tests",
