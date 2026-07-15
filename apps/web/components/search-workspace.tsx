@@ -26,6 +26,9 @@ interface SearchWorkspaceProps {
 }
 
 const mediaFilters = ['image', 'video', 'audio'] as const
+// 诊断缩略帧会从本地视频流按时间点加载。限制为五个不同场景，既能观察首屏召回，
+// 又避免一次诊断请求让浏览器并发读取过多大视频文件。
+const MAX_VISUAL_DIAGNOSTIC_FRAMES = 5
 const queryExpansionOptions = [
   {
     value: 'original',
@@ -311,7 +314,9 @@ export function SearchWorkspace({
             ))
           : null}
       </div>
-      {results.query_diagnostics ? <SearchDiagnosticsPanel results={results} /> : null}
+      {results.query_diagnostics ? (
+        <SearchDiagnosticsPanel results={results} onPreview={setPreviewItem} />
+      ) : null}
       {previewItem ? (
         <MediaPreviewDialog item={previewItem} onClose={() => setPreviewItem(null)} />
       ) : null}
@@ -319,11 +324,18 @@ export function SearchWorkspace({
   )
 }
 
-function SearchDiagnosticsPanel({ results }: { results: SearchResponse }) {
+function SearchDiagnosticsPanel({
+  results,
+  onPreview,
+}: {
+  results: SearchResponse
+  onPreview: (item: SearchResultItem) => void
+}) {
   const diagnostics = results.query_diagnostics
   if (!diagnostics) {
     return null
   }
+  const visualFrameDiagnostics = bestVisualFramesByScene(results)
   const sourceResults = results.groups.flatMap((group) =>
     group.results.flatMap((item) =>
       item.diagnostics ? [{ collection: group.collection, item }] : [],
@@ -348,6 +360,33 @@ function SearchDiagnosticsPanel({ results }: { results: SearchResponse }) {
           ))}
         </ol>
       </div>
+      {visualFrameDiagnostics.frames.length || visualFrameDiagnostics.incompleteCount ? (
+        <section aria-label="视觉通道最佳命中帧" className="diagnostic-visual-section">
+          <div className="diagnostic-visual-heading">
+            <div>
+              <h3>视觉通道最佳命中帧</h3>
+              <p>每个场景只保留分数最高的帧，排名仍是原始帧通道名次。</p>
+            </div>
+            <span>{visualFrameDiagnostics.frames.length} 个场景</span>
+          </div>
+          {visualFrameDiagnostics.incompleteCount ? (
+            <p className="diagnostic-frame-warning" role="status">
+              {visualFrameDiagnostics.incompleteCount} 条视觉帧缺少 scene_id、准确时间或诊断信息，已跳过。
+            </p>
+          ) : null}
+          {visualFrameDiagnostics.frames.length ? (
+            <div className="diagnostic-frame-grid">
+              {visualFrameDiagnostics.frames.map((item) => (
+                <VisualDiagnosticFrame
+                  key={`${item.file_id}-${item.scene_id}`}
+                  item={item}
+                  onPreview={onPreview}
+                />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       <div className="space-y-2">
         {sourceResults.map(({ collection, item }) => (
           <details
@@ -379,6 +418,105 @@ function SearchDiagnosticsPanel({ results }: { results: SearchResponse }) {
       </div>
     </section>
   )
+}
+
+/**
+ * 从原始视频帧通道中选出每个场景的最高分帧。
+ * Server 已按加权后的通道分数降序返回 group，因此第一次遇到某个 scene_id 时，
+ * 该帧就是当前召回深度内的 MaxSim（最大相似度）代表帧，无需在 Web 端重新算分。
+ */
+function bestVisualFramesByScene(results: SearchResponse): {
+  frames: SearchResultItem[]
+  incompleteCount: number
+} {
+  const visualResults =
+    results.groups.find((group) => group.collection === 'video_frame_vectors')?.results ?? []
+  const seenScenes = new Set<string>()
+  const selected: SearchResultItem[] = []
+  let incompleteCount = 0
+
+  for (const item of visualResults) {
+    if (item.media_type !== 'video') {
+      continue
+    }
+    // 缺少 scene_id、诊断名次或准确帧时间时，无法证明这是哪个场景的 MaxSim 代表帧。
+    // 这些数据会在页面上计数提示，避免静默把 asset_id 冒充场景并掩盖索引完整性问题。
+    if (!item.scene_id || item.start_time_seconds === null || !item.diagnostics) {
+      incompleteCount += 1
+      continue
+    }
+    const sceneKey = `${item.file_id}:${item.scene_id}`
+    if (seenScenes.has(sceneKey)) {
+      continue
+    }
+    seenScenes.add(sceneKey)
+    if (selected.length < MAX_VISUAL_DIAGNOSTIC_FRAMES) {
+      selected.push(item)
+    }
+  }
+
+  return { frames: selected, incompleteCount }
+}
+
+function VisualDiagnosticFrame({
+  item,
+  onPreview,
+}: {
+  item: SearchResultItem
+  onPreview: (item: SearchResultItem) => void
+}) {
+  const frameTime = item.start_time_seconds ?? 0
+  const sceneLabel = item.scene_id ?? item.asset_id
+  const winningVariant = item.diagnostics?.query_variant_hits.find((hit) => hit.winning)
+  const mediaUrl = createApiClient().mediaContentUrl(item.file_id, {
+    startTimeSeconds: frameTime,
+  })
+
+  return (
+    <button
+      type="button"
+      className="diagnostic-frame-card"
+      aria-label={`预览视觉命中帧 ${sceneLabel}`}
+      // 原始 frame result 的 start/end 相同。弹窗只传开始时间，避免生成零时长媒体片段。
+      onClick={() => onPreview({ ...item, end_time_seconds: null })}
+    >
+      <video
+        aria-label={`${sceneLabel} 在 ${frameTime.toFixed(2)} 秒的命中帧`}
+        className="diagnostic-frame-media"
+        muted
+        playsInline
+        preload="metadata"
+        src={mediaUrl}
+      />
+      <span className="diagnostic-frame-body">
+        <span className="diagnostic-frame-meta">
+          <strong>帧排名 #{item.diagnostics?.source_rank}</strong>
+          <span>{formatFrameTimestamp(frameTime)}</span>
+        </span>
+        <span className="diagnostic-frame-scene" title={sceneLabel}>
+          {sceneLabel}
+        </span>
+        <span className="diagnostic-frame-score">
+          <span>原始余弦</span>
+          <strong>{winningVariant ? winningVariant.raw_score.toFixed(4) : '—'}</strong>
+        </span>
+        <span className="diagnostic-frame-weighted">查询加权分 {item.score.toFixed(4)}</span>
+        <span className="diagnostic-frame-query" title={winningVariant?.text}>
+          {winningVariant?.text ?? '没有胜出的查询版本'}
+        </span>
+      </span>
+    </button>
+  )
+}
+
+function formatFrameTimestamp(totalSeconds: number) {
+  const safeSeconds = Math.max(0, totalSeconds)
+  const hours = Math.floor(safeSeconds / 3600)
+  const minutes = Math.floor((safeSeconds % 3600) / 60)
+  const seconds = (safeSeconds % 60).toFixed(2).padStart(5, '0')
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
+    : `${String(minutes).padStart(2, '0')}:${seconds}`
 }
 
 function formatQueryExpansionMode(mode: QueryExpansionMode) {
