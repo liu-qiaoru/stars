@@ -178,7 +178,29 @@ text_search           PostgreSQL text_chunk 全文检索
 
 **实际结果：** 该门槛已在 2026-07-15 判定失败。5 秒、1 FPS 的首个样本在 60 秒仍未完成，并产生约 11.80 GiB 的峰值交换内存增长。GiB（gibibyte，二进制吉字节）等于 `1024³` 字节，是内存和交换空间的容量单位；这里增长越大表示机器承受的内存压力越高。完整 MP4 + Transformers 7B 路线到此终止，历史报告保留为失败证据。
 
-## 实施阶段 2：重建 Schema 并删除 OCR/Segment 能力
+## 提交与验证规则
+
+- 阶段 2.1 的纯函数提取和旧评测运行层删除可以作为一个独立提交，因为它不改变 Drizzle Schema 或当前媒体索引路径；旧评测表定义暂时保留但不得再有运行代码引用。
+- 阶段 2.2～2.4 必须作为同一个原子提交：新 Schema、Worker 场景/抽帧/Caption 输入和 Search 场景回表必须一起落地。禁止出现“类型已删除，但视频索引或搜索等后续阶段再修”的提交。
+- 阶段 2 和阶段 6 修改 Drizzle Schema 后都必须生成并提交开发迁移，让 PGlite 测试能从仓库内 SQL 建出对应表。阶段 7 再删除这些过渡迁移并压缩为唯一最终 `0000`；“最终基线稍后生成”不能成为前面提交缺少迁移的理由。
+- 每个推荐提交边界都必须通过 `corepack pnpm check` 和全部 Python Worker 单元测试；不能以“后续阶段会修复”为理由接受类型检查、Server、Web 或 Worker 测试失败。
+- 需要真实模型、PostgreSQL、Qdrant 或视频文件的验收可以在对应阶段另行运行，但 fake/单元测试通过不能掩盖真实集成失败，真实服务暂时停止也不能成为跳过代码检查的理由。
+
+## 实施阶段 2：原子切换到新场景基础设施
+
+**目的：** 先用阶段 2.1 安全保存与旧媒体 Schema 无关的纯函数；随后在一个可独立编译和测试的提交边界内完成阶段 2.2～2.4，同时删除旧 `video_segment`/OCR 能力并接通最终替代路径。不得先删除旧类型，再把 Worker、Search 或 Caption 留到后续提交修复。
+
+### 2.1 先保存公共排序与指标纯函数，再删除旧评测运行层
+
+执行顺序不可颠倒：
+
+1. 先把 `rankByRrf` 搬到与旧评测业务无关的 Server 公共排序模块，例如 `apps/server/src/ranking/rrf.ts`。
+2. 把 Precision、nDCG、Hit、MRR 等不访问数据库的指标函数搬到 `apps/server/src/ranking/metrics.ts`，保留对应纯函数测试。
+3. 确认新模块不导入 Evaluation Controller、Service、数据库表、NestJS 或 Qdrant；生产搜索和后续新评测必须调用同一个 `rankByRrf`，不得复制第二份公式。
+4. 完成提取后，删除旧 `EvaluationModule`、Controller、Service、旧 Server 测试、Web `/evaluation` 页面、导航入口、API Client 类型和前端测试。旧实现强依赖 `video_segment` 与 `metadata_json.scene_id`，不得为了让它暂时编译而打补丁。为让本提交不修改 Drizzle Schema，6 张旧评测表定义仅保留到阶段 2.2，期间没有 Controller、Service 或页面可以读写它们。
+5. 阶段 6 在最终 Search API 稳定后重建评测运行层；阶段 8 只创建评测集、标注和运行记录，不再负责重新设计评测代码。
+
+### 2.2 重建 Schema 并删除 OCR/Segment 能力
 
 **主要文件：**
 
@@ -198,26 +220,20 @@ text_search           PostgreSQL text_chunk 全文检索
 - 从共享 Job Schema 删除 `run_ocr`，重新生成 JSON Schema；Python 不维护第二份手写结构。
 - 删除 PaddleOCR 初始化、任务处理器、依赖、补偿接口、全文召回、展示标签和测试。
 - 删除 `video_segment_vectors` Collection、配置、查询和 readiness 兼容逻辑。
+- 删除阶段 2.1 已停用的 6 张旧评测表定义；与其他旧 Schema 一起由本阶段开发迁移删除，不能继续留到阶段 6 再覆盖。
 - 为外键、唯一键、任务 claim 和常用过滤条件建立索引。
+- 根据本阶段 Schema 生成开发迁移。测试数据库会依次执行仓库内全部 `apps/server/drizzle/*.sql`，因此迁移必须实际创建 `video_scenes`、新外键、generation 和结构化任务字段，并删除已经从 Schema 移除的旧表/列；只修改 `schema.ts` 不算完成。
 
-验证：
-
-```bash
-corepack pnpm --filter @local-media-agent/shared check
-corepack pnpm --filter @local-media-agent/server exec vitest run tests/database tests/jobs
-PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
-```
-
-## 实施阶段 3：场景检测、固定抽帧和破坏性重索引
-
-### 3.1 场景检测
+### 2.3 同步重写 Worker 场景、抽帧和 Caption 输入
 
 - PySceneDetect 输出原始镜头边界；检测成功但无切点时创建一个覆盖原视频的原始场景。
 - 小于 0.5 秒的噪声场景按固定、可测试的相邻合并规则处理；大于等于 0.5 秒的场景必须保留。
-- 超过 30 秒的场景拆成不重叠连续窗口。
-- 校验所有边界有限、递增、不越过视频时长且没有非法重叠。
+- 超过 30 秒的场景拆成不重叠连续窗口；所有边界必须有限、递增、不越过视频时长且没有非法重叠。
 - 场景数量超过安全上限时失败，不生成固定窗口 fallback。
-- 每个最终窗口写入 `video_scenes`，再创建引用其 UUID 的 `video_frame` Asset。
+- 每个最终窗口先写入 `video_scenes`，再创建引用其 UUID 的 `video_frame` Asset。
+- 实现 `sample_frame_times(start_seconds, end_seconds, interval_seconds=2.5)`：把场景划分为最长 2.5 秒区间并取每段中点；30 秒场景得到 12 帧，0.5 秒场景至少得到一帧。
+- 在同一提交删除 `KEYFRAME_DENSITY`、密度补帧、旧场景 fallback、`video_segment` Asset、`video_segment_vectors` 引用和 OCR 任务创建；不得保留“下一阶段再删除”的旧分支。
+- 同一提交完整迁移视频 Caption，不只修改 Job 输入：`generate_caption` 使用正式 `scene_id`；Worker 通过 `video_scenes.id` 获取按时间排序的场景帧，最多稳定选择 6 帧并调用现有 VLM；成功后写入引用同一 `scene_id` 的 Caption Asset 和 `caption_text_vectors` pending Vector Ref；失败写结构化任务错误；成功、失败和超时都清理临时图片。不得继续接受 `video_segment` 来源，也不得创建尚无处理器可执行的 Caption Job。图片 Caption 继续使用单图输入。
 
 结构化错误至少包括：
 
@@ -229,28 +245,30 @@ SCENE_COUNT_EXCEEDED
 VIDEO_DURATION_MISSING
 ```
 
-任务失败时：
+场景任务失败时，`jobs.status: running -> failed`，同时令 `media_files.index_status -> failed`；Jobs 页面必须显示短错误、技术详情和修复后重试入口。确定性错误不自动重试。
 
-- `jobs.status: running -> failed`。
-- `media_files.index_status -> failed`。
-- Jobs 页面显示短错误、展开后的技术详情和“修复后重试”。
-- 确定性错误不做无意义自动重试。
+### 2.4 同步把搜索切到正式 `video_scenes`
 
-### 3.2 固定 2.5 秒抽帧
+- 删除 `video_segment_vectors` 查询时，同步删除依赖 `video_segment` Asset 的 `listVideoSceneBounds` 实现和内存 `collapseVideoFramesByScene` 旧路径；不得留下扁平视频帧检索作为过渡产品行为。
+- `video_frame_vectors` 直接使用 Qdrant grouped search：`group_by=scene_id`、`group_size=1`。所有帧参与相似度比较，每个场景只返回最高分代表帧。
+- PostgreSQL 回表从 `video_scenes` 读取正式 UUID、边界和 `index_generation`，并拒绝不存在场景、过期 generation、stale Asset 和模型版本不匹配的 Point。
+- 阶段 2 先保持现有混合排序接口；阶段 5 再增加 `search_scope`、`ranking_mode` 和公共 RRF。这样删除旧场景能力时搜索仍可编译和按场景返回结果，但不会提前混入阶段 5 的排序重构。
 
-实现纯函数：
+验证：
 
-```python
-sample_frame_times(start_seconds, end_seconds, interval_seconds=2.5) -> list[float]
+```bash
+corepack pnpm --filter @local-media-agent/server exec drizzle-kit generate
+corepack pnpm --filter @local-media-agent/shared check
+corepack pnpm --filter @local-media-agent/server check
+corepack pnpm --filter @local-media-agent/web check
+PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 ```
 
-- 将场景划分为最长 2.5 秒区间并取每段中点。
-- 最后不足 2.5 秒的区间也取中点。
-- 帧必须严格处于场景边界内。
-- 30 秒场景得到 12 帧；0.5 秒场景至少得到中点帧。
-- 删除所有密度补帧、分布式关键帧和 `KEYFRAME_DENSITY` 代码。
+## 实施阶段 3：破坏性重索引与一致性恢复
 
-### 3.3 独立 `purge_video_index` 任务
+**目的：** 阶段 2 已经能从空库创建最终场景与帧；本阶段增加对未来配置变化、失败重试和单文件重建的安全支持，不再重写场景检测或抽帧算法。
+
+### 3.1 独立 `purge_video_index` 任务
 
 ```text
 用户请求重索引
@@ -268,18 +286,15 @@ sample_frame_times(start_seconds, end_seconds, interval_seconds=2.5) -> list[flo
 - 重复执行使用稳定 ID、状态条件和事务保证幂等。
 - Qdrant 已删除但 PostgreSQL 清理失败时，任务必须失败并可安全重试，不能标记成功。
 
-测试覆盖正常检测、无切点、0.5 秒边界、长场景拆窗、所有结构化失败、抽帧边界、并发阻止、清理重试和级联删除。
+测试覆盖并发阻止、Qdrant 已删除但 PostgreSQL 清理失败后的安全重试、级联删除、generation 递增和成功后重新创建 `index_media`。阶段 2 已覆盖正常检测、无切点、0.5 秒边界、长场景拆窗、结构化失败和抽帧边界。
 
-## 实施阶段 4：Caption 与 SigLIP2 索引
+## 实施阶段 4：Caption 文本向量与 SigLIP2 模型一致性
 
-### 4.1 场景 Caption
+### 4.1 Caption 文本向量验证
 
-- `generate_caption` 输入使用 `scene_id`，不再把场景伪装成来源 Asset。
-- Worker 通过 `video_scenes.id` 查询按时间排序的场景帧。
-- 帧数不超过 6 时全部使用；超过时均匀选择 6 帧，包含首尾，结果稳定。
-- Caption Asset 引用相同 `scene_id`，记录总帧数、选中帧数、帧时间、模型和 Prompt 版本。
-- 临时图片在成功、失败和超时路径中全部清理。
-- Caption 成功后创建 `caption_text_vectors` pending Vector Ref。
+- 阶段 2 已经端到端完成单图和场景 Caption 生成、Asset 写入、pending Vector Ref、临时文件清理与失败状态；本阶段不得再次改写 Caption 任务协议或场景身份。
+- 验证 Caption 文本嵌入模型、mean pooling、向量维度、`caption_text_vectors` Collection 和查询文本塔一致，并让阶段 2 产生的 pending Vector Ref 能完成 `pending -> indexed`。
+- 使用 fake VLM/嵌入测试验证失败恢复，再在阶段 7 的真实服务重建中验证 Ollama、Caption 文本模型和 Qdrant 写入；任何一层失败都在对应 Job 中可见。
 
 ### 4.2 SigLIP2
 
@@ -296,16 +311,11 @@ model_version siglip2-base-patch16-224
 - SigLIP2 查询只接收经过语义等价校验的英文忠实译文；Caption 召回只接收中文原查询。
 - 真实模型 smoke test 必须验证 MPS/CPU 选择、首次和后续耗时、内存以及中英文消融，fake 测试不能代替真实加载。
 
-## 实施阶段 5：按场景召回、搜索范围与 RRF
+## 实施阶段 5：搜索范围与 RRF
 
-### 5.1 Qdrant 场景分组
+阶段 2 已经完成 Qdrant `group_by=scene_id` 场景召回和 PostgreSQL 正式场景回表。本阶段只在稳定的场景候选之上增加请求路由和最终排序，不再修改底层场景身份。
 
-- `video_frame_vectors` 查询使用 Qdrant grouped search：`group_by=scene_id`、`group_size=1`。
-- 所有索引帧都参与相似度比较，返回帧是该场景 MaxSim（最大相似度）代表帧。
-- 召回深度按不同场景数计算，例如内部取 Top-50/Top-100 场景，再生成最终 Top-20。
-- PostgreSQL 回表必须拒绝过期 generation、不存在场景、stale Asset 和模型版本不匹配 Point。
-
-### 5.2 搜索范围
+### 5.1 搜索范围
 
 请求增加：
 
@@ -323,9 +333,9 @@ model_version siglip2-base-patch16-224
 - `all` 才融合 visual、Caption 和 transcript。
 - 多帧 VLM 复核仅允许 `visual + rrf`；非法组合由 Server 明确拒绝，Web 同时禁用选项并解释。
 
-### 5.3 公共 RRF
+### 5.2 公共 RRF
 
-- 从评测模块提取纯函数，生产搜索与评测共用同一实现。
+- 使用阶段 2 已提取到公共排序模块的 `rankByRrf`；生产搜索和阶段 6 重建的评测运行层共用同一实现。
 - 每个通道贡献为 `1 / (60 + source_rank)`；RRF score 只表示顺序，不是概率。
 - 图片候选身份使用图片 Asset ID；视频候选身份使用场景 UUID。
 - Caption 通过正式 `scene_id` 与视觉场景合并。
@@ -339,17 +349,31 @@ model_version siglip2-base-patch16-224
 
 **目的：** 先把不依赖多帧 VLM 的检索产品闭环做完整，让用户能够独立使用和验证 SigLIP2、Caption、语音全文检索与 RRF。
 
+### 6.1 核心搜索界面
+
 - 保持现有紧凑控件风格，检索前显示 `搜索范围：视觉 | 语音 | 全部` 和 `排序方式：当前混合排序 | RRF（默认）`。
 - Server（服务端）同步返回 RRF 结果；Web 不创建或等待任何多帧任务。
 - 诊断模式显示各召回通道名次、RRF 贡献、视频场景边界和 SigLIP2 最佳命中帧时间。普通响应和日志仍不得泄露本地 Caption、绝对路径或向量。
 - Jobs 页面显示场景检测、抽帧、Embedding 和 Caption 的结构化错误、详情与修复后重试入口。
 - 可以保留一个禁用的“多帧高精度复核”说明入口，但在阶段 9A 通过前不得创建 `verify_multi_frame_search`，也不得暗示该能力已经可用。
 
+### 6.2 基于最终搜索契约重建评测运行层
+
+阶段 2 已删除强依赖旧 `video_segment` 的评测实现。本阶段必须在阶段 7 生成数据库基线之前完成新评测框架，不能推迟到阶段 8：
+
+- 重新定义 6 张评测表，使指定目标使用正式 `video_scenes.id` UUID；候选快照保存场景 UUID、文件 generation、来源证据、RRF 前后名次和盲标状态，不读取 `metadata_json.scene_id`。
+- 根据新评测 Schema 生成第二个开发迁移并提交，确保 PGlite 能在当前提交直接创建 6 张新表；阶段 7 会把阶段 2 和本阶段的开发迁移一起压缩进最终 `0000`。
+- 重建 Evaluation Controller、Service、NestJS Module、API Client、Web `/evaluation` 页面和测试；前端目标选择器从 `video_scenes` 读取场景，不把 `video_segment` 当 Asset。
+- 评测调用阶段 5 的正式 Search API 和阶段 2 的公共 `rankByRrf`/指标函数；不得维护只供评测使用的第二套召回、场景折叠或 RRF 公式。
+- 评测运行状态、失败条件和快照不可变规则保持显式；必需召回通道不可用、Point 无法回表或 generation 不一致时整次运行失败，不生成部分指标。
+- 本阶段只重建评测能力并使用最小 Fixture 验证；不导入旧评测数据，也不创建阶段 8 的正式基线样本。
+- Server 与 Web 全量检查必须通过，确保导航、API 类型、数据库表和最终搜索响应一致。
+
 ## 实施阶段 7：生成基线、重建本地服务和素材索引
 
 ### 7.1 新基线迁移
 
-- 删除旧迁移文件后，根据最终 Drizzle Schema 生成新的 `0000`。
+- 删除旧迁移和阶段 2/6 的开发迁移后，根据最终 Drizzle Schema 生成新的唯一 `0000`。压缩前后必须运行同一组 Schema/Repository 测试，证明最终基线没有遗漏开发迁移提供的表、列、约束或索引。
 - 基线不得包含 OCR、`video_segment`、旧 Collection、多帧任务或兼容列。
 - 人工核对外键、级联行为、唯一约束、generation、任务 claim 和评测表。
 - 在全新 PGlite 和临时 PostgreSQL 中运行基线迁移测试。
@@ -385,9 +409,9 @@ corepack pnpm --filter @local-media-agent/server db:migrate
 
 ## 实施阶段 8：建立核心检索的干净评测基线
 
-**目的：** 在引入多帧复核前先冻结一份可复现的 RRF 基线，使后续能明确区分“核心检索本身的效果”和“多帧复核额外带来的变化”。
+**目的：** 使用阶段 6 已重建的评测运行层创建真实评测数据并冻结一份可复现的 RRF 基线，使后续能明确区分“核心检索本身的效果”和“多帧复核额外带来的变化”。本阶段不再修改评测表、API、RRF 或指标公式。
 
-- 删除旧评测后从零创建评测集，不导出混乱标注。
+- 从零创建正式评测集，不导入或转换已在阶段 0/2 删除的旧评测数据。
 - 自然发现查询和指定目标查询分开，不混用指标；至少覆盖人物动作、空间关系、环境主体组合、0.5～3 秒短动作、图片、视频、有语音和无语音视频。
 - 在相同素材、查询和召回快照上比较：
 
@@ -626,12 +650,12 @@ PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 
 1. `chore: stop services and remove legacy local index data`
 2. `spike: validate qwen2.5-vl video inference`
-3. `refactor: rebuild scene schema and remove ocr segments`
-4. `feat: add strict scene detection and uniform frame sampling`
+3. `refactor: extract shared ranking metrics and retire legacy evaluation runtime`
+4. `refactor: atomically replace ocr segments with scene pipeline and grouped retrieval`
 5. `feat: add destructive per-video reindex jobs`
-6. `feat: rebuild caption and siglip2 indexing`
-7. `feat: add grouped scene retrieval and production rrf`
-8. `feat: expose search scope and core retrieval feedback`
+6. `feat: complete scene caption and siglip2 indexing`
+7. `feat: add search scopes and production rrf`
+8. `feat: expose core search and rebuild evaluation workflow`
 9. `chore: create clean baseline and rebuild local media index`
 10. `test: freeze clean rrf retrieval baseline`
 11. `spike: validate ollama multi-frame verification on real top-k`
@@ -645,11 +669,13 @@ PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 
 - 旧 PostgreSQL、Qdrant 和评测数据在实施前已安全删除，源媒体未被修改。
 - OCR、`video_segment` 和兼容逻辑从运行代码、依赖、Schema、UI、测试和当前文档中删除。
+- 公共 `rankByRrf` 和指标纯函数在删除旧评测运行层前已经提取；生产搜索与新评测没有复制第二套 RRF 或指标公式。
 - PostgreSQL 用独立 `video_scenes` 表和 UUID 外键表达场景事实。
 - 场景检测无自动 fallback，错误结构化展示并可修复后重试。
 - 大于等于 0.5 秒的短场景被保留，长场景最长 30 秒，每 2.5 秒稳定抽帧。
 - SigLIP2 图片/帧/查询模型一致，Qdrant 按场景返回最佳命中帧。
 - visual/spoken/all 路由与 RRF 生产排序通过测试和真实检索验证。
+- 新评测运行层在生成 `0000` 数据库基线前已经基于正式 `video_scenes.id` 和最终 Search API 重建；阶段 8 只创建正式评测数据和运行记录。
 - 阶段 8 的核心检索基线已冻结并可独立复跑；它不依赖多帧 VLM，也不会因阶段 9 失败而改判为未完成。
 - 历史 Transformers Qwen2.5-VL-7B 完整视频失败结论保留；运行代码、配置和当前文档不再把完整 MP4 校验描述为可用能力。
 - 阶段 9A 必须使用阶段 8 的真实 Top-K 快照并保存可复跑报告，明确记录抽帧覆盖、严格 JSON、重复稳定性、相关等级、30 秒候选耗时、Top-3 总耗时、内存和 swap；无论通过还是失败都不能隐藏结果。
@@ -661,3 +687,4 @@ PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 - 若多帧分支启用，全部候选成功才重排，失败、取消、后端不可用、模型版本不一致和索引变化均明确可见；任何部分结果都不会改变 RRF。
 - 若多帧分支启用，页面默认开启“多帧高精度复核”，显示每条视频被提升或降低的名次与帧时间证据，并明确说明它不等于完整视频或音频理解。
 - 新基线迁移、空库重建、重新索引、新评测和全仓库检查全部通过。
+- 每个推荐提交边界都保持 TypeScript/Server/Web/Python 检查通过，没有把已知损坏状态留给后续阶段修复。
