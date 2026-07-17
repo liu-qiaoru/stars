@@ -4,6 +4,60 @@ import unittest
 from media_agent_worker.repository import PostgresMediaRepository
 
 
+class PurgeFakeConnection:
+    """模拟 purge_file_index 的事务：返回锁定的 index_status/generation 与各删除的 rowcount。"""
+
+    def __init__(self, *, index_status, index_generation, rowcounts):
+        self.index_status = index_status
+        self.index_generation = index_generation
+        self.rowcounts = rowcounts
+        self.executed = []
+        self.rolled_back = False
+        self.committed = False
+
+    def cursor(self):
+        return PurgeFakeCursor(self)
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+
+class PurgeFakeCursor:
+    def __init__(self, connection):
+        self.connection = connection
+        self.fetchone_result = None
+        self.rowcount = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, query, params=None):
+        self.connection.executed.append((query, params))
+        # SELECT ... FOR UPDATE 返回锁定的状态与 generation。
+        if "SELECT index_status" in query:
+            self.fetchone_result = (self.connection.index_status, self.connection.index_generation)
+            return
+        # DELETE 按目标表返回模拟的删除行数。
+        if "DELETE FROM vector_refs" in query:
+            self.rowcount = self.connection.rowcounts.get("vector_refs", 0)
+        elif "DELETE FROM media_assets" in query:
+            self.rowcount = self.connection.rowcounts.get("assets", 0)
+        elif "DELETE FROM video_scenes" in query:
+            self.rowcount = self.connection.rowcounts.get("scenes", 0)
+        else:
+            self.rowcount = 0
+
+    def fetchone(self):
+        return self.fetchone_result
+
+
+
 class FakeConnection:
     def __init__(self, row):
         self.row = row
@@ -106,6 +160,47 @@ class PostgresMediaRepositoryTest(unittest.TestCase):
         self.assertEqual(row[9], {"transcript": True, "frame_index": 1})
         self.assertEqual(row[10], "scene-uuid-2")
         self.assertEqual(connection.commits, 1)
+
+    def test_purge_file_index_increments_generation_when_purge_queued(self):
+        connection = PurgeFakeConnection(
+            index_status="purge_queued",
+            index_generation=1,
+            rowcounts={"vector_refs": 3, "assets": 5, "scenes": 1},
+        )
+        repository = PostgresMediaRepository(connection)
+
+        result = repository.purge_file_index("file-1")
+
+        self.assertEqual(result, {
+            "vector_refs_deleted": 3,
+            "assets_deleted": 5,
+            "scenes_deleted": 1,
+            "index_generation": 2,
+        })
+        executed_sql = [query for query, _params in connection.executed]
+        # 一个事务内删除 vector_refs / 视频帧与 Caption 资产 / video_scenes。
+        self.assertTrue(any("DELETE FROM vector_refs" in q for q in executed_sql))
+        self.assertTrue(any("DELETE FROM media_assets" in q and "video_frame" in q for q in executed_sql))
+        self.assertTrue(any("DELETE FROM video_scenes" in q for q in executed_sql))
+        # 仅在 purge_queued 时递增 generation 并翻回 pending。
+        self.assertTrue(
+            any("index_generation = index_generation + 1" in q and "index_status = 'pending'" in q for q in executed_sql)
+        )
+
+    def test_purge_file_index_does_not_increment_generation_on_retry_after_status_flip(self):
+        # 重试路径：上一轮已把状态翻回 pending，generation 不应再次递增。
+        connection = PurgeFakeConnection(
+            index_status="pending",
+            index_generation=2,
+            rowcounts={"vector_refs": 0, "assets": 0, "scenes": 0},
+        )
+        repository = PostgresMediaRepository(connection)
+
+        result = repository.purge_file_index("file-1")
+
+        self.assertEqual(result["index_generation"], 2)
+        executed_sql = [query for query, _params in connection.executed]
+        self.assertFalse(any("index_generation = index_generation + 1" in q for q in executed_sql))
 
 
 if __name__ == "__main__":

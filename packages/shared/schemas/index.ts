@@ -141,10 +141,28 @@ export const exportClipOutputSchema = z.object({
   duration_seconds: positiveNumberSchema,
 })
 
+// purge_video_index：单文件破坏性重索引。Server 在确认无活跃媒体任务后创建该任务；
+// Worker 先删 Qdrant points，再在 PostgreSQL 事务中删除场景/帧/Caption/Vector Ref 等派生数据，
+// 条件递增 index_generation（仅在文件仍为 purge_queued 时），然后把文件状态翻回 pending。
+// 失败必须可安全重试：Qdrant/PG 清理都幂等，generation 递增受状态条件保护不重复。
+export const purgeVideoIndexInputSchema = z.object({
+  file_id: uuidSchema,
+})
+
+export const purgeVideoIndexOutputSchema = z.object({
+  points_deleted: nonNegativeIntegerSchema,
+  vector_refs_deleted: nonNegativeIntegerSchema,
+  assets_deleted: nonNegativeIntegerSchema,
+  scenes_deleted: nonNegativeIntegerSchema,
+  index_generation: nonNegativeIntegerSchema,
+  reindex_job_created: z.boolean(),
+})
+
 export const jobInputSchemas = {
   scan_library: scanLibraryInputSchema,
   probe_media: probeMediaInputSchema,
   index_media: indexMediaInputSchema,
+  purge_video_index: purgeVideoIndexInputSchema,
   transcribe_audio: transcribeAudioInputSchema,
   embed_image: embedImageInputSchema,
   embed_video_frame: embedVideoFrameInputSchema,
@@ -158,6 +176,7 @@ export const jobOutputSchemas = {
   scan_library: scanLibraryOutputSchema,
   probe_media: probeMediaOutputSchema,
   index_media: indexMediaOutputSchema,
+  purge_video_index: purgeVideoIndexOutputSchema,
   transcribe_audio: transcribeAudioOutputSchema,
   embed_image: embeddingOutputSchema,
   embed_video_frame: embeddingOutputSchema,

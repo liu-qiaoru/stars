@@ -45,6 +45,25 @@ describe('job schemas', () => {
     expect(jobOutputSchemas).not.toHaveProperty('run_ocr')
   })
 
+  it('defines a purge_video_index job for destructive per-file reindex', () => {
+    // 阶段 3：purge_video_index 接收 file_id，输出清理计数与递增后的 index_generation。
+    const input = jobInputSchemas.purge_video_index.parse({
+      file_id: '11111111-1111-4111-8111-111111111111',
+    })
+    expect(input.file_id).toBe('11111111-1111-4111-8111-111111111111')
+
+    const output = jobOutputSchemas.purge_video_index.parse({
+      points_deleted: 12,
+      vector_refs_deleted: 12,
+      assets_deleted: 13,
+      scenes_deleted: 1,
+      index_generation: 2,
+      reindex_job_created: true,
+    })
+    expect(output.index_generation).toBe(2)
+    expect(output.reindex_job_created).toBe(true)
+  })
+
   it('embed_video_frame only targets video_frame_vectors after segment vector removal', () => {
     const input = jobInputSchemas.embed_video_frame.parse({
       asset_id: '11111111-1111-4111-8111-111111111111',

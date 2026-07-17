@@ -563,6 +563,62 @@ class PostgresMediaRepository:
             )
         self.connection.commit()
 
+    def list_vector_refs_for_file(self, file_id):
+        # 阶段 3 purge 用：列出某文件全部 vector_ref 的 (collection, point_id)，供 Worker 从 Qdrant 删除。
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT collection_name, point_id FROM vector_refs WHERE file_id = %s",
+                (file_id,),
+            )
+            rows = cursor.fetchall()
+        return [{"collection_name": row[0], "point_id": str(row[1])} for row in rows]
+
+    def purge_file_index(self, file_id):
+        """单文件破坏性清理索引派生数据，并在状态为 purge_queued 时递增 index_generation。
+
+        全程一个事务：先锁住 media_files 行，删除 vector_refs / 视频帧与 Caption 资产 / video_scenes，
+        再按 index_status 条件递增 generation 并翻回 pending。删除语句本身幂等；generation 递增只在
+        purge_queued 时发生，因此 purge 重试（上一轮已成功翻回 pending）不会重复递增。
+        Qdrant 已删但本事务失败时会抛异常并回滚，调用方据此让任务失败并可安全重试。
+        """
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT index_status, index_generation FROM media_files WHERE id = %s FOR UPDATE",
+                (file_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                self.connection.rollback()
+                raise ValueError(f"Media file not found: {file_id}")
+            index_status, index_generation = row
+
+            cursor.execute("DELETE FROM vector_refs WHERE file_id = %s", (file_id,))
+            vector_refs_deleted = cursor.rowcount
+            cursor.execute(
+                "DELETE FROM media_assets WHERE file_id = %s AND asset_type IN ('image', 'video_frame', 'caption')",
+                (file_id,),
+            )
+            assets_deleted = cursor.rowcount
+            cursor.execute("DELETE FROM video_scenes WHERE file_id = %s", (file_id,))
+            scenes_deleted = cursor.rowcount
+
+            if index_status == "purge_queued":
+                cursor.execute(
+                    "UPDATE media_files SET index_generation = index_generation + 1, index_status = 'pending', updated_at = now() WHERE id = %s",
+                    (file_id,),
+                )
+                index_generation = (index_generation or 0) + 1
+            else:
+                # 重试路径：上一轮已翻回 pending，不重复递增 generation。
+                cursor.execute("UPDATE media_files SET updated_at = now() WHERE id = %s", (file_id,))
+        self.connection.commit()
+        return {
+            "vector_refs_deleted": vector_refs_deleted,
+            "assets_deleted": assets_deleted,
+            "scenes_deleted": scenes_deleted,
+            "index_generation": int(index_generation or 0),
+        }
+
 
 def connect_from_env():
     # Runtime worker entrypoint: tests usually inject fake repositories instead of opening a real PostgreSQL connection.

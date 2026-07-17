@@ -1,3 +1,4 @@
+import { ConflictException, NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -10,7 +11,7 @@ import {
   createMediaFile,
   createVectorRef,
 } from '../../src/database/repositories.js'
-import { jobs, vectorRefs } from '../../src/database/schema.js'
+import { jobs, mediaFiles, vectorRefs } from '../../src/database/schema.js'
 import { JobsController } from '../../src/jobs/jobs.controller.js'
 import { JobsModule } from '../../src/jobs/jobs.module.js'
 import { JobsService } from '../../src/jobs/jobs.service.js'
@@ -553,5 +554,129 @@ describe('jobs service', () => {
     const listed = await service.listJobs({ limit: 10, offset: 0 })
 
     expect(listed.items.filter((job) => job.job_type === 'embed_image')).toHaveLength(2)
+  })
+
+  test('requestVideoReindex 对不存在的文件返回 404', async () => {
+    await expect(
+      service.requestVideoReindex({ fileId: '11111111-1111-4111-8111-111111111111' }),
+    ).rejects.toBeInstanceOf(NotFoundException)
+  })
+
+  test('requestVideoReindex 存在活跃媒体任务时返回 409 VIDEO_INDEX_JOBS_ACTIVE', async () => {
+    const library = await createLibrary(db, { name: 'Active', rootPath: '/active' })
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/active/clip.mp4',
+      relativePath: 'clip.mp4',
+      mediaType: 'video',
+      sizeBytes: 20,
+      mtimeMs: 1,
+    })
+    const activeJob = await createJob(db, {
+      jobType: 'index_media',
+      fileId: file.id,
+      inputJson: { file_id: file.id, index_profile: 'balanced' },
+    })
+
+    await expect(service.requestVideoReindex({ fileId: file.id })).rejects.toMatchObject({
+      constructor: ConflictException,
+    })
+    // 验证冲突载荷携带错误码和任务 ID（getActiveMediaJobsForFile 经 file_id 列命中）。
+    await expect(service.requestVideoReindex({ fileId: file.id })).rejects.toMatchObject({
+      response: { error_code: 'VIDEO_INDEX_JOBS_ACTIVE', job_ids: [activeJob.id] },
+    })
+    // 冲突时不创建 purge 任务。
+    const listed = await service.listJobs()
+    expect(listed.items.filter((job) => job.job_type === 'purge_video_index')).toHaveLength(0)
+    void activeJob
+  })
+
+  test('requestVideoReindex 无活跃任务时创建 purge_video_index 并把文件设为 purge_queued', async () => {
+    const library = await createLibrary(db, { name: 'Purge', rootPath: '/purge' })
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/purge/clip.mp4',
+      relativePath: 'clip.mp4',
+      mediaType: 'video',
+      sizeBytes: 20,
+      mtimeMs: 1,
+    })
+
+    const result = await service.requestVideoReindex({ fileId: file.id })
+
+    expect(result.status).toBe('purge_queued')
+    const listed = await service.listJobs()
+    const purgeJobs = listed.items.filter((job) => job.job_type === 'purge_video_index')
+    expect(purgeJobs).toHaveLength(1)
+    expect(purgeJobs[0]?.job_type).toBe('purge_video_index')
+    // 文件被标记为 purge_queued。
+    const [updated] = await db.select().from(mediaFiles).where(eq(mediaFiles.id, file.id))
+    expect(updated?.indexStatus).toBe('purge_queued')
+  })
+
+  test('协调器 queuePendingEmbeddingJobs 跳过 purge_queued 文件的 pending refs', async () => {
+    const library = await createLibrary(db, { name: 'Skip', rootPath: '/skip' })
+    const purgeQueuedFile = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/skip/a.mp4',
+      relativePath: 'a.mp4',
+      mediaType: 'video',
+      sizeBytes: 20,
+      mtimeMs: 1,
+    })
+    const normalFile = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/skip/b.mp4',
+      relativePath: 'b.mp4',
+      mediaType: 'video',
+      sizeBytes: 20,
+      mtimeMs: 2,
+    })
+    const assetA = await createMediaAsset(db, {
+      fileId: purgeQueuedFile.id,
+      assetType: 'video_frame',
+      frameTimeSeconds: '1',
+      contentHash: 'a-hash',
+    })
+    const assetB = await createMediaAsset(db, {
+      fileId: normalFile.id,
+      assetType: 'video_frame',
+      frameTimeSeconds: '1',
+      contentHash: 'b-hash',
+    })
+    for (const [asset, file, pointId, hash] of [
+      [assetA, purgeQueuedFile, '66666666-6666-4666-8666-666666666666', 'a-hash'],
+      [assetB, normalFile, '77777777-7777-4777-8777-777777777777', 'b-hash'],
+    ] as const) {
+      await createVectorRef(db, {
+        assetId: asset.id,
+        fileId: file.id,
+        libraryId: library.id,
+        collectionName: 'video_frame_vectors',
+        pointId,
+        modelName: 'google/siglip-base-patch16-224',
+        modelVersion: 'siglip-base-patch16-224',
+        vectorKind: 'frame_embedding',
+        vectorDim: 768,
+        distance: 'Cosine',
+        contentHash: hash,
+        indexProfile: 'balanced',
+      })
+    }
+    // 把 a.mp4 标为 purge_queued：其 pending ref 应被协调器排除。
+    await db
+      .update(mediaFiles)
+      .set({ indexStatus: 'purge_queued', updatedAt: new Date() })
+      .where(eq(mediaFiles.id, purgeQueuedFile.id))
+
+    await expect(service.queuePendingEmbeddingJobs(10)).resolves.toEqual({
+      scanned: 1,
+      created: 1,
+      skipped: 0,
+    })
+    const listed = await service.listJobs()
+    // 只为 b.mp4 创建 embed 任务，跳过 purge_queued 的 a.mp4。
+    expect(listed.items.filter((job) => job.job_type === 'embed_video_frame')).toHaveLength(1)
+    expect(listed.items[0]?.input).toMatchObject({ asset_id: assetB.id })
   })
 })

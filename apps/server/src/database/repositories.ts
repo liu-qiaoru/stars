@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, count, desc, eq, ilike, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import {
@@ -179,10 +179,73 @@ export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 
           'caption_text_vectors',
         ]),
         isNull(mediaFiles.deletedAt),
+        // 排除 purge_queued 文件：阶段 3 的破坏性重索引即将删除其派生数据，
+        // 协调器不应再为它创建新的 embedding 任务，避免边删边写的竞争。
+        sql`${mediaFiles.indexStatus} <> 'purge_queued'`,
       ),
     )
     .orderBy(asc(vectorRefs.createdAt))
     .limit(limitCount)
+}
+
+// 阶段 3：会对索引派生数据产生影响的媒体任务类型。重索引前若存在这些 queued/running 任务，
+// 必须阻止 purge，避免和正在写入的索引竞争。
+const MEDIA_INDEX_JOB_TYPES = [
+  'index_media',
+  'purge_video_index',
+  'embed_image',
+  'embed_video_frame',
+  'embed_text_asset',
+  'generate_caption',
+] as const
+
+/**
+ * 列出某文件仍处于 queued/running 的媒体索引任务。
+ *
+ * 同时匹配 jobs.file_id 外键和 input_json->>'file_id'：阶段 2 起新媒体任务会填 file_id 列，
+ * 但保留 input_json 兜底以兼容未填列的历史/异常任务。供重索引前的并发阻止检查使用。
+ */
+export async function getActiveMediaJobsForFile(db: Database, fileId: string) {
+  return db
+    .select({
+      id: jobs.id,
+      jobType: jobs.jobType,
+      status: jobs.status,
+    })
+    .from(jobs)
+    .where(
+      and(
+        or(eq(jobs.fileId, fileId), sql`${jobs.inputJson}->>'file_id' = ${fileId}`),
+        inArray(jobs.jobType, [...MEDIA_INDEX_JOB_TYPES]),
+        inArray(jobs.status, ['queued', 'running']),
+      ),
+    )
+    .orderBy(desc(jobs.createdAt))
+}
+
+/**
+ * 同一事务内把文件标记为 purge_queued 并创建 purge_video_index 任务。
+ *
+ * 事务保证"状态翻转 + 任务入库"原子完成：任一步失败都不留下 purge_queued 却无任务的半成品。
+ * 调用方必须先用 getActiveMediaJobsForFile 确认无活跃媒体任务。
+ */
+export async function createVideoReindex(db: Database, fileId: string) {
+  return db.transaction(async (tx) => {
+    await tx
+      .update(mediaFiles)
+      .set({ indexStatus: 'purge_queued', updatedAt: new Date() })
+      .where(eq(mediaFiles.id, fileId))
+    const [job] = await tx
+      .insert(jobs)
+      .values({
+        id: randomUUID(),
+        jobType: 'purge_video_index',
+        fileId,
+        inputJson: { file_id: fileId },
+      })
+      .returning()
+    return job
+  })
 }
 
 export async function resetVectorRefsForCollection(

@@ -36,6 +36,12 @@ export class JobsController {
     return this.jobsService.queuePendingEmbeddingJobs(body?.limit)
   }
 
+  @Post('video/reindex')
+  requestVideoReindex(@Body() body: { file_id: string }) {
+    // 阶段 3：单文件破坏性重索引。冲突（存在活跃媒体任务）时返回 409 + VIDEO_INDEX_JOBS_ACTIVE。
+    return this.jobsService.requestVideoReindex({ fileId: body.file_id })
+  }
+
   private optionalInteger(value: string | undefined, name: string) {
     if (value === undefined) {
       return undefined

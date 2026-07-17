@@ -9,6 +9,7 @@ from .embeddings import SiglipEmbedder
 from .env import load_project_env
 from .indexing import IndexMediaHandler
 from .probe import ProbeHandler
+from .purging import PurgeVideoIndexHandler
 from .qdrant import QdrantHttpClient
 from .repository import PostgresJobRepository, PostgresMediaRepository, connect_from_env
 from .scan import ScanHandler
@@ -34,6 +35,7 @@ def build_runner(
         scan_handler=ScanHandler(media_repository, job_repository=job_repository),
         probe_handler=ProbeHandler(media_repository, job_repository=job_repository),
         index_handler=IndexMediaHandler(media_repository, job_repository=job_repository),
+        purge_handler=PurgeVideoIndexHandler(media_repository, qdrant_client, job_repository=job_repository),
         generate_caption_handler=GenerateCaptionHandler(media_repository),
         embed_image_handler=EmbedImageHandler(media_repository, qdrant_client, shared_embedder),
         embed_video_frame_handler=EmbedVideoFrameHandler(media_repository, qdrant_client, shared_embedder),

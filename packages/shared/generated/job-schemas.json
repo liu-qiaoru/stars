@@ -190,6 +190,60 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
+    "purge_video_index": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "file_id"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "points_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "vector_refs_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "assets_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "scenes_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "index_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reindex_job_created": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "points_deleted",
+          "vector_refs_deleted",
+          "assets_deleted",
+          "scenes_deleted",
+          "index_generation",
+          "reindex_job_created"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
     "transcribe_audio": {
       "input": {
         "type": "object",

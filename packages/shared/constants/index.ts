@@ -12,6 +12,7 @@ export const jobTypes = [
   'scan_library',
   'probe_media',
   'index_media',
+  'purge_video_index',
   'transcribe_audio',
   'embed_image',
   'embed_video_frame',

@@ -16,6 +16,7 @@ class WorkerRunner:
         scan_handler=None,
         probe_handler=None,
         index_handler=None,
+        purge_handler=None,
         generate_caption_handler=None,
         embed_image_handler=None,
         embed_video_frame_handler=None,
@@ -28,6 +29,7 @@ class WorkerRunner:
         self.scan_handler = scan_handler
         self.probe_handler = probe_handler
         self.index_handler = index_handler
+        self.purge_handler = purge_handler
         self.generate_caption_handler = generate_caption_handler
         self.embed_image_handler = embed_image_handler
         self.embed_video_frame_handler = embed_video_frame_handler
@@ -56,6 +58,8 @@ class WorkerRunner:
                 result = self.probe_handler.handle(job["input_json"])
             elif job["job_type"] == "index_media" and self.index_handler is not None:
                 result = self.index_handler.handle(job["input_json"])
+            elif job["job_type"] == "purge_video_index" and self.purge_handler is not None:
+                result = self.purge_handler.handle(job["input_json"])
             elif job["job_type"] == "generate_caption" and self.generate_caption_handler is not None:
                 result = self.generate_caption_handler.handle(job["input_json"])
             elif job["job_type"] == "embed_image" and self.embed_image_handler is not None:

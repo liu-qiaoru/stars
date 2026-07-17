@@ -1,8 +1,11 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { DATABASE } from '../database/database.module.js'
 import {
   claimNextJob,
+  createVideoReindex,
+  getActiveMediaJobsForFile,
   getJob,
+  getMediaFile,
   heartbeatJob,
   listAttemptedEmbeddingJobs,
   listJobs,
@@ -36,6 +39,26 @@ export class JobsService {
     }
     const filePathsByJobId = await resolveJobFilePaths(this.db, [row])
     return this.toResponse(row, filePathsByJobId.get(row.id) ?? [])
+  }
+
+  async requestVideoReindex(input: { fileId: string }) {
+    // 阶段 3：单文件破坏性重索引入口。先确认文件存在且没有正在运行的媒体索引任务，
+    // 再在同一事务里把文件标记为 purge_queued 并创建 purge_video_index 任务；
+    // purge 成功后由 Worker 重新创建 index_media，实现"先清后重建"。
+    const file = await getMediaFile(this.db, input.fileId)
+    if (!file) {
+      throw new NotFoundException('Media file not found')
+    }
+    const activeJobs = await getActiveMediaJobsForFile(this.db, input.fileId)
+    if (activeJobs.length > 0) {
+      // 不支持强制取消正在写索引的媒体任务；返回结构化错误和任务 ID 让调用方等待或处理。
+      throw new ConflictException({
+        error_code: 'VIDEO_INDEX_JOBS_ACTIVE',
+        job_ids: activeJobs.map((job) => job.id),
+      })
+    }
+    const job = await createVideoReindex(this.db, input.fileId)
+    return { job_id: job.id, status: 'purge_queued' }
   }
 
   async claimNextJob(workerId: string, now = new Date()) {
