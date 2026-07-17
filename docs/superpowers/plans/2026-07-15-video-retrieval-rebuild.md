@@ -37,12 +37,12 @@
   - `spoken`：语音转录全文检索。
   - `all`：视觉 + Caption + 语音转录。
 - 多帧 VLM 复核只允许 `search_scope=visual` 且 `ranking_mode=rrf`。语音查询和全部查询不能开启复核。
-- 阶段 1B 通过后允许用户选择 `visual + rrf + async`，但仍默认 `visual + rrf + off`；只有阶段 9 的干净检索评测也证明质量没有回退后，才改为默认 `async`。
+- 核心检索在阶段 8 完成干净基线评测后即可独立验收。多帧能力最后进入阶段 9；只有阶段 9A 可行性门槛和阶段 9D 对照评测都通过，才允许默认 `visual + rrf + async`，否则始终保持 `off`。
 
 ### 异步多帧 VLM 复核
 
 - 2026-07-15 的 Transformers Qwen2.5-VL-7B 完整 MP4 实验未通过 32 GiB 本机性能门槛，因此永久停止该方案，不建设 `/verify-video`，也不把历史失败改写成成功。
-- 2026-07-17 明确采用方案 D：用户在检索前选择“多帧高精度复核”，阶段 1B 通过后选项可用，阶段 9 也通过后才默认开启，用户始终可关闭。这个决策是对原计划“不得自动切换多帧方案”的显式重新决策。
+- 2026-07-17 明确采用方案 D，但把它放到核心检索完成之后：用户最终可在检索前选择“多帧高精度复核”，阶段 9A 通过后选项才可用，阶段 9D 也通过后才默认开启，用户始终可关闭。这个决策是对原计划“不得自动切换多帧方案”的显式重新决策。
 - `MULTI_FRAME_VERIFY_TOP_K=3`，配置范围 1～10。它只统计排名最靠前的视频场景，不统计图片。
 - VLM 不读取完整 MP4。Worker 为每个候选场景生成最多 `MULTI_FRAME_VERIFY_MAX_FRAMES=12` 张临时图片：全场景均匀覆盖帧、SigLIP2 最佳命中帧附近的 0.5 秒局部加密帧，以及低分辨率帧差扫描得到的画面变化峰值。
 - 三类证据必须同时存在或显式记录无法产生的原因；所有帧按时间排序、去重并携带秒级时间戳。短场景至少提供一张有效图片，图片总数不足上限不是错误。
@@ -166,29 +166,6 @@ text_search           PostgreSQL text_chunk 全文检索
 未通过时：停止完整 VLM 集成，保留 RRF；页面将高精度选项标为不可用并解释原因。不得未经重新决策自动切换到小模型、量化模型或多帧图片方案。
 
 **实际结果：** 该门槛已在 2026-07-15 判定失败。5 秒、1 FPS 的首个样本在 60 秒仍未完成，并产生约 11.80 GiB 的峰值交换内存增长。GiB（gibibyte，二进制吉字节）等于 `1024³` 字节，是内存和交换空间的容量单位；这里增长越大表示机器承受的内存压力越高。完整 MP4 + Transformers 7B 路线到此终止，历史报告保留为失败证据。
-
-### 1B：Ollama 多帧复核可行性门槛
-
-**目的：** 在建设正式任务和 API 前，验证方案 D 是否能在同一台 32 GiB 机器上，以有限数量的查询相关图片改善 Top-K 判断，同时诚实保留多帧方案的能力边界。
-
-- 使用本机已有的 Ollama `qwen2.5vl:7b` 量化模型；记录模型 tag、不可变 digest、Ollama 版本和 Prompt 版本，不复用已失败的 Transformers 权重。
-- 模型 tag 是便于人阅读的名称（例如 `qwen2.5vl:7b`）；digest 是根据模型文件内容生成的不可变摘要，用于确认两次实验使用同一份权重。两者都只标识版本，不表示质量分数。
-- 删除约 15 GiB 的 Hugging Face Qwen2.5-VL-7B 权重缓存是可选磁盘清理，必须由用户另行明确确认，采用方案 D 本身不授权删除。即使确认删除也要保留 `transformers` Python 库，因为 SigLIP2 和 Caption 文本嵌入仍需使用它，并保留 Ollama 模型供阶段 1B 使用。
-- 复用阶段 1 的 11 个真实场景、中文查询和人工期望标签；覆盖 0.5、5、15、30 秒、单手比耶、人物关系、环境约束和负例。
-- 对每个场景执行正式算法：5 张全局均匀帧、最佳 SigLIP2 命中时间附近最多 5 张 0.5 秒间隔帧、最多 2 张画面变化峰值帧；裁剪到场景边界、按时间排序并去重，总数不得超过 12。
-- 阶段 1B 尚未拥有正式 SigLIP2 搜索快照时，真实清单必须为大多数样本显式提供人工核对过的 `best_hit_time_seconds`，其含义仅是模拟未来 RRF 返回的最佳命中帧时间；还要包含至少一个 `null` 样本验证 Caption-only 候选。正式集成后该字段必须来自搜索候选快照，不能继续使用手写时间。
-- 每张临时图片记录 `time_seconds`、`selection_reasons`、内容哈希和尺寸。SHA-256（Secure Hash Algorithm 256-bit，256 位安全哈希算法）把图片字节映射成 64 个十六进制字符；本项目用它高可信度核对报告是否引用同一图片，但理论上仍可能发生不同内容得到同一摘要的碰撞，因此它不是数学证明，也不用于加密。成功、失败、超时或中断后都删除临时图片，不写 PostgreSQL、Qdrant 或源素材目录。
-- 同一固定输入以温度 0 重复 3 次。温度是控制模型输出随机程度的参数，0 表示尽量选择最确定的输出，用于验证严格 JSON 形状和相关等级稳定性，不代表数学上绝对无随机。自由文本理由仍需人工核对是否引用了图片中真实可见的证据。
-
-通过条件：
-
-- 所有帧时间都位于场景边界内，至少一帧，总数不超过 12；0.5 秒短场景也能产生有效帧序列。
-- 必须抽到人工标记的关键证据窗口；分别报告“抽帧是否找到证据”和“VLM 是否正确理解”，不能把两类失败合并。
-- 30 秒场景无内存不足、进程退出或持续大量交换内存；峰值 swap 相对起点增长不超过 4 GiB，结束时残留增长不超过 1 GiB。swap（交换内存）是系统把暂时放不下的内存页写到磁盘，增长越小越好；持续增长会拖慢模型和整台机器。
-- 单个 30 秒候选不超过 60 秒，最坏 Top-3 总等待不超过约 180 秒；数值单位都是秒，越低越好。另报告冷启动、热推理、算术平均值和 P95：将 N 个成功候选耗时从小到大排列，取向上取整后的第 `0.95 × N` 个值；例如 N=33 时取第 32 个，表示约 95% 成功请求不超过该耗时。P95 在 11 个场景、每个重复 3 次的小样本中只作诊断，不设独立通过阈值，也不能据此推断大规模线上分布。
-- 所有期望相关等级匹配，固定输入 3 次结果等级一致，严格 JSON 解析全部成功。
-
-未通过时：保持“多帧高精度复核”不可用，继续实施 SigLIP2 + RRF 主线。不得通过增加图片上限、放宽超时、忽略 swap 或把部分成功结果应用到排序来制造通过结论。
 
 ## 实施阶段 2：重建 Schema 并删除 OCR/Segment 能力
 
@@ -347,9 +324,100 @@ model_version siglip2-base-patch16-224
 
 测试覆盖单通道、多通道、缺失必需通道、同场景多帧、场景去重、并列、Top-K 截断和分页稳定性。
 
-## 实施阶段 6：异步多帧 VLM 高精度复核
+## 实施阶段 6：核心 Web 搜索与任务反馈
 
-### 6.1 任务和 API（应用程序接口）
+**目的：** 先把不依赖多帧 VLM 的检索产品闭环做完整，让用户能够独立使用和验证 SigLIP2、Caption、语音全文检索与 RRF。
+
+- 保持现有紧凑控件风格，检索前显示 `搜索范围：视觉 | 语音 | 全部` 和 `排序方式：当前混合排序 | RRF（默认）`。
+- Server（服务端）同步返回 RRF 结果；Web 不创建或等待任何多帧任务。
+- 诊断模式显示各召回通道名次、RRF 贡献、视频场景边界和 SigLIP2 最佳命中帧时间。普通响应和日志仍不得泄露本地 Caption、绝对路径或向量。
+- Jobs 页面显示场景检测、抽帧、Embedding 和 Caption 的结构化错误、详情与修复后重试入口。
+- 可以保留一个禁用的“多帧高精度复核”说明入口，但在阶段 9A 通过前不得创建 `verify_multi_frame_search`，也不得暗示该能力已经可用。
+
+## 实施阶段 7：生成基线、重建本地服务和素材索引
+
+### 7.1 新基线迁移
+
+- 删除旧迁移文件后，根据最终 Drizzle Schema 生成新的 `0000`。
+- 基线不得包含 OCR、`video_segment`、旧 Collection、多帧任务或兼容列。
+- 人工核对外键、级联行为、唯一约束、generation、任务 claim 和评测表。
+- 在全新 PGlite 和临时 PostgreSQL 中运行基线迁移测试。
+
+```bash
+corepack pnpm --filter @local-media-agent/server exec drizzle-kit generate
+corepack pnpm --filter @local-media-agent/server db:migrate
+```
+
+### 7.2 恢复运行
+
+```text
+应用新 PostgreSQL 基线迁移
+→ 创建 SigLIP2 与 Caption Qdrant Collections
+→ 启动 Server
+→ 启动 SigLIP2 model_service
+→ 启动 Python Worker
+→ 启动 Caption 所需的 VLM 服务和 Ollama
+→ 启动 Web
+→ 重新添加素材库
+→ 扫描、探测、场景检测、抽帧、Embedding、Caption
+```
+
+完整性检查：
+
+- 每个视频文件至少一个 `video_scenes` 行。
+- 每个场景至少一个引用其 UUID 的视频帧。
+- 每个视频帧和图片都有当前 SigLIP2 indexed Vector Ref。
+- Caption 开启时，每张图片和每个视频场景都有当前 Caption Vector Ref。
+- PostgreSQL 与 Qdrant 中没有 OCR、Segment、旧模型或多帧临时图片数据。
+- Qdrant Payload 的 scene UUID 能回表到同 generation 的真实场景。
+- 失败任务在 Jobs 页面可见且不计入索引完成数。
+
+## 实施阶段 8：建立核心检索的干净评测基线
+
+**目的：** 在引入多帧复核前先冻结一份可复现的 RRF 基线，使后续能明确区分“核心检索本身的效果”和“多帧复核额外带来的变化”。
+
+- 删除旧评测后从零创建评测集，不导出混乱标注。
+- 自然发现查询和指定目标查询分开，不混用指标；至少覆盖人物动作、空间关系、环境主体组合、0.5～3 秒短动作、图片、视频、有语音和无语音视频。
+- 在相同素材、查询和召回快照上比较：
+
+```text
+A：SigLIP2 + current + VLM off
+B：SigLIP2 + RRF + VLM off
+```
+
+- 另做 SigLIP2 中文/忠实英文查询消融；生产路由仍按已确认规则执行。
+- 报告 Precision@K、Recall@K、Hit@K、MRR、nDCG@K 时同时解释计算方式、方向、样本量和产品含义。
+- 记录每个通道是否召回正确目标、RRF 名次变化、Caption-only 候选数量，以及每个视频候选可空的 SigLIP2 最佳命中时间。
+- 保存不可变的 Top-K 候选快照，供阶段 9A 直接使用。此后多帧试验不得再手写或人工模拟 `best_hit_time_seconds`。
+- 阶段 8 通过后，SigLIP2 + Caption + 语音全文检索 + RRF 主线即具备独立验收条件；阶段 9 的成功或失败不得推翻这份完成结论。
+
+## 实施阶段 9：最后增加异步多帧 VLM 高精度复核
+
+### 9A：使用真实 Top-K 快照验证可行性
+
+**目的：** 核心检索完成后，再验证方案 D 能否在同一台 32 GiB 机器上，以有限数量的查询相关图片改善 Top-K 判断。阶段 9A 只做隔离试验，不修改生产排序。
+
+- 使用本机已有的 Ollama `qwen2.5vl:7b` 量化模型；记录模型 tag、不可变 digest、Ollama 版本和 Prompt 版本，不复用已失败的 Transformers 权重。
+- 模型 tag 是便于人阅读的名称，例如 `qwen2.5vl:7b`；digest 是根据模型文件内容生成的不可变摘要，用来确认两次实验使用的是同一份权重。两者只标识版本，不表示质量分数。
+- 删除约 15 GiB 的 Hugging Face Qwen2.5-VL-7B 权重缓存仍是独立磁盘清理，必须由用户另行明确确认；采用方案 D 本身不授权删除。`transformers` Python 库仍需保留给 SigLIP2 和 Caption 文本嵌入。
+- 输入必须来自阶段 8 保存的真实 Top-K 快照：有 SigLIP2 召回的候选使用真实最佳命中时间；Caption-only 候选的该字段保持 `null`，使用全局覆盖帧和画面变化峰值帧，不能虚构中点命中。
+- Caption-only 初始方案不增加“场景内部二次 SigLIP2 定位”。只有独立分组评测证明 Caption-only 的复核准确率明显差于含 SigLIP2 命中的候选时，才把二次定位作为后续候选改进，并单独评测成本和收益。
+- “明显差于”的判定阈值和每组最低样本量必须在查看结果前写入评测配置；样本不足时结论只能记为“不确定”，不能据此增加二次定位或宣称两组效果相同。
+- 对每个场景使用正式算法：最多 5 张全局均匀帧、SigLIP2 最佳命中附近最多 5 张 0.5 秒间隔帧、最多 2 张画面变化峰值帧；裁剪到场景边界、按时间排序并去重，总数不得超过 12。
+- 每张临时图片记录 `time_seconds`、`selection_reasons`、SHA-256 内容哈希和尺寸。SHA-256（Secure Hash Algorithm 256-bit，256 位安全哈希算法）把图片字节映射成 64 个十六进制字符，本项目只用它核对报告是否引用同一图片，不用它加密。成功、失败、超时或中断后全部删除，不写 PostgreSQL、Qdrant 或源素材目录。
+- 同一固定输入以温度 0 重复 3 次。温度是控制模型输出随机程度的参数，0 表示尽量选择最确定的输出；重复试验用于验证严格 JSON 形状和相关等级是否稳定，但不代表数学上绝对无随机。自由文本理由还要人工核对是否只引用图片中真实可见的证据。
+
+通过条件：
+
+- 所有帧时间都位于场景边界内，至少一帧，总数不超过 12；0.5 秒短场景也能产生有效帧序列。
+- 必须分别报告“抽帧是否找到证据”和“VLM 是否正确理解”，并单列 Caption-only 结果。
+- 30 秒场景无内存不足或进程退出；峰值 swap 相对起点增长不超过 4 GiB，结束时残留增长不超过 1 GiB。swap（交换内存）是系统把暂时放不下的内存页写到磁盘，增长越小越好；GiB（gibibyte，二进制吉字节）等于 `1024³` 字节，这两个上限分别约束推理峰值压力和结束后的残留压力。
+- 单个 30 秒候选不超过 60 秒，最坏 Top-3 总等待不超过约 180 秒；数值单位都是秒，越低越好。另报告冷启动、热推理、算术平均耗时和 P95。P95 是把成功耗时从小到大排列后取第 95 百分位，表示约 95% 的成功请求不超过该耗时；小样本 P95 只用于发现慢请求，不能推断大规模线上分布。
+- 所有期望相关等级匹配，固定输入 3 次结果等级一致，严格 JSON 解析全部成功。
+
+未通过时：保存可复跑报告，保持“多帧高精度复核”不可用并跳过阶段 9B～9D；核心 RRF 检索仍按阶段 8 的结论完成。不得通过增加图片上限、放宽超时、忽略 swap 或应用部分成功结果来制造通过结论。
+
+### 9B：任务和 API（应用程序接口）
 
 搜索请求：
 
@@ -362,7 +430,7 @@ model_version siglip2-base-patch16-224
 }
 ```
 
-阶段 1B 通过后允许 `multi_frame_verification_mode=async`；阶段 9 通过前默认 `off`，通过后默认 `async`。阶段 1B 未通过或后端不可用时强制为 `off`。流程：
+阶段 9A 通过后才允许 `multi_frame_verification_mode=async`；阶段 9D 通过前默认 `off`，通过后默认 `async`。阶段 9A 未通过或后端不可用时强制为 `off`。流程：
 
 ```text
 Web 发起搜索
@@ -386,7 +454,7 @@ Web 发起搜索
 - 没有视频候选时不创建任务，响应状态为 `not_applicable`，图片的 RRF 排序保持不变。
 - Server 在创建任务前发现视频后端未配置或健康检查失败时，返回 `unavailable` 且不创建必然失败的任务；任务创建后后端才发生故障时，任务以结构化错误失败。
 
-### 6.2 查询相关的精细抽帧
+#### 9B.1 查询相关的精细抽帧
 
 抽帧只处理被 RRF 选入 Top-K 的视频场景，不创建新的可检索 Asset，也不写 Qdrant：
 
@@ -411,7 +479,7 @@ Web 发起搜索
 
 抽帧算法、间隔、上限或去重阈值变化时必须更新 `sampling_fingerprint`。它是这些抽帧规则计算出的稳定指纹，用来区分不同实验和线上结果；指纹变化必须重新评测，但不要求重建素材索引，因为这些图片只服务于当前搜索任务。
 
-### 6.3 VLM 服务
+#### 9B.2 VLM 服务
 
 - 现有 `vlm_service:4030` 保留 `/caption`，新增 `/verify-frames`；两者默认调用同一个 Ollama `qwen2.5vl:7b`，但使用独立 Prompt 和严格响应 Schema。
 - `/verify-frames` 通过受限 multipart 请求接收最多 12 张 JPEG/PNG、对应时间戳、中文原查询、候选 ID、Prompt 版本和 sampling fingerprint。multipart 是一个 HTTP 请求同时传送多个文件和文本字段的标准格式；这里由 Worker 发起、VLM 服务接收，接口不接受任意本地文件路径。
@@ -421,7 +489,7 @@ Web 发起搜索
 - `/health` 分别报告 Caption 与多帧复核能力、Ollama 连通性、runtime model tag 和不可变 digest。配置 tag 与实际 digest 不一致时快速失败，不能把不同权重的结果混在同一次评测中。
 - Worker 和 VLM 服务在成功、失败、超时和取消路径都清理各自临时文件。调用前后验证 `scene_id` 和 `index_generation`；变化时返回 `SEARCH_INDEX_CHANGED`。
 
-### 6.4 严格输出与排序
+#### 9B.3 严格输出与排序
 
 Ollama 中的 VLM 原始 JSON 只允许生成 `relevance`、`matched_constraints`、`missing_constraints` 和 `reason` 四个字段。VLM 服务负责校验这四个字段并从实际运行时附加 model tag/digest；Worker 再把可信的候选 ID、sampling fingerprint、帧时间、选择原因和内容哈希合并成任务结果。模型生成或回显的候选 ID、时间戳、哈希和版本一律不能作为事实。
 
@@ -454,7 +522,7 @@ Worker 组装后的单个候选结果：
 - 图片保持位置不变，只在这些视频原来占据的位置间按 `2 > 1 > 0` 重排。
 - 同等级保持 RRF 顺序。
 - 全部候选成功才应用重排；任何抽帧、超时、服务、JSON 或版本错误都让整组失败并保留 RRF。
-- `verify_multi_frame_search.max_attempts=1`，不自动重试昂贵的多帧复核；用户可重新搜索。任务超时值在阶段 1B 后按实测设定。
+- `verify_multi_frame_search.max_attempts=1`，不自动重试昂贵的多帧复核；用户可重新搜索。任务超时值在阶段 9A 后按实测设定。
 
 成功响应至少保存：
 
@@ -474,19 +542,17 @@ sampling_fingerprint
 
 失败必须区分 `VLM_BACKEND_UNAVAILABLE`、`FRAME_EXTRACTION_FAILED`、`NO_VALID_FRAME_EVIDENCE`、`VLM_TIMEOUT`、`VLM_INVALID_RESPONSE`、`MODEL_VERSION_MISMATCH`、`SEARCH_INDEX_CHANGED` 和 `SUPERSEDED`。
 
-## 实施阶段 7：Web 搜索和任务反馈
+### 9C：Web 多帧复核反馈
 
 - 保持现有紧凑控件风格，不增加突兀的大卡片。
 - 检索前显示：
 
 ```text
-搜索范围：视觉 | 语音 | 全部
-排序方式：当前混合排序 | RRF（默认）
 多帧复核：关闭 | 多帧高精度（性能与质量评测通过后默认）
 ```
 
 - 控件正式文案改为“多帧高精度复核”，帮助文本说明“从 Top-K 视频场景选择最多 12 张查询相关图片；不能验证未采样瞬间、完整连续运动或音频条件”。不得使用“完整视频理解”。
-- 阶段 1B 未通过、`spoken/all`、非 RRF 或后端不可用时禁用多帧复核并解释具体原因。
+- 阶段 9A 未通过、`spoken/all`、非 RRF 或后端不可用时禁用多帧复核并解释具体原因。
 - 点击搜索后立即显示 RRF 结果和“正在进行多帧画面复核”。
 - 页面只轮询最新任务；同一页面发起新查询时由新请求取代旧任务。
 - 成功后展示：
@@ -499,65 +565,23 @@ sampling_fingerprint
 - 结果页若要重新复核，提供“重新执行多帧高精度搜索”，它会重新执行查询和抽帧，不把旧页面候选或临时图片当新事实。
 - Jobs 页面显示索引结构化错误、详情和修复后重试入口。
 
-## 实施阶段 8：生成基线、重建本地服务和素材索引
+### 9D：与核心 RRF 基线做多帧对照评测
 
-### 8.1 新基线迁移
-
-- 删除旧迁移文件后，根据最终 Drizzle Schema 生成新的 `0000`。
-- 基线不得包含 OCR、`video_segment`、旧 Collection 或兼容列。
-- 人工核对外键、级联行为、唯一约束、generation、任务 claim 和评测表。
-- 在全新 PGlite 和临时 PostgreSQL 中运行基线迁移测试。
-
-```bash
-corepack pnpm --filter @local-media-agent/server exec drizzle-kit generate
-corepack pnpm --filter @local-media-agent/server db:migrate
-```
-
-### 8.2 恢复运行
+- 复用阶段 8 冻结的素材、查询、标注和召回快照，禁止在看到多帧结果后修改基线样本。
+- 在运行 C 前冻结 `multi-frame-gate-v1` 评测配置，至少包含 50 条实际进入多帧复核的视频查询，短动作、人物关系和环境约束每组至少 8 条；不足时只能记为“样本不足，功能不可默认开启”。这些数量是最低覆盖要求，不代表已经具有普遍统计结论。
+- 在阶段 8 的 A/B 之外增加 C：
 
 ```text
-应用新 PostgreSQL 基线迁移
-→ 创建 SigLIP2 与 Caption Qdrant Collections
-→ 启动 Server
-→ 启动 SigLIP2 model_service
-→ 启动 Python Worker
-→ 启动 VLM 服务和 Ollama
-→ 启动 Web
-→ 重新添加素材库
-→ 扫描、探测、场景检测、抽帧、Embedding、Caption
-```
-
-完整性检查：
-
-- 每个视频文件至少一个 `video_scenes` 行。
-- 每个场景至少一个引用其 UUID 的视频帧。
-- 每个视频帧和图片都有当前 SigLIP2 indexed Vector Ref。
-- Caption 开启时，每张图片和每个视频场景都有当前 Caption Vector Ref。
-- PostgreSQL 与 Qdrant 中没有 OCR、Segment 或旧模型数据。
-- Qdrant Payload 的 scene UUID 能回表到同 generation 的真实场景。
-- 失败任务在 Jobs 页面可见且不计入索引完成数。
-
-## 实施阶段 9：重建干净评测集
-
-- 删除旧评测后从零创建评测集，不导出混乱标注。
-- 自然发现查询和指定目标查询分开，不混用指标。
-- 至少覆盖人物动作、空间关系、环境主体组合、0.5～3 秒短动作、图片、视频、有语音和无语音视频。
-- 使用相同素材、查询和召回快照比较：
-
-```text
-A：SigLIP2 + current + VLM off
-B：SigLIP2 + RRF + VLM off
 C：SigLIP2 + RRF + 异步多帧 VLM 复核
 ```
 
 不得沿用历史名称把 C 报告成完整视频模型。
 
-- 另做 SigLIP2 中文/忠实英文查询消融；生产路由仍按已确认规则执行。
-- 报告 Precision@K、Recall@K、Hit@K、MRR、nDCG@K 时同时解释计算方式、方向、样本量和产品含义。
 - 记录每个通道是否召回正确目标、RRF 名次变化、多帧复核正确提升与错误降级数量。
+- 默认开启的质量门槛固定为：自然发现查询的宏平均 nDCG@10 相对 B 回退不超过 0.01；指定目标查询的宏平均 MRR 相对 B 回退不超过 0.01；错误降级率不超过 2%，且正确提升查询数必须多于错误降级查询数。宏平均是先为每条查询计算指标再取平均，避免结果多的查询占更大权重；0.01 表示 0～1 指标范围内最多下降一个百分点。错误降级率的分母是全部成功完成多帧复核的查询，分子是把人工标注更相关结果排到较不相关结果之后的查询。nDCG@10 衡量前 10 条的相关等级和顺序，MRR 衡量指定目标第一次出现的位置，二者越高越好；2% 上限表示每 100 条成功复核最多允许 2 条被明确排坏。任何阈值都不得在看到 C 的结果后放宽。
 - 把错误拆成两层：抽帧未覆盖关键证据，以及关键证据已覆盖但 VLM 判断错误。至少按短动作、人物关系、环境约束、连续运动、时间顺序和音频相关查询分组报告；后三类用于暴露多帧方案的已知限制，不能只报告总体平均值。
 - 多帧 VLM 另外报告每个候选帧数、热/冷启动延迟、平均延迟、P95、Top-3 总延迟、超时率、失败率、峰值内存、swap 增长和队列等待。
-- 只有阶段 1B 与干净评测都通过时，多帧高精度复核才默认开启；若质量回退或性能门槛不成立，保持不可用并明确展示原因，不能静默改变默认值或放宽门槛。
+- 只有阶段 9A 与阶段 9D 都通过时，多帧高精度复核才默认开启；若质量回退或性能门槛不成立，保持不可用并明确展示原因，不能静默改变默认值或放宽门槛。
 
 ## 实施阶段 10：文档与全仓库验证
 
@@ -570,7 +594,7 @@ corepack pnpm check
 PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 ```
 
-真实端到端验收必须从空数据完成：
+核心检索的真实端到端验收必须从空数据完成；阶段 9A 通过时，再继续执行虚线后的可选多帧链路：
 
 ```text
 添加素材库
@@ -580,26 +604,29 @@ PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 → SigLIP2 与 Caption 索引
 → visual/spoken/all 搜索
 → Qdrant 场景分组与 RRF
+→ 冻结并验收核心 RRF 基线
+--- 阶段 9A 通过后才继续 ---
 → Top-K 查询相关精细抽帧与异步多帧 VLM 复核
 → 页面名次变化与失败提示
-→ 新评测
+→ 在同一基线上增加多帧对照评测
 ```
 
 ## 推荐提交边界
 
 1. `chore: stop services and remove legacy local index data`
 2. `spike: validate qwen2.5-vl video inference`
-3. `spike: validate ollama multi-frame verification`
-4. `refactor: rebuild scene schema and remove ocr segments`
-5. `feat: add strict scene detection and uniform frame sampling`
-6. `feat: add destructive per-video reindex jobs`
-7. `feat: rebuild caption and siglip2 indexing`
-8. `feat: add grouped scene retrieval and production rrf`
-9. `feat: add async multi-frame vlm verification`
-10. `feat: expose search scope and verification feedback`
-11. `chore: create clean baseline and rebuild local media index`
-12. `test: create clean retrieval evaluation baseline`
-13. `docs: update retrieval architecture and operations`
+3. `refactor: rebuild scene schema and remove ocr segments`
+4. `feat: add strict scene detection and uniform frame sampling`
+5. `feat: add destructive per-video reindex jobs`
+6. `feat: rebuild caption and siglip2 indexing`
+7. `feat: add grouped scene retrieval and production rrf`
+8. `feat: expose search scope and core retrieval feedback`
+9. `chore: create clean baseline and rebuild local media index`
+10. `test: freeze clean rrf retrieval baseline`
+11. `spike: validate ollama multi-frame verification on real top-k`
+12. `feat: add async multi-frame vlm verification and feedback`
+13. `test: compare multi-frame verification with frozen rrf baseline`
+14. `docs: update retrieval architecture and operations`
 
 ## 完成定义
 
@@ -612,11 +639,13 @@ PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 - 大于等于 0.5 秒的短场景被保留，长场景最长 30 秒，每 2.5 秒稳定抽帧。
 - SigLIP2 图片/帧/查询模型一致，Qdrant 按场景返回最佳命中帧。
 - visual/spoken/all 路由与 RRF 生产排序通过测试和真实检索验证。
+- 阶段 8 的核心检索基线已冻结并可独立复跑；它不依赖多帧 VLM，也不会因阶段 9 失败而改判为未完成。
 - 历史 Transformers Qwen2.5-VL-7B 完整视频失败结论保留；运行代码、配置和当前文档不再把完整 MP4 校验描述为可用能力。
-- 阶段 1B 必须保存可复跑报告，明确记录抽帧覆盖、严格 JSON、重复稳定性、相关等级、30 秒候选耗时、Top-3 总耗时、内存和 swap；无论通过还是失败都不能隐藏结果。
+- 阶段 9A 必须使用阶段 8 的真实 Top-K 快照并保存可复跑报告，明确记录抽帧覆盖、严格 JSON、重复稳定性、相关等级、30 秒候选耗时、Top-3 总耗时、内存和 swap；无论通过还是失败都不能隐藏结果。
+- Caption-only 候选必须保持 `best_hit_time_seconds=null`，首版只用全局覆盖与画面变化峰值；场景内部二次 SigLIP2 定位仅在该分组准确率明显较差并有独立评测证据时再立项。
 - 多帧分支最终必须满足下面两个互斥结果之一，任一结果都不阻止 SigLIP2 + RRF 主线完成：
-  - **启用：** 阶段 1B 和阶段 9 干净评测都通过。异步 Top-3 复核不阻塞搜索；每个候选最多 12 张、至少 1 张。全局覆盖、最佳命中附近加密、画面变化峰值三类来源各自有证据，或对 Caption-only、静态/过短场景显式记录无法产生该类证据的原因；所有时间戳位于真实场景边界内，sampling fingerprint 可追溯。
-  - **不可用：** 阶段 1B 或阶段 9 任一失败。报告保留，功能开关和 Web 选项明确禁用，普通搜索不创建 `verify_multi_frame_search`，页面说明当前展示 RRF 排序；已经实现的实验或服务代码不能通过默认配置进入生产调用链。
+  - **启用：** 阶段 9A 和阶段 9D 都通过。异步 Top-3 复核不阻塞搜索；每个候选最多 12 张、至少 1 张。全局覆盖、最佳命中附近加密、画面变化峰值三类来源各自有证据，或对 Caption-only、静态/过短场景显式记录无法产生该类证据的原因；所有时间戳位于真实场景边界内，sampling fingerprint 可追溯。
+  - **不可用：** 阶段 9A 未通过，或 9A 通过但阶段 9D 失败。报告保留，功能开关和 Web 选项明确禁用，普通搜索不创建 `verify_multi_frame_search`，页面说明当前展示 RRF 排序；已经实现的实验或服务代码不能通过默认配置进入生产调用链。
 - 若多帧分支启用，`/verify-frames` 只接受受限图片上传和中文原查询，固定 Ollama model digest；临时图片在成功、失败、超时和取消后全部清理，不写素材索引。
 - 若多帧分支启用，全部候选成功才重排，失败、取消、后端不可用、模型版本不一致和索引变化均明确可见；任何部分结果都不会改变 RRF。
 - 若多帧分支启用，页面默认开启“多帧高精度复核”，显示每条视频被提升或降低的名次与帧时间证据，并明确说明它不等于完整视频或音频理解。
