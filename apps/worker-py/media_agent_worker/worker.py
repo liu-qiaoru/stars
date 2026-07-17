@@ -1,3 +1,6 @@
+from .errors import JobError
+
+
 class WorkerRunner:
     """Small PostgreSQL-backed worker loop.
 
@@ -18,7 +21,6 @@ class WorkerRunner:
         embed_video_frame_handler=None,
         embed_text_asset_handler=None,
         transcribe_handler=None,
-        ocr_handler=None,
         export_handler=None,
     ):
         self.worker_id = worker_id
@@ -31,7 +33,6 @@ class WorkerRunner:
         self.embed_video_frame_handler = embed_video_frame_handler
         self.embed_text_asset_handler = embed_text_asset_handler
         self.transcribe_handler = transcribe_handler
-        self.ocr_handler = ocr_handler
         self.export_handler = export_handler
         self._shutdown_requested = False
 
@@ -65,14 +66,22 @@ class WorkerRunner:
                 result = self.embed_text_asset_handler.handle(job["input_json"])
             elif job["job_type"] == "transcribe_audio" and self.transcribe_handler is not None:
                 result = self.transcribe_handler.handle(job["input_json"])
-            elif job["job_type"] == "run_ocr" and self.ocr_handler is not None:
-                result = self.ocr_handler.handle(job["input_json"])
             elif job["job_type"] == "export_clip" and self.export_handler is not None:
                 result = self.export_handler.handle(job["input_json"])
             else:
                 raise ValueError(f"Unsupported job type: {job['job_type']}")
             self.job_repository.mark_succeeded(job["id"], result)
             return True
+        except JobError as error:
+            # 确定性失败（场景检测不可用等）带稳定 error_code，写入结构化错误字段供 Jobs 页面展示。
+            # run_ocr 路由已在阶段 2 删除。
+            self.job_repository.mark_failed(
+                job["id"],
+                error.message,
+                error_code=error.error_code,
+                error_details=error.details,
+            )
+            return False
         except Exception as error:
             self.job_repository.mark_failed(job["id"], str(error))
             return False

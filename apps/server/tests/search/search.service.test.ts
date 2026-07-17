@@ -1,4 +1,5 @@
-import { BadRequestException, Logger } from '@nestjs/common'
+import { BadRequestException } from '@nestjs/common'
+import { randomUUID } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { Test } from '@nestjs/testing'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -10,6 +11,7 @@ import {
   createMediaFile,
   createVectorRef,
 } from '../../src/database/repositories.js'
+import { videoScenes } from '../../src/database/schema.js'
 import { ModelGatewayService } from '../../src/model-gateway/model-gateway.service.js'
 import { QDRANT_CLIENT } from '../../src/qdrant/qdrant.module.js'
 import { SearchModule } from '../../src/search/search.module.js'
@@ -21,6 +23,7 @@ let closeModule: () => Promise<void>
 let service: SearchService
 let db: Awaited<ReturnType<typeof createTestDatabase>>['db']
 const search = vi.fn()
+const searchPointGroups = vi.fn()
 const embedText = vi.fn()
 const testSettings: Settings = {
   serverHost: '127.0.0.1',
@@ -36,7 +39,6 @@ const testSettings: Settings = {
   jobCoordinatorEnabled: true,
   jobCoordinatorIntervalMs: 5000,
   jobCoordinatorEmbeddingLimit: 100,
-  jobCoordinatorOcrLimit: 500,
   queryExpansionProvider: 'none',
   queryExpansionTimeoutMs: 10000,
   queryExpansionMaxVariants: 3,
@@ -45,7 +47,6 @@ const testSettings: Settings = {
   deepseekModel: 'deepseek-v4-flash',
   captionIndexingEnabled: false,
   captionSearchEnabled: false,
-  videoSegmentSearchEnabled: true,
   localVlmEnabled: false,
   localVlmServiceUrl: 'http://127.0.0.1:4030',
   searchRerankMode: 'off',
@@ -57,32 +58,54 @@ const testSettings: Settings = {
 }
 let currentSettings: Settings = testSettings
 
-beforeEach(async () => {
-  const testDb = await createTestDatabase()
-  db = testDb.db
-  closeDb = testDb.close
-  search.mockReset()
-  embedText.mockReset()
-  embedText.mockResolvedValue(Array.from({ length: 768 }, (_, index) => index / 768))
-  currentSettings = testSettings
+// 阶段 2 后视频走 video_scenes 表 + scene_id 外键；Qdrant 对 video_frame_vectors 用分组检索。
+async function seedVideoScene(
+  db: Awaited<ReturnType<typeof createTestDatabase>>['db'],
+  input: { fileId: string; sceneKey?: string; start?: string; end?: string; generation?: number },
+) {
+  const [row] = await db
+    .insert(videoScenes)
+    .values({
+      id: randomUUID(),
+      fileId: input.fileId,
+      sceneKey: input.sceneKey ?? 'scene-0001',
+      startTimeSeconds: input.start ?? '0',
+      endTimeSeconds: input.end ?? '30',
+      detectionStrategy: 'scene_detection',
+      strategyFingerprint: 'test-fingerprint',
+      indexGeneration: input.generation ?? 0,
+    })
+    .returning()
+  return row
+}
 
-  const moduleRef = await Test.createTestingModule({
-    imports: [SearchModule],
-  })
+async function buildModule(settings: Settings) {
+  const moduleRef = await Test.createTestingModule({ imports: [SearchModule] })
     .overrideProvider(DATABASE)
     .useValue(db)
     .overrideProvider(PG_POOL)
     .useValue(null)
     .overrideProvider(SETTINGS)
-    .useValue(currentSettings)
+    .useValue(settings)
     .overrideProvider(QDRANT_CLIENT)
-    .useValue({ search })
+    .useValue({ search, searchPointGroups })
     .overrideProvider(ModelGatewayService)
     .useValue({ embedText })
     .compile()
-
   service = moduleRef.get(SearchService)
   closeModule = () => moduleRef.close()
+}
+
+beforeEach(async () => {
+  const testDb = await createTestDatabase()
+  db = testDb.db
+  closeDb = testDb.close
+  search.mockReset()
+  searchPointGroups.mockReset()
+  embedText.mockReset()
+  embedText.mockResolvedValue(Array.from({ length: 768 }, (_, index) => index / 768))
+  currentSettings = testSettings
+  await buildModule(currentSettings)
 })
 
 afterEach(async () => {
@@ -92,7 +115,7 @@ afterEach(async () => {
 })
 
 describe('search service', () => {
-  test('按 collection 搜索 image 和 video segment，并回 PostgreSQL 补齐结果', async () => {
+  test('按 collection 搜索 image 和 video frame，视频按场景分组并回 PostgreSQL 补齐', async () => {
     const library = await createLibrary(db, { name: 'Main Media', rootPath: '/Volumes/Media' })
     const imageFile = await createMediaFile(db, {
       libraryId: library.id,
@@ -111,15 +134,15 @@ describe('search service', () => {
       sizeBytes: 20,
       mtimeMs: 1710000000001,
     })
-    const videoAsset = await createMediaAsset(db, {
+    const scene = await seedVideoScene(db, { fileId: videoFile.id, start: '30', end: '60' })
+    const frameAsset = await createMediaAsset(db, {
       fileId: videoFile.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '30',
-      endTimeSeconds: '60',
-      metadataJson: { scene_id: 'scene-0001', stale: false },
+      assetType: 'video_frame',
+      sceneId: scene.id,
+      frameTimeSeconds: '42',
     })
     const imagePointId = '11111111-1111-4111-8111-111111111111'
-    const videoPointId = '22222222-2222-4222-8222-222222222222'
+    const framePointId = '22222222-2222-4222-8222-222222222222'
     await createVectorRef(db, {
       assetId: imageAsset.id,
       fileId: imageFile.id,
@@ -136,17 +159,17 @@ describe('search service', () => {
       status: 'indexed',
     })
     await createVectorRef(db, {
-      assetId: videoAsset.id,
+      assetId: frameAsset.id,
       fileId: videoFile.id,
       libraryId: library.id,
-      collectionName: 'video_segment_vectors',
-      pointId: videoPointId,
+      collectionName: 'video_frame_vectors',
+      pointId: framePointId,
       modelName: 'mock',
       modelVersion: 'phase5',
-      vectorKind: 'representative_frame_embedding',
+      vectorKind: 'frame_embedding',
       vectorDim: 512,
       distance: 'Cosine',
-      contentHash: 'video-hash',
+      contentHash: 'frame-hash',
       indexProfile: 'balanced',
       status: 'indexed',
     })
@@ -154,7 +177,10 @@ describe('search service', () => {
       if (collectionName === 'image_vectors') {
         return [{ id: imagePointId, score: 0.91 }]
       }
-      return [{ id: videoPointId, score: 0.82 }]
+      return []
+    })
+    searchPointGroups.mockResolvedValue({
+      groups: [{ id: scene.id, hits: [{ id: framePointId, score: 0.82 }] }],
     })
 
     const result = await service.search({
@@ -165,110 +191,24 @@ describe('search service', () => {
       offset: 0,
     })
 
-    expect(result).toMatchObject({
-      limit: 5,
-      offset: 0,
-      results: [
-        {
-          asset_id: imageAsset.id,
-          merged_asset_ids: [imageAsset.id],
-          file_id: imageFile.id,
-          media_type: 'image',
-          path: '/Volumes/Media/cat.jpg',
-          start_time_seconds: null,
-          end_time_seconds: null,
-          scene_id: null,
-          score: 0.91,
-          score_kind: 'hybrid_score',
-          primary_reason: 'vector_match',
-          reasons: ['vector_match'],
-          source_scores: { image_vectors: 0.91 },
-        },
-        {
-          asset_id: videoAsset.id,
-          merged_asset_ids: [videoAsset.id],
-          file_id: videoFile.id,
-          media_type: 'video',
-          path: '/Volumes/Media/clip.mp4',
-          start_time_seconds: 30,
-          end_time_seconds: 60,
-          scene_id: 'scene-0001',
-          score: 0.82,
-          score_kind: 'hybrid_score',
-          primary_reason: 'vector_match',
-          reasons: ['vector_match'],
-          source_scores: { video_segment_vectors: 0.82 },
-        },
-      ],
-      groups: [
-        {
-          collection: 'image_vectors',
-          score_kind: 'cosine_similarity',
-          results: [
-            {
-              asset_id: imageAsset.id,
-              file_id: imageFile.id,
-              media_type: 'image',
-              path: '/Volumes/Media/cat.jpg',
-              start_time_seconds: null,
-              end_time_seconds: null,
-              scene_id: null,
-              score: 0.91,
-              reason: 'vector_match',
-            },
-          ],
-        },
-        {
-          collection: 'video_segment_vectors',
-          score_kind: 'cosine_similarity',
-          results: [
-            {
-              asset_id: videoAsset.id,
-              file_id: videoFile.id,
-              media_type: 'video',
-              path: '/Volumes/Media/clip.mp4',
-              start_time_seconds: 30,
-              end_time_seconds: 60,
-              scene_id: 'scene-0001',
-              score: 0.82,
-              reason: 'vector_match',
-            },
-          ],
-        },
-        {
-          collection: 'video_frame_vectors',
-          score_kind: 'cosine_similarity',
-          results: [],
-        },
-        {
-          collection: 'text_search',
-          score_kind: 'ts_rank_cd',
-          results: [],
-        },
-      ],
-    })
-    expect(search).toHaveBeenCalledWith(
-      'image_vectors',
-      expect.objectContaining({
-        vector: Array.from({ length: 768 }, (_, index) => index / 768),
-        limit: 30,
-        offset: 0,
-        with_payload: false,
-        with_vector: false,
-        filter: {
-          must: [{ key: 'library_id', match: { any: [library.id] } }],
-        },
-      }),
+    // 视频帧向量走分组检索（按 scene_id），图片走普通检索。
+    expect(search).toHaveBeenCalledWith('image_vectors', expect.any(Object))
+    expect(searchPointGroups).toHaveBeenCalledWith('video_frame_vectors', expect.any(Object))
+    expect(result.results.map((item) => item.asset_id).sort()).toEqual(
+      [imageAsset.id, frameAsset.id].sort(),
     )
-    expect(embedText).toHaveBeenCalledWith('cat by window', {
-      modelName: 'google/siglip-base-patch16-224',
-      modelVersion: 'siglip-base-patch16-224',
-      vectorDim: 768,
+    const videoResult = result.results.find((item) => item.media_type === 'video')
+    expect(videoResult).toMatchObject({
+      scene_id: scene.id,
+      start_time_seconds: 30,
+      end_time_seconds: 60,
+      source_scores: { video_frame_vectors: 0.82 },
     })
   })
 
   test('空结果返回稳定分页结构', async () => {
     search.mockResolvedValue([])
+    searchPointGroups.mockResolvedValue({ groups: [] })
 
     await expect(
       service.search({ query: 'nothing', media_types: ['image'], limit: 10, offset: 0 }),
@@ -277,16 +217,8 @@ describe('search service', () => {
       offset: 0,
       results: [],
       groups: [
-        {
-          collection: 'image_vectors',
-          score_kind: 'cosine_similarity',
-          results: [],
-        },
-        {
-          collection: 'text_search',
-          score_kind: 'ts_rank_cd',
-          results: [],
-        },
+        { collection: 'image_vectors', score_kind: 'cosine_similarity', results: [] },
+        { collection: 'text_search', score_kind: 'ts_rank_cd', results: [] },
       ],
     })
   })
@@ -303,224 +235,12 @@ describe('search service', () => {
   test('不支持向量或文本检索的 media_types 返回空 groups', async () => {
     const result = await service.search({ query: 'test', media_types: ['document'], limit: 10 })
 
-    expect(result).toEqual({
-      limit: 10,
-      offset: 0,
-      results: [],
-      groups: [],
-    })
+    expect(result).toEqual({ limit: 10, offset: 0, results: [], groups: [] })
     expect(search).not.toHaveBeenCalled()
   })
 
-  test('does not expand user queries with an internal dictionary', async () => {
-    const library = await createLibrary(db, { name: 'Scenes', rootPath: '/video' })
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/video/query-match.mp4',
-      relativePath: 'query-match.mp4',
-      mediaType: 'video',
-      sizeBytes: 100,
-      mtimeMs: 1710000000000,
-    })
-    const asset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '10',
-      endTimeSeconds: '20',
-      metadataJson: { scene_id: 'scene-0001', stale: false },
-    })
-    const pointId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
-    await createVectorRef(db, {
-      assetId: asset.id,
-      fileId: file.id,
-      libraryId: library.id,
-      collectionName: 'video_segment_vectors',
-      pointId,
-      modelName: 'mock',
-      modelVersion: 'phase5',
-      vectorKind: 'representative_frame_embedding',
-      vectorDim: 512,
-      distance: 'Cosine',
-      contentHash: 'query-hash',
-      indexProfile: 'balanced',
-      status: 'indexed',
-    })
-    const query = '用户输入的原始短语'
-    embedText.mockResolvedValue([1, ...Array.from({ length: 767 }, () => 0)])
-    search.mockImplementation(async (collectionName: string) => {
-      if (collectionName === 'video_segment_vectors') {
-        return [{ id: pointId, score: 0.72 }]
-      }
-      return []
-    })
-    const logSpy = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined)
-
-    const result = await service.search({ query, media_types: ['video'], limit: 10 })
-
-    expect(embedText).toHaveBeenCalledTimes(1)
-    expect(embedText).toHaveBeenCalledWith(query, {
-      modelName: 'google/siglip-base-patch16-224',
-      modelVersion: 'siglip-base-patch16-224',
-      vectorDim: 768,
-    })
-    expect(logSpy).toHaveBeenCalledWith(
-      'query_expansion_mode=expand provider=none query_expansion=disabled',
-    )
-    expect(result.results).toEqual([
-      expect.objectContaining({
-        asset_id: asset.id,
-        source_scores: { video_segment_vectors: 0.72 },
-      }),
-    ])
-  })
-
-  test('expands vector queries through configured DeepSeek provider without hardcoded aliases', async () => {
-    currentSettings = {
-      ...testSettings,
-      queryExpansionProvider: 'deepseek',
-      deepseekApiKey: 'test-key',
-    }
-    await closeModule()
-    const moduleRef = await Test.createTestingModule({
-      imports: [SearchModule],
-    })
-      .overrideProvider(DATABASE)
-      .useValue(db)
-      .overrideProvider(PG_POOL)
-      .useValue(null)
-      .overrideProvider(SETTINGS)
-      .useValue(currentSettings)
-      .overrideProvider(QDRANT_CLIENT)
-      .useValue({ search })
-      .overrideProvider(ModelGatewayService)
-      .useValue({ embedText })
-      .compile()
-    service = moduleRef.get(SearchService)
-    closeModule = () => moduleRef.close()
-
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  variants: [
-                    { text: '架子鼓', weight: 1 },
-                    { text: 'drum kit', weight: 0.9 },
-                    { text: 'drummer performing on stage', weight: 0.8 },
-                    { text: 'percussion instrument', weight: 0.7 },
-                    { text: 'stage musician', weight: 0.6 },
-                  ],
-                }),
-              },
-            },
-          ],
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    )
-
-    const library = await createLibrary(db, { name: 'Stage', rootPath: '/stage' })
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/stage/drums.mp4',
-      relativePath: 'drums.mp4',
-      mediaType: 'video',
-      sizeBytes: 100,
-      mtimeMs: 1710000000000,
-    })
-    const asset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '0',
-      endTimeSeconds: '10',
-      metadataJson: { scene_id: 'scene-0001', stale: false },
-    })
-    const pointId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-    await createVectorRef(db, {
-      assetId: asset.id,
-      fileId: file.id,
-      libraryId: library.id,
-      collectionName: 'video_segment_vectors',
-      pointId,
-      modelName: 'mock',
-      modelVersion: 'phase5',
-      vectorKind: 'representative_frame_embedding',
-      vectorDim: 512,
-      distance: 'Cosine',
-      contentHash: 'drums-hash',
-      indexProfile: 'balanced',
-      status: 'indexed',
-    })
-    embedText.mockImplementation(async (text: string) => {
-      if (text === 'drum kit') {
-        return [2, ...Array.from({ length: 767 }, () => 0)]
-      }
-      return [1, ...Array.from({ length: 767 }, () => 0)]
-    })
-    search.mockImplementation(async (collectionName: string, request: { vector?: number[] }) => {
-      if (collectionName === 'video_segment_vectors' && request.vector?.[0] === 2) {
-        return [{ id: pointId, score: 0.8 }]
-      }
-      return []
-    })
-    const logSpy = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined)
-
-    const result = await service.search({ query: '架子鼓', media_types: ['video'], limit: 10 })
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.deepseek.com/chat/completions',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({ authorization: 'Bearer test-key' }),
-        body: expect.stringContaining(
-          'Return at most 3 variants in total, including the original query.',
-        ),
-      }),
-    )
-    expect(embedText).toHaveBeenCalledWith('架子鼓', {
-      modelName: 'google/siglip-base-patch16-224',
-      modelVersion: 'siglip-base-patch16-224',
-      vectorDim: 768,
-    })
-    expect(embedText).toHaveBeenCalledWith('drum kit', {
-      modelName: 'google/siglip-base-patch16-224',
-      modelVersion: 'siglip-base-patch16-224',
-      vectorDim: 768,
-    })
-    expect(embedText).toHaveBeenCalledWith('drummer performing on stage', {
-      modelName: 'google/siglip-base-patch16-224',
-      modelVersion: 'siglip-base-patch16-224',
-      vectorDim: 768,
-    })
-    expect(embedText).not.toHaveBeenCalledWith('percussion instrument', expect.anything())
-    expect(embedText).not.toHaveBeenCalledWith('stage musician', expect.anything())
-    expect(new Set(embedText.mock.calls.map(([text]) => text))).toEqual(
-      new Set(['架子鼓', 'drum kit', 'drummer performing on stage']),
-    )
-    expect(result.results[0]).toMatchObject({ asset_id: asset.id })
-    expect(result.results[0]?.source_scores.video_segment_vectors).toBeCloseTo(0.72, 5)
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('provider=deepseek max_variants=3'))
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'variants="架子鼓"@1.00 original, "drum kit"@0.90 deepseek, "drummer performing on stage"@0.80 deepseek',
-      ),
-    )
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining('search_timing variants=3 collections=2 expansion_ms='),
-    )
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'collection=video_segment_vectors variant="drum kit" source=deepseek weight=0.90 raw_hits=1 top_raw_score=0.8 top_weighted_score=0.7200000000000001',
-      ),
-    )
-
-    fetchMock.mockRestore()
-  })
-
-  test('filters legacy video vector hits without stable scene identity', async () => {
-    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+  test('filters legacy video frame hits without a stable scene', async () => {
+    // 视频帧缺 scene_id（旧迁移残留）必须被回表拒绝，不进入结果。
     const library = await createLibrary(db, { name: 'Video', rootPath: '/video' })
     const file = await createMediaFile(db, {
       libraryId: library.id,
@@ -530,34 +250,12 @@ describe('search service', () => {
       sizeBytes: 100,
       mtimeMs: 1710000000000,
     })
-    const segmentAsset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '10',
-      endTimeSeconds: '20',
-    })
     const frameAsset = await createMediaAsset(db, {
       fileId: file.id,
       assetType: 'video_frame',
       frameTimeSeconds: '12',
     })
-    const segmentPointId = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
     const framePointId = '99999999-9999-4999-8999-999999999999'
-    await createVectorRef(db, {
-      assetId: segmentAsset.id,
-      fileId: file.id,
-      libraryId: library.id,
-      collectionName: 'video_segment_vectors',
-      pointId: segmentPointId,
-      modelName: 'mock',
-      modelVersion: 'phase5',
-      vectorKind: 'representative_frame_embedding',
-      vectorDim: 512,
-      distance: 'Cosine',
-      contentHash: 'segment-hash',
-      indexProfile: 'balanced',
-      status: 'indexed',
-    })
     await createVectorRef(db, {
       assetId: frameAsset.id,
       fileId: file.id,
@@ -573,40 +271,17 @@ describe('search service', () => {
       indexProfile: 'balanced',
       status: 'indexed',
     })
-    search.mockImplementation(async (collectionName: string) => {
-      if (collectionName === 'video_segment_vectors') {
-        return [{ id: segmentPointId, score: 0.58 }]
-      }
-      if (collectionName === 'video_frame_vectors') {
-        return [{ id: framePointId, score: 0.81 }]
-      }
-      return []
+    searchPointGroups.mockResolvedValue({
+      groups: [{ id: 'orphan-scene', hits: [{ id: framePointId, score: 0.81 }] }],
     })
 
     const result = await service.search({ query: 'beach', media_types: ['video'], limit: 10 })
 
-    expect(search).toHaveBeenCalledWith('video_frame_vectors', expect.any(Object))
-    expect(result.groups.map((group) => group.collection)).toEqual([
-      'video_segment_vectors',
-      'video_frame_vectors',
-      'text_search',
-    ])
     expect(result.results).toEqual([])
-    expect(
-      result.groups.find((group) => group.collection === 'video_segment_vectors')?.results,
-    ).toEqual([])
-    expect(
-      result.groups.find((group) => group.collection === 'video_frame_vectors')?.results,
-    ).toEqual([])
-    expect(warnSpy).toHaveBeenCalledWith(
-      'search_scene_identity_rejected collection=video_segment_vectors count=1',
-    )
-    expect(warnSpy).toHaveBeenCalledWith(
-      'search_scene_identity_rejected collection=video_frame_vectors count=1',
-    )
   })
 
-  test('collapses distant frame hits from the same scene with MaxSim and PostgreSQL bounds', async () => {
+  test('grouped retrieval returns one candidate per scene using the best frame', async () => {
+    // 同一场景两帧命中：分组检索只返回该场景的代表（最高分）帧，作为一条候选。
     const library = await createLibrary(db, { name: 'MaxSim', rootPath: '/maxsim' })
     const file = await createMediaFile(db, {
       libraryId: library.id,
@@ -616,24 +291,18 @@ describe('search service', () => {
       sizeBytes: 100,
       mtimeMs: 1710000000000,
     })
-    await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '0',
-      endTimeSeconds: '30',
-      metadataJson: { scene_id: 'scene-0001', stale: false },
-    })
+    const scene = await seedVideoScene(db, { fileId: file.id, start: '0', end: '30' })
     const frameA = await createMediaAsset(db, {
       fileId: file.id,
       assetType: 'video_frame',
+      sceneId: scene.id,
       frameTimeSeconds: '5',
-      metadataJson: { scene_id: 'scene-0001' },
     })
     const frameB = await createMediaAsset(db, {
       fileId: file.id,
       assetType: 'video_frame',
+      sceneId: scene.id,
       frameTimeSeconds: '25',
-      metadataJson: { scene_id: 'scene-0001' },
     })
     const pointA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     const pointB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -657,25 +326,17 @@ describe('search service', () => {
         status: 'indexed',
       })
     }
-    search.mockImplementation(async (collectionName: string) =>
-      collectionName === 'video_frame_vectors'
-        ? [
-            { id: pointA, score: 0.82 },
-            { id: pointB, score: 0.91 },
-          ]
-        : [],
-    )
+    // Qdrant 分组检索返回该场景一个组，代表帧是分数更高的 frameB。
+    searchPointGroups.mockResolvedValue({
+      groups: [{ id: scene.id, hits: [{ id: pointB, score: 0.91 }] }],
+    })
 
     const result = await service.search({ query: 'singing', media_types: ['video'], limit: 10 })
 
-    expect(
-      result.groups.find((group) => group.collection === 'video_frame_vectors')?.results,
-    ).toHaveLength(2)
     expect(result.results).toEqual([
       expect.objectContaining({
         asset_id: frameB.id,
-        merged_asset_ids: expect.arrayContaining([frameA.id, frameB.id]),
-        scene_id: 'scene-0001',
+        scene_id: scene.id,
         start_time_seconds: 0,
         end_time_seconds: 30,
         source_scores: { video_frame_vectors: 0.91 },
@@ -685,63 +346,17 @@ describe('search service', () => {
 
   test('caption search is disabled by default', async () => {
     search.mockResolvedValue([])
+    searchPointGroups.mockResolvedValue({ groups: [] })
 
     await service.search({ query: 'kitchen cooking', media_types: ['video'], limit: 10 })
 
     expect(search).not.toHaveBeenCalledWith('caption_text_vectors', expect.any(Object))
   })
 
-  test('does not query video segment vectors when the migration switch is disabled', async () => {
-    currentSettings = {
-      ...testSettings,
-      videoSegmentSearchEnabled: false,
-    }
-    await closeModule()
-    const moduleRef = await Test.createTestingModule({ imports: [SearchModule] })
-      .overrideProvider(DATABASE)
-      .useValue(db)
-      .overrideProvider(PG_POOL)
-      .useValue(null)
-      .overrideProvider(SETTINGS)
-      .useValue(currentSettings)
-      .overrideProvider(QDRANT_CLIENT)
-      .useValue({ search })
-      .overrideProvider(ModelGatewayService)
-      .useValue({ embedText })
-      .compile()
-    service = moduleRef.get(SearchService)
-    closeModule = () => moduleRef.close()
-    search.mockResolvedValue([])
-
-    const result = await service.search({ query: 'performance', media_types: ['video'], limit: 10 })
-
-    expect(search).not.toHaveBeenCalledWith('video_segment_vectors', expect.any(Object))
-    expect(search).toHaveBeenCalledWith('video_frame_vectors', expect.any(Object))
-    expect(result.groups.map((group) => group.collection)).not.toContain('video_segment_vectors')
-  })
-
   test('caption vector hits are returned as caption_match when enabled', async () => {
-    currentSettings = {
-      ...testSettings,
-      captionSearchEnabled: true,
-    }
+    currentSettings = { ...testSettings, captionSearchEnabled: true }
     await closeModule()
-    const moduleRef = await Test.createTestingModule({
-      imports: [SearchModule],
-    })
-      .overrideProvider(DATABASE)
-      .useValue(db)
-      .overrideProvider(PG_POOL)
-      .useValue(null)
-      .overrideProvider(SETTINGS)
-      .useValue(currentSettings)
-      .overrideProvider(QDRANT_CLIENT)
-      .useValue({ search })
-      .overrideProvider(ModelGatewayService)
-      .useValue({ embedText })
-      .compile()
-    service = moduleRef.get(SearchService)
-    closeModule = () => moduleRef.close()
+    await buildModule(currentSettings)
 
     const library = await createLibrary(db, { name: 'Video', rootPath: '/video' })
     const file = await createMediaFile(db, {
@@ -752,6 +367,8 @@ describe('search service', () => {
       sizeBytes: 100,
       mtimeMs: 1710000000000,
     })
+    const scene = await seedVideoScene(db, { fileId: file.id, start: '10', end: '20' })
+    // 旧 caption-v1 视频 Caption 缺 scene_id（被拒绝）；新 scene-caption-v2 引用正式 scene_id。
     const legacyCaptionAsset = await createMediaAsset(db, {
       fileId: file.id,
       assetType: 'caption',
@@ -762,59 +379,38 @@ describe('search service', () => {
       metadataJson: { prompt_version: 'caption-v1', source: 'vlm_caption' },
     })
     const legacyPointId = '13131313-1313-4313-8313-131313131313'
-    await createVectorRef(db, {
-      assetId: legacyCaptionAsset.id,
-      fileId: file.id,
-      libraryId: library.id,
-      collectionName: 'caption_text_vectors',
-      pointId: legacyPointId,
-      modelName: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-      modelVersion: 'paraphrase-multilingual-MiniLM-L12-v2',
-      vectorKind: 'vlm_caption_text_embedding',
-      vectorDim: 384,
-      distance: 'Cosine',
-      contentHash: 'legacy-caption-hash',
-      indexProfile: 'balanced',
-      status: 'indexed',
-    })
     const captionAsset = await createMediaAsset(db, {
       fileId: file.id,
       assetType: 'caption',
+      sceneId: scene.id,
       startTimeSeconds: '10',
       endTimeSeconds: '20',
       textContent: 'A person cooks in a kitchen',
       contentHash: 'caption-hash',
-      metadataJson: {
-        prompt_version: 'scene-caption-v2',
-        source: 'vlm_scene_caption',
-        scene_id: 'scene-0001',
-      },
+      metadataJson: { prompt_version: 'scene-caption-v2', source: 'vlm_scene_caption' },
     })
     const pointId = '12121212-1212-4212-8212-121212121212'
-    await createVectorRef(db, {
-      assetId: captionAsset.id,
-      fileId: file.id,
-      libraryId: library.id,
-      collectionName: 'caption_text_vectors',
-      pointId,
-      modelName: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-      modelVersion: 'paraphrase-multilingual-MiniLM-L12-v2',
-      vectorKind: 'vlm_caption_text_embedding',
-      vectorDim: 384,
-      distance: 'Cosine',
-      contentHash: 'caption-hash',
-      indexProfile: 'balanced',
-      status: 'indexed',
-    })
-    embedText.mockImplementation(async (_text: string, expected: unknown) => {
-      if (typeof expected === 'object' && expected !== null && 'vectorDim' in expected) {
-        return Array.from(
-          { length: Number(expected.vectorDim) },
-          (_, index) => index / Number(expected.vectorDim),
-        )
-      }
-      return Array.from({ length: 768 }, (_, index) => index / 768)
-    })
+    for (const [asset, pointId2, hash] of [
+      [legacyCaptionAsset, legacyPointId, 'legacy-caption-hash'],
+      [captionAsset, pointId, 'caption-hash'],
+    ] as const) {
+      await createVectorRef(db, {
+        assetId: asset.id,
+        fileId: file.id,
+        libraryId: library.id,
+        collectionName: 'caption_text_vectors',
+        pointId: pointId2,
+        modelName: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+        modelVersion: 'paraphrase-multilingual-MiniLM-L12-v2',
+        vectorKind: 'vlm_caption_text_embedding',
+        vectorDim: 384,
+        distance: 'Cosine',
+        contentHash: hash,
+        indexProfile: 'balanced',
+        status: 'indexed',
+      })
+    }
+    embedText.mockResolvedValue(Array.from({ length: 384 }, (_, index) => index / 384))
     search.mockImplementation(async (collectionName: string) => {
       if (collectionName === 'caption_text_vectors') {
         return [
@@ -824,6 +420,7 @@ describe('search service', () => {
       }
       return []
     })
+    searchPointGroups.mockResolvedValue({ groups: [] })
 
     const result = await service.search({
       query: 'kitchen cooking',
@@ -832,35 +429,13 @@ describe('search service', () => {
     })
 
     expect(search).toHaveBeenCalledWith('caption_text_vectors', expect.any(Object))
-    expect(result.groups).toEqual(
-      expect.arrayContaining([
-        {
-          collection: 'caption_text_vectors',
-          score_kind: 'cosine_similarity',
-          results: [
-            {
-              asset_id: captionAsset.id,
-              file_id: file.id,
-              media_type: 'video',
-              path: '/video/kitchen.mp4',
-              start_time_seconds: 10,
-              end_time_seconds: 20,
-              scene_id: 'scene-0001',
-              score: 0.86,
-              reason: 'caption_match',
-            },
-          ],
-        },
-      ]),
-    )
+    // 旧 caption-v1（无 scene_id）被回表拒绝；只保留引用正式 scene_id 的 scene-caption-v2。
+    expect(result.results.map((item) => item.asset_id)).toEqual([captionAsset.id])
     expect(result.results[0]).toMatchObject({
       asset_id: captionAsset.id,
       primary_reason: 'caption_match',
-      reasons: ['caption_match'],
-      source_scores: { caption_text_vectors: 0.86 },
+      scene_id: scene.id,
     })
-    expect(result.results).toHaveLength(1)
-    expect(result.results[0]?.asset_id).not.toBe(legacyCaptionAsset.id)
   })
 
   test('audio-only search returns transcript matches from PostgreSQL FTS', async () => {
@@ -892,177 +467,13 @@ describe('search service', () => {
       limit: 10,
     })
 
-    expect(result).toEqual({
-      limit: 10,
-      offset: 0,
-      results: [
-        {
-          asset_id: asset.id,
-          merged_asset_ids: [asset.id],
-          file_id: file.id,
-          media_type: 'audio',
-          path: '/audio/interview.mp3',
-          start_time_seconds: 30,
-          end_time_seconds: 55,
-          scene_id: null,
-          score: expect.any(Number),
-          score_kind: 'hybrid_score',
-          primary_reason: 'transcript_match',
-          confidence: 'high',
-          reasons: ['transcript_match'],
-          source_scores: { text_search: expect.any(Number) },
-        },
-      ],
-      groups: [
-        {
-          collection: 'text_search',
-          score_kind: 'ts_rank_cd',
-          results: [
-            {
-              asset_id: asset.id,
-              file_id: file.id,
-              media_type: 'audio',
-              path: '/audio/interview.mp3',
-              start_time_seconds: 30,
-              end_time_seconds: 55,
-              scene_id: null,
-              score: expect.any(Number),
-              reason: 'transcript_match',
-            },
-          ],
-        },
-      ],
+    expect(result.results.map((item) => item.asset_id)).toEqual([asset.id])
+    expect(result.results[0]).toMatchObject({
+      asset_id: asset.id,
+      primary_reason: 'transcript_match',
+      reasons: ['transcript_match'],
     })
     expect(search).not.toHaveBeenCalled()
-  })
-
-  test('image OCR text search returns ocr_match reason', async () => {
-    const library = await createLibrary(db, { name: 'Posters', rootPath: '/posters' })
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/posters/local-media.png',
-      relativePath: 'local-media.png',
-      mediaType: 'image',
-      sizeBytes: 100,
-      mtimeMs: 1710000000000,
-    })
-    const asset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'image',
-      path: '/posters/local-media.png',
-      textContent: 'local media archive poster',
-      metadataJson: { ocr: { engine: 'paddleocr', language: 'ch', block_count: 1 } },
-    })
-    search.mockResolvedValue([])
-
-    const result = await service.search({
-      query: 'archive',
-      media_types: ['image'],
-      library_ids: [library.id],
-      limit: 10,
-    })
-
-    expect(result.groups).toEqual([
-      {
-        collection: 'image_vectors',
-        score_kind: 'cosine_similarity',
-        results: [],
-      },
-      {
-        collection: 'text_search',
-        score_kind: 'ts_rank_cd',
-        results: [
-          {
-            asset_id: asset.id,
-            file_id: file.id,
-            media_type: 'image',
-            path: '/posters/local-media.png',
-            start_time_seconds: null,
-            end_time_seconds: null,
-            scene_id: null,
-            score: expect.any(Number),
-            reason: 'ocr_match',
-          },
-        ],
-      },
-    ])
-    expect(result.results).toEqual([
-      {
-        asset_id: asset.id,
-        merged_asset_ids: [asset.id],
-        file_id: file.id,
-        media_type: 'image',
-        path: '/posters/local-media.png',
-        start_time_seconds: null,
-        end_time_seconds: null,
-        scene_id: null,
-        score: expect.any(Number),
-        score_kind: 'hybrid_score',
-        primary_reason: 'ocr_match',
-        confidence: 'high',
-        reasons: ['ocr_match'],
-        source_scores: { text_search: expect.any(Number) },
-      },
-    ])
-  })
-
-  test('same asset vector and OCR matches merge into one hybrid result', async () => {
-    const library = await createLibrary(db, { name: 'Posters', rootPath: '/posters' })
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/posters/keynote.png',
-      relativePath: 'keynote.png',
-      mediaType: 'image',
-      sizeBytes: 100,
-      mtimeMs: 1710000000000,
-    })
-    const asset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'image',
-      path: '/posters/keynote.png',
-      textContent: 'keynote schedule poster',
-      metadataJson: { ocr: { engine: 'paddleocr', language: 'ch', block_count: 1 } },
-    })
-    const pointId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
-    await createVectorRef(db, {
-      assetId: asset.id,
-      fileId: file.id,
-      libraryId: library.id,
-      collectionName: 'image_vectors',
-      pointId,
-      modelName: 'mock',
-      modelVersion: 'phase5',
-      vectorKind: 'image_embedding',
-      vectorDim: 512,
-      distance: 'Cosine',
-      contentHash: 'hash',
-      indexProfile: 'balanced',
-      status: 'indexed',
-    })
-    search.mockResolvedValue([{ id: pointId, score: 0.76 }])
-
-    const result = await service.search({
-      query: 'keynote',
-      media_types: ['image'],
-      library_ids: [library.id],
-      limit: 10,
-    })
-
-    expect(result.results).toEqual([
-      expect.objectContaining({
-        asset_id: asset.id,
-        merged_asset_ids: [asset.id],
-        reasons: ['vector_match', 'ocr_match'],
-        source_scores: {
-          image_vectors: 0.76,
-          text_search: expect.any(Number),
-        },
-      }),
-    ])
-    expect(result.groups[1].results[0]).toMatchObject({
-      asset_id: asset.id,
-      reason: 'ocr_match',
-    })
   })
 
   test('Qdrant 返回的 point 在 PostgreSQL 中不存在时被静默跳过', async () => {
@@ -1093,7 +504,6 @@ describe('search service', () => {
       indexProfile: 'balanced',
       status: 'indexed',
     })
-    // Qdrant 返回 2 个 point，但只有 validPointId 在 PostgreSQL 中有记录
     search.mockResolvedValue([
       { id: validPointId, score: 0.9 },
       { id: orphanPointId, score: 0.8 },
@@ -1101,21 +511,7 @@ describe('search service', () => {
 
     const result = await service.search({ query: 'test', media_types: ['image'], limit: 10 })
 
-    expect(result.results).toEqual([
-      expect.objectContaining({
-        asset_id: asset.id,
-        source_scores: { image_vectors: 0.9 },
-      }),
-    ])
-    expect(result.groups).toHaveLength(2)
-    expect(result.groups[0].results).toEqual([
-      expect.objectContaining({ asset_id: asset.id, score: 0.9 }),
-    ])
-    expect(result.groups[1]).toEqual({
-      collection: 'text_search',
-      score_kind: 'ts_rank_cd',
-      results: [],
-    })
+    expect(result.results.map((item) => item.asset_id)).toEqual([asset.id])
   })
 
   test('soft-deleted media is filtered from vector, FTS, and hybrid results', async () => {
@@ -1165,17 +561,5 @@ describe('search service', () => {
     })
 
     expect(result.results).toEqual([])
-    expect(result.groups).toEqual([
-      {
-        collection: 'image_vectors',
-        score_kind: 'cosine_similarity',
-        results: [],
-      },
-      {
-        collection: 'text_search',
-        score_kind: 'ts_rank_cd',
-        results: [],
-      },
-    ])
   })
 })

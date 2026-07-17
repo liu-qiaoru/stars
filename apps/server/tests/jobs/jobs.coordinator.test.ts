@@ -3,17 +3,16 @@ import { JobsCoordinatorService } from "../../src/jobs/jobs-coordinator.service.
 import type { JobsService } from "../../src/jobs/jobs.service.js";
 import type { Settings } from "../../src/config/settings.js";
 
+// 阶段 2 删除 OCR 后，协调器只负责把 pending vector_refs 转成 embedding jobs。
 const enabledSettings = {
   jobCoordinatorEnabled: true,
   jobCoordinatorIntervalMs: 1000,
   jobCoordinatorEmbeddingLimit: 25,
-  jobCoordinatorOcrLimit: 50,
 } as Settings;
 
 function createJobsService() {
   return {
     queuePendingEmbeddingJobs: vi.fn().mockResolvedValue({ scanned: 0, created: 0, skipped: 0 }),
-    queuePendingOcrJobs: vi.fn().mockResolvedValue({ scanned: 0, created: 0, skipped: 0 }),
   } as unknown as JobsService;
 }
 
@@ -26,7 +25,7 @@ describe("JobsCoordinatorService", () => {
     vi.useRealTimers();
   });
 
-  test("启动后立即协调 pending embedding 和 OCR，并按间隔继续协调", async () => {
+  test("启动后立即协调 pending embedding，并按间隔继续协调", async () => {
     const jobsService = createJobsService();
     const coordinator = new JobsCoordinatorService(jobsService, enabledSettings);
 
@@ -35,12 +34,10 @@ describe("JobsCoordinatorService", () => {
     await Promise.resolve();
 
     expect(jobsService.queuePendingEmbeddingJobs).toHaveBeenCalledWith(25);
-    expect(jobsService.queuePendingOcrJobs).toHaveBeenCalledWith({ limit: 50 });
 
     await vi.advanceTimersByTimeAsync(1000);
 
     expect(jobsService.queuePendingEmbeddingJobs).toHaveBeenCalledTimes(2);
-    expect(jobsService.queuePendingOcrJobs).toHaveBeenCalledTimes(2);
 
     coordinator.onApplicationShutdown();
   });
@@ -57,7 +54,6 @@ describe("JobsCoordinatorService", () => {
     await vi.advanceTimersByTimeAsync(1000);
 
     expect(jobsService.queuePendingEmbeddingJobs).not.toHaveBeenCalled();
-    expect(jobsService.queuePendingOcrJobs).not.toHaveBeenCalled();
   });
 
   test("上一轮协调未完成时跳过重入，避免重复创建 active jobs", async () => {
@@ -73,14 +69,12 @@ describe("JobsCoordinatorService", () => {
     coordinator.onApplicationBootstrap();
     await vi.advanceTimersByTimeAsync(1000);
 
+    // embedding 还没 resolve，runOnce 仍在进行中，下一个 tick 必须被重入保护跳过。
     expect(jobsService.queuePendingEmbeddingJobs).toHaveBeenCalledTimes(1);
-    expect(jobsService.queuePendingOcrJobs).not.toHaveBeenCalled();
 
     finishEmbedding();
     await Promise.resolve();
     await Promise.resolve();
-
-    expect(jobsService.queuePendingOcrJobs).toHaveBeenCalledTimes(1);
 
     coordinator.onApplicationShutdown();
   });

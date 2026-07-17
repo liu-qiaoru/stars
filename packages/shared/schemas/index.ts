@@ -7,7 +7,6 @@ const positiveNumberSchema = z.number().positive()
 const nonNegativeNumberSchema = z.number().min(0)
 const collectionSchema = z.enum(vectorCollectionNames)
 const indexProfileSchema = z.enum(indexProfiles)
-const keyframeDensitySchema = z.enum(['light', 'balanced', 'dense'])
 
 // 这里是跨语言 job 协议的事实来源：NestJS 创建 job，Python worker 读取生成的 JSON Schema 校验输入。
 // 新 job type 必须先在这里声明输入/输出，再生成 packages/shared/generated/job-schemas.json。
@@ -41,22 +40,21 @@ export const probeMediaOutputSchema = z.object({
   streams: nonNegativeIntegerSchema,
 })
 
+// index_media 不再携带 segment_strategy：旧 fixed_30s fallback 已删除，视频索引只走
+// PySceneDetect 场景检测；检测失败直接让任务失败，不再回退到固定窗口。
 export const indexMediaInputSchema = z.object({
   file_id: uuidSchema,
   index_profile: indexProfileSchema,
-  segment_strategy: z.enum(['fixed_30s', 'scene_detection']),
 })
 
+// 输出不再有 segment_strategy / fallback / fallback_reason / keyframes_selected /
+// keyframe_density：场景检测要么成功写出 video_scenes 与 video_frame，要么结构化失败。
 export const indexMediaOutputSchema = z.object({
   assets_created: nonNegativeIntegerSchema,
   vector_refs_created: nonNegativeIntegerSchema,
   collections: z.array(collectionSchema),
-  segment_strategy: z.enum(['fixed_30s', 'scene_detection']),
-  fallback: z.boolean(),
-  fallback_reason: z.string().min(1).optional(),
   scenes_detected: nonNegativeIntegerSchema.optional(),
-  keyframes_selected: nonNegativeIntegerSchema.optional(),
-  keyframe_density: keyframeDensitySchema.optional(),
+  frames_created: nonNegativeIntegerSchema.optional(),
 })
 
 export const transcribeAudioInputSchema = z.object({
@@ -73,18 +71,6 @@ export const transcribeAudioOutputSchema = z.object({
   duration_seconds: nonNegativeNumberSchema.optional(),
 })
 
-export const runOcrInputSchema = z.object({
-  asset_ids: z.array(uuidSchema).min(1),
-  engine: z.literal('paddleocr').default('paddleocr'),
-  language: z.string().min(1).default('ch'),
-})
-
-export const runOcrOutputSchema = z.object({
-  assets_processed: nonNegativeIntegerSchema,
-  text_written: nonNegativeIntegerSchema,
-  skipped_no_text: nonNegativeIntegerSchema,
-})
-
 export const embedImageInputSchema = z.object({
   asset_id: uuidSchema,
   path: z.string().min(1),
@@ -93,11 +79,12 @@ export const embedImageInputSchema = z.object({
   model_version: z.string().min(1),
 })
 
+// 视频帧向量只写入 video_frame_vectors；video_segment_vectors 集合已删除（场景不再有独立向量点）。
 export const embedVideoFrameInputSchema = z.object({
   asset_id: uuidSchema,
   frame_path: z.string().min(1),
   frame_time_seconds: nonNegativeNumberSchema.optional(),
-  collection: z.union([z.literal('video_frame_vectors'), z.literal('video_segment_vectors')]),
+  collection: z.literal('video_frame_vectors'),
   model_name: z.string().min(1),
   model_version: z.string().min(1),
 })
@@ -109,10 +96,15 @@ export const embedTextAssetInputSchema = z.object({
   model_version: z.string().min(1),
 })
 
+// generate_caption 支持两种来源，由 prompt_version 决定（Worker 侧强制）：
+// - caption-v1（图片）：source_asset_ids 给出图片 asset，无 scene_id。
+// - scene-caption-v2（视频场景）：scene_id 给出正式 video_scenes.id，Worker 通过它取按时间
+//   排序的场景帧；不再接受 video_segment 来源，也不再从 metadata_json.scene_id 解析。
 export const generateCaptionInputSchema = z.object({
   file_id: uuidSchema,
-  source_asset_ids: z.array(uuidSchema).min(1),
   prompt_version: z.enum(['caption-v1', 'scene-caption-v2']).default('caption-v1'),
+  source_asset_ids: z.array(uuidSchema).min(1).optional(),
+  scene_id: uuidSchema.optional(),
   model_name: z.string().min(1).default('Qwen/Qwen2.5-VL-7B-Instruct'),
   model_version: z.string().min(1).default('qwen2.5-vl-7b-instruct'),
 })
@@ -154,7 +146,6 @@ export const jobInputSchemas = {
   probe_media: probeMediaInputSchema,
   index_media: indexMediaInputSchema,
   transcribe_audio: transcribeAudioInputSchema,
-  run_ocr: runOcrInputSchema,
   embed_image: embedImageInputSchema,
   embed_video_frame: embedVideoFrameInputSchema,
   embed_text_asset: embedTextAssetInputSchema,
@@ -168,7 +159,6 @@ export const jobOutputSchemas = {
   probe_media: probeMediaOutputSchema,
   index_media: indexMediaOutputSchema,
   transcribe_audio: transcribeAudioOutputSchema,
-  run_ocr: runOcrOutputSchema,
   embed_image: embeddingOutputSchema,
   embed_video_frame: embeddingOutputSchema,
   embed_text_asset: embeddingOutputSchema,

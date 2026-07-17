@@ -36,6 +36,13 @@
       "when": 1783958400000,
       "tag": "0004_stale_legacy_video_captions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783958400001,
+      "tag": "0005_rebuild_scene_schema",
+      "breakpoints": true
     }
   ]
 }

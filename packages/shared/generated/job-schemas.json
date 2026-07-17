@@ -141,19 +141,11 @@
               "balanced",
               "dense"
             ]
-          },
-          "segment_strategy": {
-            "type": "string",
-            "enum": [
-              "fixed_30s",
-              "scene_detection"
-            ]
           }
         },
         "required": [
           "file_id",
-          "index_profile",
-          "segment_strategy"
+          "index_profile"
         ],
         "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
@@ -176,50 +168,23 @@
               "enum": [
                 "image_vectors",
                 "video_frame_vectors",
-                "video_segment_vectors",
-                "audio_segment_vectors",
-                "caption_text_vectors",
-                "text_chunk_vectors"
+                "caption_text_vectors"
               ]
             }
-          },
-          "segment_strategy": {
-            "type": "string",
-            "enum": [
-              "fixed_30s",
-              "scene_detection"
-            ]
-          },
-          "fallback": {
-            "type": "boolean"
-          },
-          "fallback_reason": {
-            "type": "string",
-            "minLength": 1
           },
           "scenes_detected": {
             "type": "integer",
             "minimum": 0
           },
-          "keyframes_selected": {
+          "frames_created": {
             "type": "integer",
             "minimum": 0
-          },
-          "keyframe_density": {
-            "type": "string",
-            "enum": [
-              "light",
-              "balanced",
-              "dense"
-            ]
           }
         },
         "required": [
           "assets_created",
           "vector_refs_created",
-          "collections",
-          "segment_strategy",
-          "fallback"
+          "collections"
         ],
         "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"
@@ -287,60 +252,6 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
-    "run_ocr": {
-      "input": {
-        "type": "object",
-        "properties": {
-          "asset_ids": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "minItems": 1
-          },
-          "engine": {
-            "type": "string",
-            "const": "paddleocr",
-            "default": "paddleocr"
-          },
-          "language": {
-            "type": "string",
-            "minLength": 1,
-            "default": "ch"
-          }
-        },
-        "required": [
-          "asset_ids"
-        ],
-        "additionalProperties": false,
-        "$schema": "http://json-schema.org/draft-07/schema#"
-      },
-      "output": {
-        "type": "object",
-        "properties": {
-          "assets_processed": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "text_written": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "skipped_no_text": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "assets_processed",
-          "text_written",
-          "skipped_no_text"
-        ],
-        "additionalProperties": false,
-        "$schema": "http://json-schema.org/draft-07/schema#"
-      }
-    },
     "embed_image": {
       "input": {
         "type": "object",
@@ -388,10 +299,7 @@
             "enum": [
               "image_vectors",
               "video_frame_vectors",
-              "video_segment_vectors",
-              "audio_segment_vectors",
-              "caption_text_vectors",
-              "text_chunk_vectors"
+              "caption_text_vectors"
             ]
           },
           "vector_dim": {
@@ -436,10 +344,7 @@
           },
           "collection": {
             "type": "string",
-            "enum": [
-              "video_frame_vectors",
-              "video_segment_vectors"
-            ]
+            "const": "video_frame_vectors"
           },
           "model_name": {
             "type": "string",
@@ -472,10 +377,7 @@
             "enum": [
               "image_vectors",
               "video_frame_vectors",
-              "video_segment_vectors",
-              "audio_segment_vectors",
-              "caption_text_vectors",
-              "text_chunk_vectors"
+              "caption_text_vectors"
             ]
           },
           "vector_dim": {
@@ -544,10 +446,7 @@
             "enum": [
               "image_vectors",
               "video_frame_vectors",
-              "video_segment_vectors",
-              "audio_segment_vectors",
-              "caption_text_vectors",
-              "text_chunk_vectors"
+              "caption_text_vectors"
             ]
           },
           "vector_dim": {
@@ -582,6 +481,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "prompt_version": {
+            "type": "string",
+            "enum": [
+              "caption-v1",
+              "scene-caption-v2"
+            ],
+            "default": "caption-v1"
+          },
           "source_asset_ids": {
             "type": "array",
             "items": {
@@ -590,13 +497,9 @@
             },
             "minItems": 1
           },
-          "prompt_version": {
+          "scene_id": {
             "type": "string",
-            "enum": [
-              "caption-v1",
-              "scene-caption-v2"
-            ],
-            "default": "caption-v1"
+            "format": "uuid"
           },
           "model_name": {
             "type": "string",
@@ -610,8 +513,7 @@
           }
         },
         "required": [
-          "file_id",
-          "source_asset_ids"
+          "file_id"
         ],
         "additionalProperties": false,
         "$schema": "http://json-schema.org/draft-07/schema#"

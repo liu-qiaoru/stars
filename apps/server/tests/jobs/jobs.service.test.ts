@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { SETTINGS } from '../../src/config/settings.js'
 import { DATABASE, PG_POOL } from '../../src/database/database.module.js'
 import {
@@ -59,136 +59,6 @@ afterEach(async () => {
 })
 
 describe('jobs service', () => {
-  test('video reindex controller maps snake_case rollout inputs', () => {
-    const jobsService = {
-      queueVideoReindexJobs: vi.fn().mockReturnValue({ scanned: 0, created: 0 }),
-    } as unknown as JobsService
-    const controller = new JobsController(jobsService)
-
-    controller.queueVideoReindexJobs({
-      library_id: '11111111-1111-4111-8111-111111111111',
-      file_id: '22222222-2222-4222-8222-222222222222',
-      limit: 25,
-      dry_run: true,
-      only_not_ready: false,
-    })
-
-    expect(jobsService.queueVideoReindexJobs).toHaveBeenCalledWith({
-      libraryId: '11111111-1111-4111-8111-111111111111',
-      fileId: '22222222-2222-4222-8222-222222222222',
-      limit: 25,
-      dryRun: true,
-      onlyNotReady: false,
-    })
-  })
-
-  test('video reindex supports dry-run and skips an already active file', async () => {
-    const library = await createLibrary(db, { name: 'Video', rootPath: '/video' })
-    const video = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/video/clip.mp4',
-      relativePath: 'clip.mp4',
-      mediaType: 'video',
-      sizeBytes: 20,
-      mtimeMs: 2,
-    })
-    await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/video/poster.jpg',
-      relativePath: 'poster.jpg',
-      mediaType: 'image',
-      sizeBytes: 10,
-      mtimeMs: 1,
-    })
-
-    await expect(
-      service.queueVideoReindexJobs({ limit: 100, dryRun: true }),
-    ).resolves.toMatchObject({
-      scanned: 1,
-      queueable: 1,
-      created: 0,
-      skipped_active: 0,
-      dry_run: true,
-      file_ids: [video.id],
-    })
-    await expect(service.listJobs()).resolves.toMatchObject({ total: 0 })
-
-    await expect(service.queueVideoReindexJobs({ limit: 100 })).resolves.toMatchObject({
-      created: 1,
-      file_ids: [video.id],
-    })
-    await expect(service.queueVideoReindexJobs({ limit: 100 })).resolves.toMatchObject({
-      created: 0,
-      skipped_active: 1,
-    })
-  })
-
-  test('video reindex readiness reports missing frames, long segments, and active segment refs', async () => {
-    const library = await createLibrary(db, { name: 'Readiness', rootPath: '/ready' })
-    const video = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/ready/clip.mp4',
-      relativePath: 'clip.mp4',
-      mediaType: 'video',
-      sizeBytes: 20,
-      mtimeMs: 2,
-    })
-    const segment = await createMediaAsset(db, {
-      fileId: video.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '0',
-      endTimeSeconds: '60',
-      metadataJson: { scene_id: 'scene-0001', stale: false },
-    })
-    await createVectorRef(db, {
-      assetId: segment.id,
-      fileId: video.id,
-      libraryId: library.id,
-      collectionName: 'video_segment_vectors',
-      pointId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      modelName: 'mock',
-      modelVersion: 'v1',
-      vectorKind: 'representative_frame_embedding',
-      vectorDim: 768,
-      distance: 'Cosine',
-      contentHash: 'segment',
-      indexProfile: 'balanced',
-      status: 'indexed',
-    })
-
-    await expect(service.getVideoReindexReadiness()).resolves.toMatchObject({
-      ready: false,
-      active_video_files: 1,
-      active_video_segments: 1,
-      segments_without_frames: 1,
-      segments_over_30_seconds: 1,
-      active_video_segment_vector_refs: 1,
-      segments_without_scene_caption_v2: 1,
-      missing_file_ids: [video.id],
-    })
-  })
-
-  test('OCR queue-pending controller 透传 limit 和 batch size', () => {
-    const jobsService = {
-      queuePendingOcrJobs: vi.fn().mockReturnValue({ scanned: 0, created: 0, skipped: 0 }),
-    } as unknown as JobsService
-    const controller = new JobsController(jobsService)
-
-    controller.queuePendingOcrJobs({
-      library_id: '11111111-1111-4111-8111-111111111111',
-      file_id: '22222222-2222-4222-8222-222222222222',
-      batch_size: 5,
-      limit: 50,
-    })
-
-    expect(jobsService.queuePendingOcrJobs).toHaveBeenCalledWith({
-      libraryId: '11111111-1111-4111-8111-111111111111',
-      fileId: '22222222-2222-4222-8222-222222222222',
-      batchSize: 5,
-      limit: 50,
-    })
-  })
-
   test('按优先级 claim queued job 并写入 worker lock', async () => {
     await createJob(db, {
       jobType: 'scan_library',
@@ -301,20 +171,22 @@ describe('jobs service', () => {
       path: '/media/poster.png',
     })
 
+    // index_media 输入不再包含 segment_strategy（阶段 2 删除）；OCR 任务已删除，用 embed_image 覆盖图片路径映射。
     await createJob(db, {
       jobType: 'index_media',
       inputJson: {
         file_id: file.id,
         index_profile: 'balanced',
-        segment_strategy: 'fixed_30s',
       },
     })
     await createJob(db, {
-      jobType: 'run_ocr',
+      jobType: 'embed_image',
       inputJson: {
-        asset_ids: [imageAsset.id],
-        engine: 'paddleocr',
-        language: 'ch',
+        asset_id: imageAsset.id,
+        path: '/media/poster.png',
+        collection: 'image_vectors',
+        model_name: 'google/siglip-base-patch16-224',
+        model_version: 'siglip-base-patch16-224',
       },
     })
     await createJob(db, {
@@ -333,7 +205,7 @@ describe('jobs service', () => {
           file_paths: ['/media/clip.mp4'],
         }),
         expect.objectContaining({
-          job_type: 'run_ocr',
+          job_type: 'embed_image',
           file_paths: ['/media/poster.png'],
         }),
         expect.objectContaining({
@@ -344,7 +216,7 @@ describe('jobs service', () => {
     })
   })
 
-  test('将 pending image 和 video segment vector_refs 转成 embedding jobs', async () => {
+  test('将 pending image 和 video frame vector_refs 转成 embedding jobs', async () => {
     const library = await createLibrary(db, { name: 'Main', rootPath: '/media' })
     const imageFile = await createMediaFile(db, {
       libraryId: library.id,
@@ -368,12 +240,11 @@ describe('jobs service', () => {
       sizeBytes: 20,
       mtimeMs: 2,
     })
-    const segmentAsset = await createMediaAsset(db, {
+    const frameAsset = await createMediaAsset(db, {
       fileId: videoFile.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '30',
-      endTimeSeconds: '60',
-      contentHash: 'segment-hash',
+      assetType: 'video_frame',
+      frameTimeSeconds: '45',
+      contentHash: 'frame-hash',
     })
 
     await createVectorRef(db, {
@@ -391,17 +262,17 @@ describe('jobs service', () => {
       indexProfile: 'balanced',
     })
     await createVectorRef(db, {
-      assetId: segmentAsset.id,
+      assetId: frameAsset.id,
       fileId: videoFile.id,
       libraryId: library.id,
-      collectionName: 'video_segment_vectors',
+      collectionName: 'video_frame_vectors',
       pointId: '22222222-2222-4222-8222-222222222222',
       modelName: 'google/siglip-base-patch16-224',
       modelVersion: 'siglip-base-patch16-224',
-      vectorKind: 'representative_frame_embedding',
+      vectorKind: 'frame_embedding',
       vectorDim: 768,
       distance: 'Cosine',
-      contentHash: 'segment-hash',
+      contentHash: 'frame-hash',
       indexProfile: 'balanced',
     })
 
@@ -431,10 +302,10 @@ describe('jobs service', () => {
         expect.objectContaining({
           job_type: 'embed_video_frame',
           input: expect.objectContaining({
-            asset_id: segmentAsset.id,
+            asset_id: frameAsset.id,
             frame_path: '/media/clip.mp4',
             frame_time_seconds: 45,
-            collection: 'video_segment_vectors',
+            collection: 'video_frame_vectors',
             model_name: 'google/siglip-base-patch16-224',
             model_version: 'siglip-base-patch16-224',
           }),
@@ -507,34 +378,33 @@ describe('jobs service', () => {
       sizeBytes: 20,
       mtimeMs: 2,
     })
-    const segmentAsset = await createMediaAsset(db, {
+    const frameAsset = await createMediaAsset(db, {
       fileId: videoFile.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '30',
-      endTimeSeconds: '60',
-      contentHash: 'segment-hash',
+      assetType: 'video_frame',
+      frameTimeSeconds: '45',
+      contentHash: 'frame-hash',
     })
     await createVectorRef(db, {
-      assetId: segmentAsset.id,
+      assetId: frameAsset.id,
       fileId: videoFile.id,
       libraryId: library.id,
-      collectionName: 'video_segment_vectors',
+      collectionName: 'video_frame_vectors',
       pointId: '33333333-3333-4333-8333-333333333333',
       modelName: 'google/siglip-base-patch16-224',
       modelVersion: 'siglip-base-patch16-224',
-      vectorKind: 'representative_frame_embedding',
+      vectorKind: 'frame_embedding',
       vectorDim: 768,
       distance: 'Cosine',
-      contentHash: 'segment-hash',
+      contentHash: 'frame-hash',
       indexProfile: 'balanced',
     })
     const failedJob = await createJob(db, {
       jobType: 'embed_video_frame',
       inputJson: {
-        asset_id: segmentAsset.id,
+        asset_id: frameAsset.id,
         frame_path: '/media/clip.mp4',
         frame_time_seconds: 45,
-        collection: 'video_segment_vectors',
+        collection: 'video_frame_vectors',
         model_name: 'google/siglip-base-patch16-224',
         model_version: 'siglip-base-patch16-224',
       },
@@ -683,206 +553,5 @@ describe('jobs service', () => {
     const listed = await service.listJobs({ limit: 10, offset: 0 })
 
     expect(listed.items.filter((job) => job.job_type === 'embed_image')).toHaveLength(2)
-  })
-
-  test('将未 OCR 的 image 和 video_frame assets 批量转成 run_ocr jobs', async () => {
-    const library = await createLibrary(db, { name: 'Main', rootPath: '/media' })
-    const imageFile = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/media/poster.png',
-      relativePath: 'poster.png',
-      mediaType: 'image',
-      sizeBytes: 10,
-      mtimeMs: 1,
-    })
-    const imageAsset = await createMediaAsset(db, {
-      fileId: imageFile.id,
-      assetType: 'image',
-      path: '/media/poster.png',
-    })
-    const videoFile = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/media/clip.mp4',
-      relativePath: 'clip.mp4',
-      mediaType: 'video',
-      sizeBytes: 20,
-      mtimeMs: 2,
-    })
-    const frameAsset = await createMediaAsset(db, {
-      fileId: videoFile.id,
-      assetType: 'video_frame',
-      path: '/media/clip.mp4',
-      frameTimeSeconds: '12.5',
-    })
-    await createMediaAsset(db, {
-      fileId: imageFile.id,
-      assetType: 'image',
-      path: '/media/already.png',
-      textContent: 'already indexed',
-      metadataJson: { ocr: { engine: 'paddleocr' } },
-    })
-    await createMediaAsset(db, {
-      fileId: videoFile.id,
-      assetType: 'video_segment',
-      startTimeSeconds: '0',
-      endTimeSeconds: '30',
-    })
-
-    await expect(
-      service.queuePendingOcrJobs({ libraryId: library.id, batchSize: 20 }),
-    ).resolves.toEqual({
-      scanned: 2,
-      created: 1,
-      skipped: 0,
-    })
-    const jobs = await service.listJobs()
-
-    expect(jobs.items).toEqual([
-      expect.objectContaining({
-        job_type: 'run_ocr',
-        timeout_seconds: 7200,
-        input: {
-          asset_ids: [imageAsset.id, frameAsset.id],
-          engine: 'paddleocr',
-          language: 'ch',
-        },
-      }),
-    ])
-  })
-
-  test('OCR queue-pending 不会为已经失败的 asset 反复创建新 job', async () => {
-    const library = await createLibrary(db, { name: 'Main', rootPath: '/media' })
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/media/poster.png',
-      relativePath: 'poster.png',
-      mediaType: 'image',
-      sizeBytes: 10,
-      mtimeMs: 1,
-    })
-    const asset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'image',
-      path: '/media/poster.png',
-    })
-    const failedJob = await createJob(db, {
-      jobType: 'run_ocr',
-      inputJson: {
-        asset_ids: [asset.id],
-        engine: 'paddleocr',
-        language: 'ch',
-      },
-    })
-    await db
-      .update(jobs)
-      .set({
-        status: 'failed',
-        errorMessage: 'The truth value of an empty array is ambiguous',
-        finishedAt: new Date(),
-      })
-      .where(eq(jobs.id, failedJob.id))
-
-    await expect(service.queuePendingOcrJobs({ libraryId: library.id })).resolves.toEqual({
-      scanned: 1,
-      created: 0,
-      skipped: 1,
-    })
-    const listed = await service.listJobs({ limit: 10, offset: 0 })
-
-    expect(listed.items.filter((job) => job.job_type === 'run_ocr')).toHaveLength(1)
-  })
-
-  test('OCR queue-pending 不会为已成功但没有文本的 asset 重复创建 job', async () => {
-    const library = await createLibrary(db, { name: 'Main', rootPath: '/media' })
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/media/blank.png',
-      relativePath: 'blank.png',
-      mediaType: 'image',
-      sizeBytes: 10,
-      mtimeMs: 1,
-    })
-    const asset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'image',
-      path: '/media/blank.png',
-    })
-    const succeededJob = await createJob(db, {
-      jobType: 'run_ocr',
-      inputJson: {
-        asset_ids: [asset.id],
-        engine: 'paddleocr',
-        language: 'ch',
-      },
-    })
-    await db
-      .update(jobs)
-      .set({
-        status: 'succeeded',
-        resultJson: { assets_processed: 1, text_written: 0, skipped_no_text: 1 },
-        progress: 100,
-        finishedAt: new Date(),
-      })
-      .where(eq(jobs.id, succeededJob.id))
-
-    await expect(service.queuePendingOcrJobs({ libraryId: library.id })).resolves.toEqual({
-      scanned: 1,
-      created: 0,
-      skipped: 1,
-    })
-    const listed = await service.listJobs({ limit: 10, offset: 0 })
-
-    expect(listed.items.filter((job) => job.job_type === 'run_ocr')).toHaveLength(1)
-  })
-
-  test('OCR queue-pending 使用 limit 并从 OCR_BATCH_SIZE 读取默认 batch size', async () => {
-    const originalBatchSize = process.env.OCR_BATCH_SIZE
-    process.env.OCR_BATCH_SIZE = '1'
-    const library = await createLibrary(db, { name: 'Main', rootPath: '/media' })
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: '/media/contact-sheet.png',
-      relativePath: 'contact-sheet.png',
-      mediaType: 'image',
-      sizeBytes: 10,
-      mtimeMs: 1,
-    })
-    const firstAsset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'image',
-      path: '/media/contact-sheet-1.png',
-    })
-    const secondAsset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'image',
-      path: '/media/contact-sheet-2.png',
-    })
-    await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: 'image',
-      path: '/media/contact-sheet-3.png',
-    })
-
-    try {
-      await expect(
-        service.queuePendingOcrJobs({ libraryId: library.id, limit: 2 }),
-      ).resolves.toEqual({
-        scanned: 2,
-        created: 2,
-        skipped: 0,
-      })
-      const jobs = await service.listJobs()
-
-      const queuedAssetIds = jobs.items
-        .map((job) => (job.input as { asset_ids: string[] }).asset_ids[0])
-        .sort()
-      expect(queuedAssetIds).toEqual([firstAsset.id, secondAsset.id].sort())
-    } finally {
-      if (originalBatchSize === undefined) {
-        delete process.env.OCR_BATCH_SIZE
-      } else {
-        process.env.OCR_BATCH_SIZE = originalBatchSize
-      }
-    }
   })
 })

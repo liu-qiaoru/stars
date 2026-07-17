@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Test } from "@nestjs/testing";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AgentController } from "../../src/agent/agent.controller.js";
@@ -6,6 +7,7 @@ import { AGENT_MODEL_RUNNER, type AgentModelRunner } from "../../src/agent/agent
 import { SETTINGS } from "../../src/config/settings.js";
 import { DATABASE, PG_POOL } from "../../src/database/database.module.js";
 import { createLibrary, createMediaAsset, createMediaFile, createVectorRef } from "../../src/database/repositories.js";
+import { videoScenes } from "../../src/database/schema.js";
 import { JobsController } from "../../src/jobs/jobs.controller.js";
 import { JobsModule } from "../../src/jobs/jobs.module.js";
 import { ModelGatewayService } from "../../src/model-gateway/model-gateway.service.js";
@@ -57,7 +59,7 @@ async function compileAgentModule(settings = testSettings()) {
     .overrideProvider(SETTINGS)
     .useValue(settings)
     .overrideProvider(QDRANT_CLIENT)
-    .useValue({ search: qdrantSearch })
+    .useValue({ search: qdrantSearch, searchPointGroups: qdrantSearch })
     .overrideProvider(ModelGatewayService)
     .useValue({ embedText })
     .overrideProvider(AGENT_MODEL_RUNNER)
@@ -117,30 +119,46 @@ describe("agent API", () => {
       sizeBytes: 20,
       mtimeMs: 1710000000001,
     });
+    const [scene] = await db
+      .insert(videoScenes)
+      .values({
+        id: randomUUID(),
+        fileId: file.id,
+        sceneKey: "scene-0001",
+        startTimeSeconds: "30",
+        endTimeSeconds: "60",
+        detectionStrategy: "scene_detection",
+        strategyFingerprint: "test-fingerprint",
+        indexGeneration: 0,
+      })
+      .returning();
     const asset = await createMediaAsset(db, {
       fileId: file.id,
-      assetType: "video_segment",
-      startTimeSeconds: "30",
-      endTimeSeconds: "60",
-      metadataJson: { scene_id: "scene-0001", stale: false },
+      assetType: "video_frame",
+      sceneId: scene.id,
+      frameTimeSeconds: "45",
+      contentHash: "frame-hash",
     });
     const pointId = "22222222-2222-4222-8222-222222222222";
     await createVectorRef(db, {
       assetId: asset.id,
       fileId: file.id,
       libraryId: library.id,
-      collectionName: "video_segment_vectors",
+      collectionName: "video_frame_vectors",
       pointId,
       modelName: "google/siglip-base-patch16-224",
       modelVersion: "siglip-base-patch16-224",
-      vectorKind: "representative_frame_embedding",
+      vectorKind: "frame_embedding",
       vectorDim: 768,
       distance: "Cosine",
-      contentHash: "video-hash",
+      contentHash: "frame-hash",
       indexProfile: "balanced",
       status: "indexed",
     });
-    qdrantSearch.mockResolvedValue([{ id: pointId, score: 0.82 }]);
+    // 视频帧向量走分组检索：返回该场景一个组，代表帧即命中的 point。
+    qdrantSearch.mockResolvedValue({
+      groups: [{ id: scene.id, hits: [{ id: pointId, score: 0.82 }] }],
+    });
     runnerRun.mockImplementation(async ({ tools }) => {
       const input = { query: "发布会", media_types: ["video"], library_ids: [], limit: 5, offset: 0 };
       const output = (await tools.search_media.execute(input)) as {

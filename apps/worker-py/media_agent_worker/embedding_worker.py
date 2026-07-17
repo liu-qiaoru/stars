@@ -77,9 +77,9 @@ class BaseEmbeddingHandler:
                     "start_time_seconds": vector_ref.get("start_time_seconds"),
                     "end_time_seconds": vector_ref.get("end_time_seconds"),
                     "frame_time_seconds": vector_ref.get("frame_time_seconds"),
-                    "scene_id": vector_ref.get("metadata_json", {}).get("scene_id"),
-                    "segment_strategy": vector_ref.get("metadata_json", {}).get("segment_strategy"),
-                    "keyframe_index": vector_ref.get("metadata_json", {}).get("keyframe_index"),
+                    # scene_id 取自 media_assets 正式列（视频帧/caption 引用 video_scenes 行），
+                    # 供 Qdrant 分组检索 group_by=scene_id；图片/纯音频为 None。
+                    "scene_id": vector_ref.get("scene_id"),
                     "source": metadata.get("source"),
                     "prompt_version": metadata.get("prompt_version"),
                     "model_name": vector_ref["model_name"],

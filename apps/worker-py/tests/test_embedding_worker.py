@@ -230,7 +230,7 @@ class EmbeddingWorkerTest(unittest.TestCase):
         self.assertEqual(point["payload"]["asset_type"], "caption")
         self.assertEqual(point["payload"]["source"], "vlm_caption")
 
-    def test_embed_video_segment_job_extracts_representative_frame_before_embedding(self):
+    def test_embed_video_frame_job_extracts_frame_and_writes_scene_id_payload(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             extracted = str(Path(tmp_dir) / "frame.jpg")
             Path(extracted).write_bytes(b"frame")
@@ -239,23 +239,22 @@ class EmbeddingWorkerTest(unittest.TestCase):
                 "asset_id": "asset-2",
                 "file_id": "file-2",
                 "library_id": "library-1",
-                "collection_name": "video_segment_vectors",
+                "collection_name": "video_frame_vectors",
                 "point_id": "22222222-2222-4222-8222-222222222222",
                 "model_name": "google/siglip-base-patch16-224",
                 "model_version": "siglip-base-patch16-224",
-                "vector_kind": "representative_frame_embedding",
+                "vector_kind": "frame_embedding",
                 "vector_dim": 4,
                 "distance": "Cosine",
-                "content_hash": "segment-hash",
+                "content_hash": "frame-hash",
                 "index_profile": "balanced",
-                "asset_type": "video_segment",
+                "asset_type": "video_frame",
                 "media_type": "video",
                 "start_time_seconds": 30.0,
                 "end_time_seconds": 60.0,
-                "metadata_json": {
-                    "scene_id": "scene-0002",
-                    "segment_strategy": "scene_detection",
-                },
+                # scene_id 是 media_assets 正式列（引用 video_scenes 行），写入 Qdrant payload 供分组检索。
+                "scene_id": "scene-uuid-2",
+                "metadata_json": {"scene_key": "scene-0002"},
             })
             qdrant = FakeQdrantClient()
             embedder = FakeEmbedder()
@@ -271,15 +270,17 @@ class EmbeddingWorkerTest(unittest.TestCase):
                 "asset_id": "asset-2",
                 "frame_path": "/media/clip.mp4",
                 "frame_time_seconds": 45,
-                "collection": "video_segment_vectors",
+                "collection": "video_frame_vectors",
                 "model_name": "google/siglip-base-patch16-224",
                 "model_version": "siglip-base-patch16-224",
             })
 
-            self.assertEqual(result["collection"], "video_segment_vectors")
+            self.assertEqual(result["collection"], "video_frame_vectors")
             self.assertEqual(calls, [("/media/clip.mp4", 45)])
             self.assertEqual(embedder.image_paths, [extracted])
-            self.assertEqual(qdrant.points[0][1]["payload"]["scene_id"], "scene-0002")
+            self.assertEqual(qdrant.points[0][1]["payload"]["scene_id"], "scene-uuid-2")
+            # segment_strategy 已删除，不再写入 Qdrant payload。
+            self.assertNotIn("segment_strategy", qdrant.points[0][1]["payload"])
 
     def test_worker_runner_dispatches_embedding_jobs(self):
         class StaticHandler:

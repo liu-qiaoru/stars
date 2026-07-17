@@ -38,17 +38,16 @@ class FakeCursor:
         if "UPDATE media_assets" in query:
             row = self.connection.row
             if "CASE WHEN %s THEN %s ELSE text_content END" in query:
-                content_hash, has_text_content, text_content, metadata_json, _asset_id = params
+                # 阶段 2 后 re-index UPDATE 多了 scene_id 参数：
+                # (content_hash, has_text_content, text_content, metadata_json, scene_id, asset_id)
+                content_hash, has_text_content, text_content, metadata_json, scene_id, _asset_id = params
                 row[7] = content_hash
                 if has_text_content:
                     row[8] = text_content
                 row[9] = {**(row[9] or {}), **json.loads(metadata_json)}
+                row[10] = scene_id
                 return
-            content_hash, text_content, metadata_json, _asset_id = params
-            row[7] = content_hash
-            row[8] = text_content
-            row[9] = json.loads(metadata_json)
-            return
+            raise AssertionError(f"Unexpected media_assets update: {query}")
         raise AssertionError(f"Unexpected query: {query}")
 
     def fetchone(self):
@@ -73,18 +72,21 @@ class PostgresMediaRepositoryTest(unittest.TestCase):
         self.assertIn("FROM vector_refs", connection.executed[1][0])
         self.assertEqual(connection.executed[1][1], ("point-1",))
 
-    def test_upsert_media_asset_preserves_ocr_text_and_merges_metadata_when_reindexing(self):
+    def test_upsert_media_asset_preserves_existing_text_and_merges_metadata_and_scene(self):
+        # 重索引时，未提供的 text_content 必须保留旧值（转录等后置任务可能已经写入文本），
+        # metadata 以 patch 合并，scene_id 同步更新到新场景。
         row = [
-            "asset-1",
-            "file-1",
-            "video_frame",
-            "/media/clip.mp4",
-            None,
-            None,
-            12.5,
-            "old-hash",
-            "VISIBLE TITLE",
-            {"ocr": {"engine": "paddleocr"}, "scene_id": "scene-0001"},
+            "asset-1",        # 0 id
+            "file-1",         # 1 file_id
+            "video_frame",    # 2 asset_type
+            "/media/clip.mp4",  # 3 path
+            None,             # 4 start_time_seconds
+            None,             # 5 end_time_seconds
+            12.5,             # 6 frame_time_seconds
+            "old-hash",       # 7 content_hash
+            "EXISTING TRANSCRIPT",  # 8 text_content
+            {"transcript": True},   # 9 metadata_json
+            None,             # 10 scene_id
         ]
         connection = FakeConnection(row)
         repository = PostgresMediaRepository(connection)
@@ -92,18 +94,17 @@ class PostgresMediaRepositoryTest(unittest.TestCase):
         repository.upsert_media_asset(
             file_id="file-1",
             asset_type="video_frame",
+            scene_id="scene-uuid-2",
             path="/media/clip.mp4",
             frame_time_seconds=12.5,
             content_hash="new-hash",
-            metadata_json={"scene_id": "scene-0002", "keyframe_index": 1},
+            metadata_json={"frame_index": 1},
         )
 
-        self.assertEqual(row[8], "VISIBLE TITLE")
-        self.assertEqual(row[9], {
-            "ocr": {"engine": "paddleocr"},
-            "scene_id": "scene-0002",
-            "keyframe_index": 1,
-        })
+        self.assertEqual(row[7], "new-hash")
+        self.assertEqual(row[8], "EXISTING TRANSCRIPT")
+        self.assertEqual(row[9], {"transcript": True, "frame_index": 1})
+        self.assertEqual(row[10], "scene-uuid-2")
         self.assertEqual(connection.commits, 1)
 
 
