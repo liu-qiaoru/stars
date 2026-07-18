@@ -25,34 +25,6 @@ export class JobsController {
     })
   }
 
-  @Get('video/reindex-readiness')
-  getVideoReindexReadiness(
-    @Query('library_id') libraryId?: string,
-    @Query('file_id') fileId?: string,
-  ) {
-    return this.jobsService.getVideoReindexReadiness({ libraryId, fileId })
-  }
-
-  @Post('video/reindex')
-  queueVideoReindexJobs(
-    @Body()
-    body: {
-      library_id?: string
-      file_id?: string
-      limit?: number
-      dry_run?: boolean
-      only_not_ready?: boolean
-    },
-  ) {
-    return this.jobsService.queueVideoReindexJobs({
-      libraryId: body?.library_id,
-      fileId: body?.file_id,
-      limit: body?.limit,
-      dryRun: body?.dry_run,
-      onlyNotReady: body?.only_not_ready,
-    })
-  }
-
   @Get(':id')
   getJob(@Param('id') id: string) {
     return this.jobsService.getJob(id)
@@ -64,17 +36,10 @@ export class JobsController {
     return this.jobsService.queuePendingEmbeddingJobs(body?.limit)
   }
 
-  @Post('ocr/queue-pending')
-  queuePendingOcrJobs(
-    @Body() body: { library_id?: string; file_id?: string; batch_size?: number; limit?: number },
-  ) {
-    // OCR 可以在索引完成后自动创建，也可以通过这个入口按 library/file 补漏。
-    return this.jobsService.queuePendingOcrJobs({
-      libraryId: body?.library_id,
-      fileId: body?.file_id,
-      batchSize: body?.batch_size,
-      limit: body?.limit,
-    })
+  @Post('video/reindex')
+  requestVideoReindex(@Body() body: { file_id: string }) {
+    // 阶段 3：单文件破坏性重索引。冲突（存在活跃媒体任务）时返回 409 + VIDEO_INDEX_JOBS_ACTIVE。
+    return this.jobsService.requestVideoReindex({ fileId: body.file_id })
   }
 
   private optionalInteger(value: string | undefined, name: string) {

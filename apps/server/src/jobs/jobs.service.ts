@@ -1,18 +1,17 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { DATABASE } from '../database/database.module.js'
 import {
   claimNextJob,
+  createVideoReindex,
+  getActiveMediaJobsForFile,
   getJob,
+  getMediaFile,
   heartbeatJob,
   listAttemptedEmbeddingJobs,
-  listAttemptedOcrJobs,
   listJobs,
-  listPendingOcrAssets,
   listPendingEmbeddingVectorRefs,
   markJobSucceeded,
   createJob,
-  createVideoReindexJobs,
-  getVideoReindexState,
   reclaimStaleJobs,
   resolveJobFilePaths,
   type Database,
@@ -42,48 +41,24 @@ export class JobsService {
     return this.toResponse(row, filePathsByJobId.get(row.id) ?? [])
   }
 
-  async getVideoReindexReadiness(input: { libraryId?: string; fileId?: string } = {}) {
-    const state = await getVideoReindexState(this.db, input)
-    return {
-      ready: state.visualNotReadyFileIds.length === 0,
-      active_video_files: state.fileIds.length,
-      active_video_segments: state.activeVideoSegments,
-      segments_without_frames: state.segmentsWithoutFrames,
-      segments_over_30_seconds: state.segmentsOver30Seconds,
-      active_video_segment_vector_refs: state.activeVideoSegmentVectorRefs,
-      segments_without_scene_caption_v2: state.segmentsWithoutSceneCaptionV2,
-      missing_file_ids: state.notReadyFileIds,
+  async requestVideoReindex(input: { fileId: string }) {
+    // 阶段 3：单文件破坏性重索引入口。先确认文件存在且没有正在运行的媒体索引任务，
+    // 再在同一事务里把文件标记为 purge_queued 并创建 purge_video_index 任务；
+    // purge 成功后由 Worker 重新创建 index_media，实现"先清后重建"。
+    const file = await getMediaFile(this.db, input.fileId)
+    if (!file) {
+      throw new NotFoundException('Media file not found')
     }
-  }
-
-  async queueVideoReindexJobs(
-    input: {
-      libraryId?: string
-      fileId?: string
-      limit?: number
-      dryRun?: boolean
-      onlyNotReady?: boolean
-    } = {},
-  ) {
-    const limit = input.limit ?? 100
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
-      throw new BadRequestException('limit must be an integer between 1 and 1000')
+    const activeJobs = await getActiveMediaJobsForFile(this.db, input.fileId)
+    if (activeJobs.length > 0) {
+      // 不支持强制取消正在写索引的媒体任务；返回结构化错误和任务 ID 让调用方等待或处理。
+      throw new ConflictException({
+        error_code: 'VIDEO_INDEX_JOBS_ACTIVE',
+        job_ids: activeJobs.map((job) => job.id),
+      })
     }
-    const state = await getVideoReindexState(this.db, input)
-    const candidateIds = input.onlyNotReady === false ? state.fileIds : state.notReadyFileIds
-    const activeIds = candidateIds.filter((fileId) => state.activeJobFileIds.has(fileId))
-    const queueableIds = candidateIds
-      .filter((fileId) => !state.activeJobFileIds.has(fileId))
-      .slice(0, limit)
-    const created = input.dryRun ? [] : await createVideoReindexJobs(this.db, queueableIds)
-    return {
-      scanned: state.fileIds.length,
-      queueable: queueableIds.length,
-      created: created.length,
-      skipped_active: activeIds.length,
-      dry_run: input.dryRun ?? false,
-      file_ids: queueableIds,
-    }
+    const job = await createVideoReindex(this.db, input.fileId)
+    return { job_id: job.id, status: 'purge_queued' }
   }
 
   async claimNextJob(workerId: string, now = new Date()) {
@@ -142,6 +117,8 @@ export class JobsService {
       }
       await createJob(this.db, {
         jobType: this.embeddingJobType(input.collection),
+        // embed 任务是单文件任务，填写 file_id 外键便于按文件查询活跃任务。
+        fileId: ref.fileId,
         inputJson: input,
       })
       lastAttemptedAtByKey.set(key, new Date())
@@ -150,57 +127,6 @@ export class JobsService {
 
     return {
       scanned: pendingRefs.length,
-      created,
-      skipped,
-    }
-  }
-
-  async queuePendingOcrJobs(
-    input: { libraryId?: string; fileId?: string; batchSize?: number; limit?: number } = {},
-  ) {
-    // OCR 以 asset batch 为单位创建 job，降低每个图片/关键帧一个 job 的队列噪音。
-    const defaultBatchSize = Number.parseInt(process.env.OCR_BATCH_SIZE ?? '20', 10)
-    const batchSize = Math.max(
-      1,
-      input.batchSize ?? (Number.isFinite(defaultBatchSize) ? defaultBatchSize : 20),
-    )
-    const pendingAssets = await listPendingOcrAssets(this.db, {
-      libraryId: input.libraryId,
-      fileId: input.fileId,
-      limit: input.limit ?? 500,
-    })
-    const attemptedJobs = await listAttemptedOcrJobs(this.db)
-    const attemptedAssetIds = new Set(
-      attemptedJobs.flatMap((job) => {
-        const jobInput = job.inputJson as { asset_ids?: string[] }
-        return jobInput.asset_ids ?? []
-      }),
-    )
-    const queueableAssetIds = pendingAssets
-      .map((asset) => asset.assetId)
-      .filter((assetId) => !attemptedAssetIds.has(assetId))
-    const skipped = pendingAssets.length - queueableAssetIds.length
-    let created = 0
-
-    for (let index = 0; index < queueableAssetIds.length; index += batchSize) {
-      const assetIds = queueableAssetIds.slice(index, index + batchSize)
-      if (!assetIds.length) {
-        continue
-      }
-      await createJob(this.db, {
-        jobType: 'run_ocr',
-        timeoutSeconds: 7200,
-        inputJson: {
-          asset_ids: assetIds,
-          engine: 'paddleocr',
-          language: 'ch',
-        },
-      })
-      created += 1
-    }
-
-    return {
-      scanned: pendingAssets.length,
       created,
       skipped,
     }
@@ -240,7 +166,7 @@ export class JobsService {
   private representativeFrameTime(
     ref: Awaited<ReturnType<typeof listPendingEmbeddingVectorRefs>>[number],
   ) {
-    // video_segment 没有独立 frame asset 时，取 segment 中点作为代表帧时间。
+    // 视频帧 asset 通常带 frame_time_seconds；缺失时退回到 asset 起止时间中点作为代表帧。
     if (ref.frameTimeSeconds !== null) {
       return Number(ref.frameTimeSeconds)
     }
@@ -257,7 +183,7 @@ export class JobsService {
     if (collection === 'caption_text_vectors') {
       return 'embed_text_asset'
     }
-    if (collection === 'video_frame_vectors' || collection === 'video_segment_vectors') {
+    if (collection === 'video_frame_vectors') {
       return 'embed_video_frame'
     }
     throw new Error(`Unsupported embedding collection: ${collection}`)
@@ -290,7 +216,11 @@ export class JobsService {
       file_paths: filePaths,
       input: row.inputJson,
       result: row.resultJson,
+      // error_message 是给用户看的简短错误；error_code/error_details 暴露机器可读的结构化
+      // 错误码与技术诊断（场景检测失败等），供 Jobs 页面展开详情和修复后重试。
       error_message: row.errorMessage,
+      error_code: row.errorCode,
+      error_details: row.errorDetailsJson,
       created_at: row.createdAt.toISOString(),
       updated_at: row.updatedAt.toISOString(),
       finished_at: row.finishedAt?.toISOString() ?? null,

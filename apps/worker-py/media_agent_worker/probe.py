@@ -91,10 +91,10 @@ class ProbeHandler:
 
         if self.job_repository is not None and media_type in ("image", "video"):
             # Visual assets go through index_media; audio files skip image/video indexing and rely on transcript FTS.
+            # segment_strategy 已删除：视频只走场景检测，不再有 fixed_30s 选项。
             self.job_repository.create_job("index_media", {
                 "file_id": file_id,
                 "index_profile": "balanced",
-                "segment_strategy": "scene_detection" if media_type == "video" else "fixed_30s",
             })
         if self.job_repository is not None and media_type in ("video", "audio"):
             # Transcription is independent from visual indexing, so video can produce both jobs in parallel.

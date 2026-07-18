@@ -18,9 +18,6 @@ describe('collection-specific query routing', () => {
     expect(routeQueryVariantsForCollection(variants, 'image_vectors', 'translate')).toEqual([
       { ...variants[1], weight: 1 },
     ])
-    expect(routeQueryVariantsForCollection(variants, 'video_segment_vectors', 'translate')).toEqual([
-      { ...variants[1], weight: 1 },
-    ])
   })
 
   test('uses only the original Chinese query in the Caption collection', () => {

@@ -419,7 +419,7 @@ describe("hybrid search ranking", () => {
           asset_id: "time-point",
           start_time_seconds: 5,
           end_time_seconds: 5,
-          reasons: ["ocr_match"],
+          reasons: ["transcript_match"],
           source_scores: { text_search: 0.7 },
         },
       ],

@@ -25,7 +25,6 @@ describe('createSettings', () => {
       jobCoordinatorEnabled: true,
       jobCoordinatorIntervalMs: 5000,
       jobCoordinatorEmbeddingLimit: 100,
-      jobCoordinatorOcrLimit: 500,
       queryExpansionProvider: 'none',
       queryExpansionTimeoutMs: 10000,
       queryExpansionMaxVariants: 3,
@@ -34,7 +33,6 @@ describe('createSettings', () => {
       deepseekModel: 'deepseek-v4-flash',
       captionIndexingEnabled: false,
       captionSearchEnabled: false,
-      videoSegmentSearchEnabled: true,
       localVlmEnabled: false,
       localVlmServiceUrl: 'http://127.0.0.1:4030',
       searchRerankMode: 'off',
@@ -44,23 +42,6 @@ describe('createSettings', () => {
       frameCacheMaxBytes: 1073741824,
       frameCacheImageMaxWidth: 512,
     })
-  })
-
-  test('video segment search migration switch defaults on and can be disabled', () => {
-    expect(
-      createSettings({
-        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
-        QDRANT_URL: 'http://localhost:6333',
-      }),
-    ).toMatchObject({ videoSegmentSearchEnabled: true })
-
-    expect(
-      createSettings({
-        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
-        QDRANT_URL: 'http://localhost:6333',
-        VIDEO_SEGMENT_SEARCH_ENABLED: 'false',
-      }),
-    ).toMatchObject({ videoSegmentSearchEnabled: false })
   })
 
   test('读取 DeepSeek query expansion 配置并默认关闭', () => {

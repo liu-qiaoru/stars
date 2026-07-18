@@ -3,27 +3,25 @@ import { QdrantCollectionsService } from "../../src/qdrant/qdrant-collections.se
 import { VECTOR_COLLECTIONS } from "../../src/qdrant/vector-collections.js";
 
 describe("vector collection registry", () => {
-  test("定义 Phase 10 SigLIP Qdrant collections", () => {
+  test("定义阶段 2 后的 SigLIP/Caption Qdrant collections", () => {
+    // 阶段 2 删除 OCR/segment 后只保留三个向量集合。
     expect(Object.keys(VECTOR_COLLECTIONS).sort()).toEqual([
-      "audio_segment_vectors",
       "caption_text_vectors",
       "image_vectors",
-      "text_chunk_vectors",
       "video_frame_vectors",
-      "video_segment_vectors",
     ]);
-    expect(VECTOR_COLLECTIONS.video_segment_vectors).toMatchObject({
+    expect(VECTOR_COLLECTIONS.video_frame_vectors).toMatchObject({
       modality: "video",
-      vectorKind: "representative_frame_embedding",
+      vectorKind: "frame_embedding",
       modelName: "google/siglip-base-patch16-224",
       modelVersion: "siglip-base-patch16-224",
       vectorDim: 768,
       distance: "Cosine",
     });
-    expect(VECTOR_COLLECTIONS.text_chunk_vectors).toMatchObject({
-      modelName: "sentence-transformers",
-      modelVersion: "all-MiniLM-L6-v2",
-      vectorDim: 384,
+    expect(VECTOR_COLLECTIONS.image_vectors).toMatchObject({
+      modality: "image",
+      vectorKind: "image_embedding",
+      vectorDim: 768,
     });
     expect(VECTOR_COLLECTIONS.caption_text_vectors).toMatchObject({
       modelName: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -38,19 +36,19 @@ describe("vector collection registry", () => {
       if (url.endsWith("/collections/image_vectors") && init?.method === "GET") {
         return new Response("missing", { status: 404 });
       }
-      if (url.endsWith("/collections/video_segment_vectors") && init?.method === "GET") {
+      if (url.endsWith("/collections/video_frame_vectors") && init?.method === "GET") {
         return new Response("exists", { status: 200 });
       }
       return new Response("ok", { status: 200 });
     });
     const service = new QdrantCollectionsService("http://qdrant.local", fetcher, {
       image_vectors: VECTOR_COLLECTIONS.image_vectors,
-      video_segment_vectors: VECTOR_COLLECTIONS.video_segment_vectors,
+      video_frame_vectors: VECTOR_COLLECTIONS.video_frame_vectors,
     });
 
     const result = await service.ensureCollections();
 
-    expect(result).toEqual({ created: ["image_vectors"], existing: ["video_segment_vectors"] });
+    expect(result).toEqual({ created: ["image_vectors"], existing: ["video_frame_vectors"] });
     expect(fetcher).toHaveBeenCalledWith("http://qdrant.local/collections/image_vectors", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -69,13 +67,13 @@ describe("vector collection registry", () => {
     });
     const service = new QdrantCollectionsService("http://qdrant.local", fetcher, {
       image_vectors: VECTOR_COLLECTIONS.image_vectors,
-      video_segment_vectors: VECTOR_COLLECTIONS.video_segment_vectors,
+      video_frame_vectors: VECTOR_COLLECTIONS.video_frame_vectors,
     });
 
     await service.ensureCollections();
 
     // 每个 collection 应创建 2 个 payload index: library_id + media_type
-    for (const collection of ["image_vectors", "video_segment_vectors"]) {
+    for (const collection of ["image_vectors", "video_frame_vectors"]) {
       expect(fetcher).toHaveBeenCalledWith(`http://qdrant.local/collections/${collection}/index`, {
         method: "PUT",
         headers: { "content-type": "application/json" },

@@ -15,7 +15,6 @@ export interface Settings {
   jobCoordinatorEnabled: boolean
   jobCoordinatorIntervalMs: number
   jobCoordinatorEmbeddingLimit: number
-  jobCoordinatorOcrLimit: number
   queryExpansionProvider: 'none' | 'deepseek'
   queryExpansionTimeoutMs: number
   queryExpansionMaxVariants: number
@@ -24,7 +23,6 @@ export interface Settings {
   deepseekModel: string
   captionIndexingEnabled: boolean
   captionSearchEnabled: boolean
-  videoSegmentSearchEnabled: boolean
   localVlmEnabled: boolean
   localVlmServiceUrl: string
   searchRerankMode: 'off' | 'blocking'
@@ -143,20 +141,6 @@ const settingsSchema = z.object({
       }
       return limit
     }),
-  JOB_COORDINATOR_OCR_LIMIT: z
-    .string()
-    .default('500')
-    .transform((value, context) => {
-      const limit = Number(value)
-      if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'JOB_COORDINATOR_OCR_LIMIT must be between 1 and 10000',
-        })
-        return z.NEVER
-      }
-      return limit
-    }),
   QUERY_EXPANSION_PROVIDER: z.enum(['none', 'deepseek']).default('none'),
   QUERY_EXPANSION_MAX_VARIANTS: z
     .string()
@@ -199,10 +183,6 @@ const settingsSchema = z.object({
   CAPTION_SEARCH_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
-    .transform((value) => value === 'true'),
-  VIDEO_SEGMENT_SEARCH_ENABLED: z
-    .enum(['true', 'false'])
-    .default('true')
     .transform((value) => value === 'true'),
   LOCAL_VLM_ENABLED: z
     .enum(['true', 'false'])
@@ -293,7 +273,6 @@ export function createSettings(env: Env = process.env): Settings {
     jobCoordinatorEnabled: parsed.JOB_COORDINATOR_ENABLED,
     jobCoordinatorIntervalMs: parsed.JOB_COORDINATOR_INTERVAL_MS,
     jobCoordinatorEmbeddingLimit: parsed.JOB_COORDINATOR_EMBEDDING_LIMIT,
-    jobCoordinatorOcrLimit: parsed.JOB_COORDINATOR_OCR_LIMIT,
     queryExpansionProvider: parsed.QUERY_EXPANSION_PROVIDER,
     queryExpansionTimeoutMs: parsed.QUERY_EXPANSION_TIMEOUT_MS,
     queryExpansionMaxVariants: parsed.QUERY_EXPANSION_MAX_VARIANTS,
@@ -302,7 +281,6 @@ export function createSettings(env: Env = process.env): Settings {
     deepseekModel: parsed.DEEPSEEK_MODEL,
     captionIndexingEnabled: parsed.CAPTION_INDEXING_ENABLED,
     captionSearchEnabled: parsed.CAPTION_SEARCH_ENABLED,
-    videoSegmentSearchEnabled: parsed.VIDEO_SEGMENT_SEARCH_ENABLED,
     localVlmEnabled: parsed.LOCAL_VLM_ENABLED,
     localVlmServiceUrl: parsed.LOCAL_VLM_SERVICE_URL,
     searchRerankMode: parsed.SEARCH_RERANK_MODE,

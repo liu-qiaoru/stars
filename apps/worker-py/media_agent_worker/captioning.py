@@ -42,7 +42,39 @@ class VlmCaptionClient:
             return json.loads(response.read().decode("utf-8"))
 
 
+def select_uniform_frames(frames, max_frames):
+    """从按时间排序的帧列表中稳定均匀选择最多 max_frames 帧（含首尾）。
+
+    帧数 <= max_frames 时全部使用；超过时按等间距取 max_frames 帧，保证首尾被选中、结果稳定，
+    让同一场景重复 Caption 不会因帧序变化产生不同输入。
+    """
+    if not frames:
+        return []
+    if len(frames) <= max_frames:
+        return list(frames)
+    if max_frames <= 1:
+        # 只取一帧时选中点帧，避免总用首帧偏向场景开头。
+        return [frames[len(frames) // 2]]
+    # 等间距取 max_frames 个下标（含 0 与 n-1），去重保序。
+    n = len(frames)
+    indices = []
+    for i in range(max_frames):
+        index = round(i * (n - 1) / (max_frames - 1))
+        if index not in indices:
+            indices.append(index)
+    return [frames[index] for index in indices]
+
+
 class GenerateCaptionHandler:
+    """生成图片或视频场景的 VLM Caption，并创建 caption_text_vectors pending 引用。
+
+    阶段 2 起：
+    - caption-v1 用于图片，输入 source_asset_ids（图片 asset）。
+    - scene-caption-v2 用于视频场景，输入正式 video_scenes.id（scene_id）；Worker 通过该 UUID
+      取按时间排序的场景帧，最多选 6 帧，调用现有 VLM；不再接受 video_segment 来源。
+    成功写引用同 scene_id 的 caption asset 与 pending vector ref；失败/超时/异常都清理临时图片。
+    """
+
     def __init__(
         self,
         repository,
@@ -57,36 +89,65 @@ class GenerateCaptionHandler:
         self.index_profile = index_profile or os.environ.get("CAPTION_INDEX_PROFILE", "balanced")
 
     def handle(self, job_input):
-        source_asset_ids = job_input["source_asset_ids"]
-        if len(source_asset_ids) != 1:
-            raise ValueError("generate_caption currently supports exactly one source asset")
         prompt_version = job_input.get("prompt_version", "caption-v1")
-        source = self.repository.get_caption_source_asset(source_asset_ids[0])
-        image_paths = []
+        file_id = job_input["file_id"]
+        model_name = job_input.get("model_name")
+        model_version = job_input.get("model_version")
+
+        # 收集 VLM 输入（图片路径 + 帧时间）与回写所需的来源元数据。两条路径都保证临时图片在
+        # 成功/失败/异常后被清理。
+        if prompt_version == "caption-v1":
+            source_asset_ids = job_input.get("source_asset_ids") or []
+            if len(source_asset_ids) != 1:
+                raise ValueError("caption-v1 requires exactly one image source_asset_id")
+            source = self.repository.get_caption_source_asset(source_asset_ids[0])
+            if source["asset_type"] != "image":
+                raise ValueError(f"caption-v1 only supports image sources: {source['id']}")
+            sources = [source]
+            caption_sources, frame_times_seconds = self._image_caption_input(source)
+            scene = None
+        elif prompt_version == "scene-caption-v2":
+            scene_id = job_input.get("scene_id")
+            if not scene_id:
+                raise ValueError("scene-caption-v2 requires a scene_id")
+            scene = self.repository.get_video_scene(scene_id)
+            frames = self.repository.list_scene_frames(scene_id)
+            if not frames:
+                raise ValueError(f"No video_frame assets for scene_id={scene_id}")
+            max_frames = int(os.environ.get("SCENE_CAPTION_MAX_FRAMES", "6"))
+            if max_frames < 1 or max_frames > 12:
+                raise ValueError("SCENE_CAPTION_MAX_FRAMES must be between 1 and 12")
+            selected = select_uniform_frames(frames, max_frames)
+            caption_sources, frame_times_seconds = self._scene_caption_input(selected, scene)
+            sources = selected
+        else:
+            raise ValueError(f"Unsupported prompt_version: {prompt_version}")
+
         extracted_paths = []
+        image_paths = []
         try:
-            caption_sources, frame_times_seconds = self._caption_sources(source, prompt_version)
             for caption_source in caption_sources:
                 image_path, extracted_path = self._image_path_for_source(caption_source)
                 image_paths.append(image_path)
                 if extracted_path is not None:
                     extracted_paths.append(extracted_path)
-            response = self.vlm_client.caption(
-                image_paths=image_paths,
-                frame_times_seconds=frame_times_seconds,
-                prompt_version=prompt_version,
-                model_name=job_input["model_name"],
-                model_version=job_input["model_version"],
-            )
-        except Exception as error:
-            logger.exception(
-                "caption_index_failed file_id=%s source_asset_id=%s prompt_version=%s error_class=%s",
-                job_input.get("file_id"),
-                source_asset_ids[0],
-                prompt_version,
-                type(error).__name__,
-            )
-            raise
+            try:
+                response = self.vlm_client.caption(
+                    image_paths=image_paths,
+                    frame_times_seconds=frame_times_seconds,
+                    prompt_version=prompt_version,
+                    model_name=model_name,
+                    model_version=model_version,
+                )
+            except Exception as error:
+                logger.exception(
+                    "caption_index_failed file_id=%s scene_id=%s prompt_version=%s error_class=%s",
+                    file_id,
+                    scene["id"] if scene else None,
+                    prompt_version,
+                    type(error).__name__,
+                )
+                raise
         finally:
             for extracted_path in extracted_paths:
                 try:
@@ -100,38 +161,53 @@ class GenerateCaptionHandler:
         caption = caption.strip()
         vlm_model_name = response.get("model_name")
         vlm_model_version = response.get("model_version")
-        if vlm_model_name != job_input["model_name"]:
-            raise ValueError(f"VLM returned model_name={vlm_model_name}, expected {job_input['model_name']}")
-        if vlm_model_version != job_input["model_version"]:
-            raise ValueError(
-                f"VLM returned model_version={vlm_model_version}, expected {job_input['model_version']}"
-            )
+        if vlm_model_name != model_name:
+            raise ValueError(f"VLM returned model_name={vlm_model_name}, expected {model_name}")
+        if vlm_model_version != model_version:
+            raise ValueError(f"VLM returned model_version={vlm_model_version}, expected {model_version}")
 
         content_hash = self._caption_content_hash(
-            sources=caption_sources,
+            sources=sources,
             frame_times_seconds=frame_times_seconds,
             prompt_version=prompt_version,
             vlm_model_version=vlm_model_version,
             caption=caption,
         )
+        if scene is not None:
+            # 视频场景 Caption：scene_id 外键 + 场景权威边界；library_id 来自场景所属文件。
+            asset_file_id = scene["file_id"]
+            library_id = scene["library_id"]
+            scene_id = scene["id"]
+            start_time_seconds = scene["start_time_seconds"]
+            end_time_seconds = scene["end_time_seconds"]
+            frame_time_seconds = None
+            source_label = "vlm_scene_caption"
+        else:
+            asset_file_id = file_id
+            library_id = source["library_id"]
+            scene_id = None
+            start_time_seconds = source.get("start_time_seconds")
+            end_time_seconds = source.get("end_time_seconds")
+            frame_time_seconds = source.get("frame_time_seconds")
+            source_label = "vlm_caption"
+
         caption_asset = self.repository.upsert_media_asset(
-            file_id=job_input["file_id"],
+            file_id=asset_file_id,
             asset_type="caption",
+            scene_id=scene_id,
             path=None,
-            start_time_seconds=source.get("start_time_seconds"),
-            end_time_seconds=source.get("end_time_seconds"),
-            frame_time_seconds=source.get("frame_time_seconds"),
+            start_time_seconds=start_time_seconds,
+            end_time_seconds=end_time_seconds,
+            frame_time_seconds=frame_time_seconds,
             content_hash=content_hash,
             text_content=caption,
             metadata_json={
-                "source": "vlm_scene_caption" if prompt_version == "scene-caption-v2" else "vlm_caption",
-                "scene_id": source.get("metadata_json", {}).get("scene_id"),
+                "source": source_label,
                 "prompt_version": prompt_version,
                 "vlm_model_name": vlm_model_name,
                 "vlm_model_version": vlm_model_version,
-                "source_asset_ids": [caption_source["id"] for caption_source in caption_sources],
                 "frame_times_seconds": frame_times_seconds,
-                "source_asset_type": source["asset_type"],
+                "scene_id": scene_id,
             },
         )
         config = CAPTION_TEXT_VECTOR_CONFIG
@@ -145,8 +221,8 @@ class GenerateCaptionHandler:
         )
         vector_outcome = self.repository.upsert_vector_ref(
             asset_id=caption_asset["id"],
-            file_id=job_input["file_id"],
-            library_id=source["library_id"],
+            file_id=asset_file_id,
+            library_id=library_id,
             collection_name=config["collection_name"],
             point_id=point_id,
             model_name=config["model_name"],
@@ -158,15 +234,13 @@ class GenerateCaptionHandler:
             index_profile=self.index_profile,
         )
         logger.info(
-            "caption_index file_id=%s scene_id=%s prompt_version=%s model=%s/%s "
-            "source_asset_ids=%s frame_times_seconds=%s",
-            job_input["file_id"],
-            source.get("metadata_json", {}).get("scene_id"),
+            "caption_index file_id=%s scene_id=%s prompt_version=%s model=%s/%s frames=%s",
+            asset_file_id,
+            scene_id,
             prompt_version,
             vlm_model_name,
             vlm_model_version,
-            [caption_source["id"] for caption_source in caption_sources],
-            frame_times_seconds,
+            len(frame_times_seconds),
         )
         return {
             "caption_asset_id": caption_asset["id"],
@@ -175,68 +249,39 @@ class GenerateCaptionHandler:
             "vector_ref_created": vector_outcome == "created",
         }
 
+    def _image_caption_input(self, source):
+        # caption-v1 是单图输入；帧时间为 None（VLM 只看图片本身）。
+        return [source], [None]
+
+    def _scene_caption_input(self, selected_frames, scene):
+        # 视频场景按所选帧抽取临时图片；帧时间为绝对场景时间，按时间升序。
+        caption_sources = []
+        frame_times = []
+        for frame in selected_frames:
+            frame_time = frame.get("frame_time_seconds")
+            if frame_time is None:
+                raise ValueError(f"video_frame is missing frame_time_seconds: {frame['id']}")
+            caption_sources.append(frame)
+            frame_times.append(float(frame_time))
+        return caption_sources, frame_times
+
     def _image_path_for_source(self, source):
         if not source.get("path"):
             raise ValueError(f"Caption source has no local path: {source['id']}")
         if source["asset_type"] == "image":
             return source["path"], None
-        if source["asset_type"] in ("video_segment", "video_frame"):
-            frame_time_seconds = self._representative_frame_time(source)
+        if source["asset_type"] == "video_frame":
+            # 视频帧需要用 FFmpeg 抽到临时图片再送给 VLM；调用方负责清理临时文件。
+            frame_time_seconds = self._required_frame_time(source)
             extracted_path = self.frame_extractor(source["path"], frame_time_seconds)
             return extracted_path, extracted_path
         raise ValueError(f"Unsupported caption source asset_type: {source['asset_type']}")
-
-    def _caption_sources(self, source, prompt_version):
-        if prompt_version == "caption-v1":
-            # caption-v1 是单图描述协议。旧版本曾允许视频片段走该分支，
-            # 但生成的 Caption 没有稳定 scene_id，会和 scene-caption-v2 返回重复时间窗。
-            # 这里明确失败，防止历史队列或调用方再次写入不可合并的视频 Caption。
-            if source["asset_type"] != "image":
-                raise ValueError(
-                    f"caption-v1 only supports image sources; video requires scene-caption-v2: {source['id']}"
-                )
-            return [source], [self._optional_frame_time(source)]
-        if prompt_version != "scene-caption-v2":
-            raise ValueError(f"Unsupported prompt_version: {prompt_version}")
-        if source["asset_type"] != "video_segment":
-            raise ValueError("scene-caption-v2 requires a video_segment source")
-        scene_id = source.get("metadata_json", {}).get("scene_id")
-        if not isinstance(scene_id, str) or not scene_id:
-            raise ValueError(f"video_segment is missing scene_id: {source['id']}")
-        frames = self.repository.list_scene_caption_frames(source["file_id"], scene_id)
-        max_frames = int(os.environ.get("SCENE_CAPTION_MAX_FRAMES", "6"))
-        if max_frames < 1 or max_frames > 12:
-            raise ValueError("SCENE_CAPTION_MAX_FRAMES must be between 1 and 12")
-        if not frames:
-            raise ValueError(f"No video_frame assets for file_id={source['file_id']} scene_id={scene_id}")
-        if len(frames) > max_frames:
-            raise ValueError(
-                f"Scene frame count exceeds SCENE_CAPTION_MAX_FRAMES: "
-                f"file_id={source['file_id']} scene_id={scene_id} frames={len(frames)} max={max_frames}"
-            )
-        frame_times = [self._required_frame_time(frame) for frame in frames]
-        return frames, frame_times
-
-    def _optional_frame_time(self, source):
-        if source["asset_type"] == "image":
-            return None
-        return self._representative_frame_time(source)
 
     def _required_frame_time(self, source):
         frame_time = source.get("frame_time_seconds")
         if frame_time is None:
             raise ValueError(f"video_frame is missing frame_time_seconds: {source['id']}")
         return float(frame_time)
-
-    def _representative_frame_time(self, source):
-        metadata = source.get("metadata_json", {})
-        if metadata.get("representative_frame_time_seconds") is not None:
-            return float(metadata["representative_frame_time_seconds"])
-        if source.get("frame_time_seconds") is not None:
-            return float(source["frame_time_seconds"])
-        if source.get("start_time_seconds") is not None and source.get("end_time_seconds") is not None:
-            return (float(source["start_time_seconds"]) + float(source["end_time_seconds"])) / 2.0
-        return 0.0
 
     def _caption_content_hash(
         self,
@@ -250,7 +295,6 @@ class GenerateCaptionHandler:
         digest = hashlib.sha256()
         parts = [
             *[source["id"] for source in sources],
-            *[(source.get("content_hash") or "") for source in sources],
             *[("" if frame_time is None else f"{frame_time:g}") for frame_time in frame_times_seconds],
             prompt_version,
             vlm_model_version,

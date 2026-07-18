@@ -11,6 +11,7 @@ import {
   mediaAssets,
   mediaFiles,
   vectorRefs,
+  videoScenes,
 } from './schema.js'
 import type * as schema from './schema.js'
 
@@ -68,6 +69,7 @@ export async function createMediaAsset(
       Pick<
         InsertMediaAsset,
         | 'path'
+        | 'sceneId'
         | 'startTimeSeconds'
         | 'endTimeSeconds'
         | 'frameTimeSeconds'
@@ -122,11 +124,13 @@ export async function createVectorRef(
 export async function createJob(
   db: Database,
   input: Pick<InsertJob, 'jobType'> &
-    Partial<Pick<InsertJob, 'priority' | 'maxAttempts' | 'timeoutSeconds'>> & {
+    Partial<Pick<InsertJob, 'priority' | 'maxAttempts' | 'timeoutSeconds' | 'fileId'>> & {
       inputJson: JsonValue
     },
 ) {
   // input_json 必须来自 packages/shared 的 job schema，Python worker 只消费生成后的 JSON Schema。
+  // fileId 用于单文件媒体任务（index_media/embed_*/transcribe/generate_caption/export_clip），
+  // 方便按文件查询活跃任务；scan_library 等多文件任务不填。
   const [row] = await db
     .insert(jobs)
     .values({
@@ -172,14 +176,76 @@ export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 
         inArray(vectorRefs.collectionName, [
           'image_vectors',
           'video_frame_vectors',
-          'video_segment_vectors',
           'caption_text_vectors',
         ]),
         isNull(mediaFiles.deletedAt),
+        // 排除 purge_queued 文件：阶段 3 的破坏性重索引即将删除其派生数据，
+        // 协调器不应再为它创建新的 embedding 任务，避免边删边写的竞争。
+        sql`${mediaFiles.indexStatus} <> 'purge_queued'`,
       ),
     )
     .orderBy(asc(vectorRefs.createdAt))
     .limit(limitCount)
+}
+
+// 阶段 3：会对索引派生数据产生影响的媒体任务类型。重索引前若存在这些 queued/running 任务，
+// 必须阻止 purge，避免和正在写入的索引竞争。
+const MEDIA_INDEX_JOB_TYPES = [
+  'index_media',
+  'purge_video_index',
+  'embed_image',
+  'embed_video_frame',
+  'embed_text_asset',
+  'generate_caption',
+] as const
+
+/**
+ * 列出某文件仍处于 queued/running 的媒体索引任务。
+ *
+ * 同时匹配 jobs.file_id 外键和 input_json->>'file_id'：阶段 2 起新媒体任务会填 file_id 列，
+ * 但保留 input_json 兜底以兼容未填列的历史/异常任务。供重索引前的并发阻止检查使用。
+ */
+export async function getActiveMediaJobsForFile(db: Database, fileId: string) {
+  return db
+    .select({
+      id: jobs.id,
+      jobType: jobs.jobType,
+      status: jobs.status,
+    })
+    .from(jobs)
+    .where(
+      and(
+        or(eq(jobs.fileId, fileId), sql`${jobs.inputJson}->>'file_id' = ${fileId}`),
+        inArray(jobs.jobType, [...MEDIA_INDEX_JOB_TYPES]),
+        inArray(jobs.status, ['queued', 'running']),
+      ),
+    )
+    .orderBy(desc(jobs.createdAt))
+}
+
+/**
+ * 同一事务内把文件标记为 purge_queued 并创建 purge_video_index 任务。
+ *
+ * 事务保证"状态翻转 + 任务入库"原子完成：任一步失败都不留下 purge_queued 却无任务的半成品。
+ * 调用方必须先用 getActiveMediaJobsForFile 确认无活跃媒体任务。
+ */
+export async function createVideoReindex(db: Database, fileId: string) {
+  return db.transaction(async (tx) => {
+    await tx
+      .update(mediaFiles)
+      .set({ indexStatus: 'purge_queued', updatedAt: new Date() })
+      .where(eq(mediaFiles.id, fileId))
+    const [job] = await tx
+      .insert(jobs)
+      .values({
+        id: randomUUID(),
+        jobType: 'purge_video_index',
+        fileId,
+        inputJson: { file_id: fileId },
+      })
+      .returning()
+    return job
+  })
 }
 
 export async function resetVectorRefsForCollection(
@@ -267,57 +333,6 @@ export async function listAttemptedEmbeddingJobs(db: Database) {
     )
 }
 
-export async function listAttemptedOcrJobs(db: Database) {
-  return db
-    .select({
-      jobType: jobs.jobType,
-      inputJson: jobs.inputJson,
-    })
-    .from(jobs)
-    .where(
-      and(
-        eq(jobs.jobType, 'run_ocr'),
-        inArray(jobs.status, ['queued', 'running', 'failed', 'succeeded']),
-      ),
-    )
-}
-
-export async function listPendingOcrAssets(
-  db: Database,
-  input: { libraryId?: string; fileId?: string; limit?: number } = {},
-) {
-  // OCR 可以被自动补队列，也可以被手动补队列。用 text_content 和 metadata_json.ocr
-  // 双条件判断，兼容“有文本但没有 OCR metadata”的历史/异常数据。
-  const conditions = [
-    inArray(mediaAssets.assetType, ['image', 'video_frame']),
-    isNull(mediaFiles.deletedAt),
-    isNull(libraries.deletedAt),
-    or(isNull(mediaAssets.textContent), sql`NOT (${mediaAssets.metadataJson} ? 'ocr')`),
-  ]
-  if (input.libraryId) {
-    conditions.push(eq(mediaFiles.libraryId, input.libraryId))
-  }
-  if (input.fileId) {
-    conditions.push(eq(mediaFiles.id, input.fileId))
-  }
-
-  return db
-    .select({
-      assetId: mediaAssets.id,
-      fileId: mediaFiles.id,
-      libraryId: mediaFiles.libraryId,
-      assetType: mediaAssets.assetType,
-      path: mediaAssets.path,
-      frameTimeSeconds: mediaAssets.frameTimeSeconds,
-    })
-    .from(mediaAssets)
-    .innerJoin(mediaFiles, eq(mediaAssets.fileId, mediaFiles.id))
-    .innerJoin(libraries, eq(mediaFiles.libraryId, libraries.id))
-    .where(and(...conditions))
-    .orderBy(asc(mediaAssets.createdAt))
-    .limit(input.limit ?? 500)
-}
-
 export async function getFileWithAssetsAndVectors(db: Database, fileId: string) {
   const file = (await db.query.mediaFiles.findFirst({
     where: eq(mediaFiles.id, fileId),
@@ -370,7 +385,8 @@ export async function listSearchResultMetadata(
   }
 
   // Qdrant 只返回 point id 和 score；最终 API 结果必须回 PostgreSQL 补齐事实字段。
-  // 软删除和 library/media type 过滤放在这里兜底，避免 Qdrant payload 漏同步导致脏结果。
+  // 软删除、library/media type、stale、场景 generation 一致性与模型版本都在这里兜底，
+  // 避免 Qdrant payload 漏同步或重索引残留导致脏结果。
   const conditions = [
     eq(vectorRefs.collectionName, collectionName),
     inArray(vectorRefs.pointId, pointIds),
@@ -378,8 +394,16 @@ export async function listSearchResultMetadata(
     isNull(mediaFiles.deletedAt),
     isNull(libraries.deletedAt),
     sql`COALESCE(${mediaAssets.metadataJson}->>'stale', 'false') <> 'true'`,
-    // 图片继续使用 caption-v1；视频检索只接受带稳定 scene_id 的 scene-caption-v2。
-    // 这条防御性约束避免历史视频 caption-v1 与新场景 Caption 同时返回重叠片段。
+    // 视频候选必须引用真实场景行（scene_id 非空）。图片资产 scene_id 为空，不受影响。
+    sql`NOT (${mediaFiles.mediaType} = 'video' AND ${mediaAssets.sceneId} IS NULL)`,
+    // 视频候选的场景必须属于文件当前 index_generation；LEFT JOIN 找不到场景行（已删除）
+    // 或 generation 不一致都视为上一轮重索引残留，必须拒绝。
+    sql`NOT (
+      ${mediaFiles.mediaType} = 'video'
+      AND ${mediaAssets.sceneId} IS NOT NULL
+      AND ${videoScenes.indexGeneration} IS DISTINCT FROM ${mediaFiles.indexGeneration}
+    )`,
+    // 视频检索只接受 scene-caption-v2 的 caption，避免历史 caption-v1 与新场景 Caption 重叠。
     sql`NOT (
       ${mediaFiles.mediaType} = 'video'
       AND ${mediaAssets.assetType} = 'caption'
@@ -392,6 +416,8 @@ export async function listSearchResultMetadata(
   if (filters.libraryIds?.length) {
     conditions.push(inArray(mediaFiles.libraryId, filters.libraryIds))
   }
+  // 模型版本一致性由确定性 point_id + status='indexed' 保证：模型变化会改变 point_id 并把旧 ref
+  // 重置为 pending，旧 Qdrant point 回表时找不到 indexed ref 即被拒绝，无需在此再按模型名过滤。
 
   return db
     .select({
@@ -401,8 +427,13 @@ export async function listSearchResultMetadata(
       fileId: mediaFiles.id,
       mediaType: mediaFiles.mediaType,
       path: mediaFiles.path,
+      // scene_id 是正式列：视频帧/caption 引用真实 video_scenes 行，图片为 null。
+      sceneId: mediaAssets.sceneId,
       startTimeSeconds: mediaAssets.startTimeSeconds,
       endTimeSeconds: mediaAssets.endTimeSeconds,
+      // 视频场景边界来自 video_scenes；用于搜索结果的时间窗口与诊断展示。
+      sceneStartTimeSeconds: videoScenes.startTimeSeconds,
+      sceneEndTimeSeconds: videoScenes.endTimeSeconds,
       frameTimeSeconds: mediaAssets.frameTimeSeconds,
       textContent: mediaAssets.textContent,
       metadataJson: mediaAssets.metadataJson,
@@ -411,56 +442,9 @@ export async function listSearchResultMetadata(
     .innerJoin(mediaAssets, eq(vectorRefs.assetId, mediaAssets.id))
     .innerJoin(mediaFiles, eq(vectorRefs.fileId, mediaFiles.id))
     .innerJoin(libraries, eq(vectorRefs.libraryId, libraries.id))
+    // LEFT JOIN：图片资产 scene_id 为 null；视频资产 scene_id 指向 video_scenes。
+    .leftJoin(videoScenes, eq(mediaAssets.sceneId, videoScenes.id))
     .where(and(...conditions))
-}
-
-export async function listVideoSceneBounds(
-  db: Database,
-  keys: Array<{ fileId: string; sceneId: string }>,
-) {
-  if (!keys.length) {
-    return []
-  }
-  const requestedKeys = new Set(keys.map((key) => `${key.fileId}|${key.sceneId}`))
-  const rows = await db
-    .select({
-      assetId: mediaAssets.id,
-      fileId: mediaAssets.fileId,
-      startTimeSeconds: mediaAssets.startTimeSeconds,
-      endTimeSeconds: mediaAssets.endTimeSeconds,
-      metadataJson: mediaAssets.metadataJson,
-    })
-    .from(mediaAssets)
-    .where(
-      and(
-        eq(mediaAssets.assetType, 'video_segment'),
-        inArray(mediaAssets.fileId, [...new Set(keys.map((key) => key.fileId))]),
-        sql`COALESCE(media_assets.metadata_json->>'stale', 'false') <> 'true'`,
-      ),
-    )
-
-  const matched = new Map<string, (typeof rows)[number] & { sceneId: string }>()
-  for (const row of rows) {
-    const metadata = row.metadataJson
-    const sceneId =
-      typeof metadata === 'object' && metadata !== null && 'scene_id' in metadata
-        ? metadata.scene_id
-        : undefined
-    if (typeof sceneId !== 'string') {
-      continue
-    }
-    const key = `${row.fileId}|${sceneId}`
-    if (!requestedKeys.has(key)) {
-      continue
-    }
-    if (matched.has(key)) {
-      throw new Error(
-        `Multiple active video segments for file_id=${row.fileId} scene_id=${sceneId}`,
-      )
-    }
-    matched.set(key, { ...row, sceneId })
-  }
-  return [...matched.values()]
 }
 
 export async function listTextSearchResultMetadata(
@@ -472,11 +456,11 @@ export async function listTextSearchResultMetadata(
     offset: number
   },
 ) {
-  // FTS 复用 media_assets.text_content：text_chunk 表示 transcript，image/video_frame 表示 OCR。
-  // 使用 simple config 是当前 MVP 的可移植选择；中文分词优化留给后续阶段。
+  // FTS 复用 media_assets.text_content：阶段 2 删除 OCR 后，全文检索只来自 text_chunk
+  // （音频/视频语音转录）。使用 simple config 是当前 MVP 的可移植选择；中文分词优化留给后续阶段。
   const rank = sql<number>`ts_rank_cd(media_assets.text_tsv, plainto_tsquery('simple', ${input.query}))`
   const conditions = [
-    inArray(mediaAssets.assetType, ['text_chunk', 'image', 'video_frame']),
+    eq(mediaAssets.assetType, 'text_chunk'),
     sql`media_assets.text_tsv @@ plainto_tsquery('simple', ${input.query})`,
     isNull(mediaFiles.deletedAt),
     isNull(libraries.deletedAt),
@@ -495,6 +479,7 @@ export async function listTextSearchResultMetadata(
       fileId: mediaFiles.id,
       mediaType: mediaFiles.mediaType,
       path: mediaFiles.path,
+      sceneId: mediaAssets.sceneId,
       startTimeSeconds: mediaAssets.startTimeSeconds,
       endTimeSeconds: mediaAssets.endTimeSeconds,
       metadataJson: mediaAssets.metadataJson,
@@ -595,163 +580,6 @@ export async function listJobs(db: Database, input: { limit?: number; offset?: n
   const total = Number(totalRows[0]?.total ?? 0)
 
   return { rows, total, limit, offset }
-}
-
-export async function getVideoReindexState(
-  db: Database,
-  filters: { libraryId?: string; fileId?: string } = {},
-) {
-  const fileConditions = [eq(mediaFiles.mediaType, 'video'), isNull(mediaFiles.deletedAt)]
-  if (filters.libraryId) {
-    fileConditions.push(eq(mediaFiles.libraryId, filters.libraryId))
-  }
-  if (filters.fileId) {
-    fileConditions.push(eq(mediaFiles.id, filters.fileId))
-  }
-  const files = await db
-    .select({ id: mediaFiles.id })
-    .from(mediaFiles)
-    .where(and(...fileConditions))
-    .orderBy(asc(mediaFiles.createdAt), asc(mediaFiles.id))
-  const fileIds = files.map((file) => file.id)
-  if (!fileIds.length) {
-    return {
-      fileIds,
-      notReadyFileIds: [] as string[],
-      visualNotReadyFileIds: [] as string[],
-      activeJobFileIds: new Set<string>(),
-      activeVideoSegments: 0,
-      segmentsWithoutFrames: 0,
-      segmentsOver30Seconds: 0,
-      activeVideoSegmentVectorRefs: 0,
-      segmentsWithoutSceneCaptionV2: 0,
-    }
-  }
-
-  const [assetRows, segmentRefRows, activeJobRows] = await Promise.all([
-    db
-      .select({
-        id: mediaAssets.id,
-        fileId: mediaAssets.fileId,
-        assetType: mediaAssets.assetType,
-        startTimeSeconds: mediaAssets.startTimeSeconds,
-        endTimeSeconds: mediaAssets.endTimeSeconds,
-        metadataJson: mediaAssets.metadataJson,
-      })
-      .from(mediaAssets)
-      .where(
-        and(
-          inArray(mediaAssets.fileId, fileIds),
-          inArray(mediaAssets.assetType, ['video_segment', 'video_frame', 'caption']),
-          sql`COALESCE(media_assets.metadata_json->>'stale', 'false') <> 'true'`,
-        ),
-      ),
-    db
-      .select({ fileId: vectorRefs.fileId })
-      .from(vectorRefs)
-      .where(
-        and(
-          inArray(vectorRefs.fileId, fileIds),
-          eq(vectorRefs.collectionName, 'video_segment_vectors'),
-          sql`vector_refs.status <> 'stale'`,
-        ),
-      ),
-    db
-      .select({ inputJson: jobs.inputJson })
-      .from(jobs)
-      .where(and(eq(jobs.jobType, 'index_media'), inArray(jobs.status, ['queued', 'running']))),
-  ])
-
-  const sceneKey = (fileId: string, sceneId: string) => `${fileId}|${sceneId}`
-  const framesByScene = new Set<string>()
-  const captionsByScene = new Set<string>()
-  const segments = assetRows.flatMap((asset) => {
-    const metadata = recordValue(asset.metadataJson)
-    const sceneId = metadata.scene_id
-    if (asset.assetType === 'video_frame' && typeof sceneId === 'string') {
-      framesByScene.add(sceneKey(asset.fileId, sceneId))
-    }
-    if (
-      asset.assetType === 'caption' &&
-      typeof sceneId === 'string' &&
-      metadata.prompt_version === 'scene-caption-v2'
-    ) {
-      captionsByScene.add(sceneKey(asset.fileId, sceneId))
-    }
-    return asset.assetType === 'video_segment'
-      ? [{ ...asset, sceneId: typeof sceneId === 'string' ? sceneId : null }]
-      : []
-  })
-  const segmentRefsByFile = new Set(segmentRefRows.map((row) => row.fileId))
-  let segmentsWithoutFrames = 0
-  let segmentsOver30Seconds = 0
-  let segmentsWithoutSceneCaptionV2 = 0
-  const notReadyFileIds = new Set<string>()
-  const visualNotReadyFileIds = new Set<string>()
-  const segmentCountByFile = new Map<string, number>()
-  for (const segment of segments) {
-    segmentCountByFile.set(segment.fileId, (segmentCountByFile.get(segment.fileId) ?? 0) + 1)
-    const key = segment.sceneId ? sceneKey(segment.fileId, segment.sceneId) : null
-    if (!key || !framesByScene.has(key)) {
-      segmentsWithoutFrames += 1
-      notReadyFileIds.add(segment.fileId)
-      visualNotReadyFileIds.add(segment.fileId)
-    }
-    const start = segment.startTimeSeconds === null ? null : Number(segment.startTimeSeconds)
-    const end = segment.endTimeSeconds === null ? null : Number(segment.endTimeSeconds)
-    if (start === null || end === null || end - start > 30.000001) {
-      segmentsOver30Seconds += 1
-      notReadyFileIds.add(segment.fileId)
-      visualNotReadyFileIds.add(segment.fileId)
-    }
-    if (!key || !captionsByScene.has(key)) {
-      segmentsWithoutSceneCaptionV2 += 1
-      notReadyFileIds.add(segment.fileId)
-    }
-  }
-  for (const fileId of fileIds) {
-    if (!segmentCountByFile.has(fileId) || segmentRefsByFile.has(fileId)) {
-      notReadyFileIds.add(fileId)
-      visualNotReadyFileIds.add(fileId)
-    }
-  }
-  const activeJobFileIds = new Set(
-    activeJobRows.flatMap((row) => {
-      const fileId = recordValue(row.inputJson).file_id
-      return typeof fileId === 'string' ? [fileId] : []
-    }),
-  )
-  return {
-    fileIds,
-    notReadyFileIds: [...notReadyFileIds],
-    visualNotReadyFileIds: [...visualNotReadyFileIds],
-    activeJobFileIds,
-    activeVideoSegments: segments.length,
-    segmentsWithoutFrames,
-    segmentsOver30Seconds,
-    activeVideoSegmentVectorRefs: segmentRefRows.length,
-    segmentsWithoutSceneCaptionV2,
-  }
-}
-
-export async function createVideoReindexJobs(db: Database, fileIds: string[]) {
-  if (!fileIds.length) {
-    return []
-  }
-  return db
-    .insert(jobs)
-    .values(
-      fileIds.map((fileId) => ({
-        id: randomUUID(),
-        jobType: 'index_media',
-        inputJson: {
-          file_id: fileId,
-          index_profile: 'balanced',
-          segment_strategy: 'scene_detection',
-        },
-      })),
-    )
-    .returning()
 }
 
 export async function resolveJobFilePaths(

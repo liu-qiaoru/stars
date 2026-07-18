@@ -44,12 +44,11 @@ export class JobsCoordinatorService implements OnApplicationBootstrap, OnApplica
 
     this.isRunning = true
     try {
+      // 协调器定时把 pending vector_refs 转成 embedding jobs。OCR 能力已在阶段 2 删除，
+      // 不再有 OCR 补队列；场景检测与抽帧由 index_media 任务自身驱动。
       await this.jobsService.queuePendingEmbeddingJobs(
         this.settings.jobCoordinatorEmbeddingLimit,
       )
-      await this.jobsService.queuePendingOcrJobs({
-        limit: this.settings.jobCoordinatorOcrLimit,
-      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.logger.warn(`Job coordination failed: ${message}`)

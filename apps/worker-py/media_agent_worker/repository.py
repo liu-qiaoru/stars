@@ -83,18 +83,27 @@ class PostgresJobRepository:
             )
         self.connection.commit()
 
-    def mark_failed(self, job_id, message):
+    def mark_failed(self, job_id, message, *, error_code=None, error_details=None):
+        # error_code/error_details_json 让 Jobs 页面展示机器可读的结构化错误和技术诊断，
+        # 与面向用户的 error_message 一起形成完整的失败说明。
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
                 UPDATE jobs
                 SET status = 'failed',
                     error_message = %s,
+                    error_code = %s,
+                    error_details_json = %s,
                     updated_at = now(),
                     finished_at = now()
                 WHERE id = %s
                 """,
-                (message, job_id),
+                (
+                    message,
+                    error_code,
+                    json.dumps(error_details) if error_details is not None else None,
+                    job_id,
+                ),
             )
         self.connection.commit()
 
@@ -159,7 +168,7 @@ class PostgresMediaRepository:
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, library_id, path, media_type, duration_seconds, width, height, codec
+                SELECT id, library_id, path, media_type, duration_seconds, width, height, codec, index_generation
                 FROM media_files
                 WHERE id = %s
                 """,
@@ -177,6 +186,7 @@ class PostgresMediaRepository:
             "width": row[5],
             "height": row[6],
             "codec": row[7],
+            "index_generation": int(row[8]) if row[8] is not None else 0,
         }
 
     def update_probe_metadata(self, file_id, metadata):
@@ -205,10 +215,10 @@ class PostgresMediaRepository:
     def upsert_media_asset(self, **asset):
         with self.connection.cursor() as cursor:
             # Asset identity is semantic, not just UUID based: file + asset type + path/time window.
-            # This makes scan/index/transcribe/OCR reruns idempotent across worker restarts.
+            # This makes scan/index/transcribe reruns idempotent across worker restarts.
             cursor.execute(
                 """
-                SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash, text_content, metadata_json
+                SELECT id, file_id, asset_type, path, start_time_seconds, end_time_seconds, frame_time_seconds, content_hash, text_content, metadata_json, scene_id
                 FROM media_assets
                 WHERE file_id = %s
                   AND asset_type = %s
@@ -230,15 +240,16 @@ class PostgresMediaRepository:
             if previous is not None:
                 has_text_content = "text_content" in asset
                 metadata_patch = asset.get("metadata_json", {})
-                # Re-indexing updates only fields owned by the current job. OCR and
-                # transcription can add text/metadata later, so absent text_content
-                # must preserve the existing value and metadata is patched, not reset.
+                # Re-indexing updates only fields owned by the current job. Transcription can add
+                # text/metadata later, so absent text_content must preserve the existing value and
+                # metadata is patched, not reset. scene_id 同步更新到最新场景（重索引可能换场景）。
                 cursor.execute(
                     """
                     UPDATE media_assets
                     SET content_hash = %s,
                         text_content = CASE WHEN %s THEN %s ELSE text_content END,
-                        metadata_json = COALESCE(metadata_json, '{}'::jsonb) || %s::jsonb
+                        metadata_json = COALESCE(metadata_json, '{}'::jsonb) || %s::jsonb,
+                        scene_id = %s
                     WHERE id = %s
                     """,
                     (
@@ -246,6 +257,7 @@ class PostgresMediaRepository:
                         has_text_content,
                         asset.get("text_content"),
                         json.dumps(metadata_patch),
+                        asset.get("scene_id"),
                         previous[0],
                     ),
                 )
@@ -264,6 +276,7 @@ class PostgresMediaRepository:
                     "content_hash": previous[7],
                     "text_content": asset["text_content"] if has_text_content else previous[8],
                     "metadata_json": {**previous_metadata, **metadata_patch},
+                    "scene_id": str(previous[10]) if previous[10] is not None else None,
                     "_created": False,
                 }
 
@@ -271,16 +284,17 @@ class PostgresMediaRepository:
             cursor.execute(
                 """
                 INSERT INTO media_assets (
-                  id, file_id, asset_type, path, start_time_seconds, end_time_seconds,
+                  id, file_id, asset_type, path, scene_id, start_time_seconds, end_time_seconds,
                   frame_time_seconds, content_hash, text_content, metadata_json
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     asset_id,
                     asset["file_id"],
                     asset["asset_type"],
                     asset.get("path"),
+                    asset.get("scene_id"),
                     asset.get("start_time_seconds"),
                     asset.get("end_time_seconds"),
                     asset.get("frame_time_seconds"),
@@ -356,7 +370,7 @@ class PostgresMediaRepository:
                   vr.model_name, vr.model_version, vr.vector_kind, vr.vector_dim, vr.distance,
                   vr.content_hash, vr.index_profile, ma.asset_type, mf.media_type,
                   ma.start_time_seconds, ma.end_time_seconds, ma.frame_time_seconds, ma.metadata_json,
-                  ma.text_content
+                  ma.text_content, ma.scene_id
                 FROM vector_refs vr
                 JOIN media_assets ma ON ma.id = vr.asset_id
                 JOIN media_files mf ON mf.id = vr.file_id
@@ -390,9 +404,14 @@ class PostgresMediaRepository:
             "frame_time_seconds": float(row[16]) if row[16] is not None else None,
             "metadata_json": row[17] or {},
             "text_content": row[18],
+            # scene_id 是正式列：视频帧/caption 引用真实 video_scenes 行；Qdrant payload 冗余保存它
+            # 供分组检索（group_by=scene_id）和诊断使用，最终事实仍以 PostgreSQL 为准。
+            "scene_id": str(row[19]) if row[19] is not None else None,
         }
 
     def get_caption_source_asset(self, asset_id):
+        # 阶段 2 后只有图片走 caption-v1 单图来源；视频场景 Caption 直接用 video_scenes.id，
+        # 不再以 video_segment 资产作为 Caption 来源。
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -403,7 +422,7 @@ class PostgresMediaRepository:
                 FROM media_assets ma
                 JOIN media_files mf ON mf.id = ma.file_id
                 WHERE ma.id = %s
-                  AND ma.asset_type IN ('image', 'video_segment')
+                  AND ma.asset_type = 'image'
                 """,
                 (asset_id,),
             )
@@ -424,23 +443,86 @@ class PostgresMediaRepository:
             "media_type": row[10],
         }
 
-    def list_scene_caption_frames(self, file_id, scene_id):
+    def upsert_video_scene(
+        self, *, file_id, scene_key, start_time_seconds, end_time_seconds, detection_strategy,
+        strategy_fingerprint, index_generation,
+    ):
+        # 场景身份在 (file_id, scene_key, index_generation) 上幂等。重索引产生新 generation 时，
+        # 旧 generation 的场景由阶段 3 的 purge 任务清理；本处只保证当前 generation 的场景可重复写入。
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO video_scenes (
+                  id, file_id, scene_key, start_time_seconds, end_time_seconds,
+                  detection_strategy, strategy_fingerprint, index_generation
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (file_id, scene_key, index_generation) DO UPDATE
+                SET start_time_seconds = EXCLUDED.start_time_seconds,
+                    end_time_seconds = EXCLUDED.end_time_seconds,
+                    detection_strategy = EXCLUDED.detection_strategy,
+                    strategy_fingerprint = EXCLUDED.strategy_fingerprint,
+                    updated_at = now()
+                RETURNING id
+                """,
+                (
+                    str(uuid.uuid4()),
+                    file_id,
+                    scene_key,
+                    start_time_seconds,
+                    end_time_seconds,
+                    detection_strategy,
+                    strategy_fingerprint,
+                    index_generation,
+                ),
+            )
+            row = cursor.fetchone()
+        self.connection.commit()
+        return {"id": str(row[0]), "file_id": file_id, "scene_key": scene_key}
+
+    def get_video_scene(self, scene_id):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT vs.id, vs.file_id, vs.scene_key, vs.start_time_seconds, vs.end_time_seconds,
+                       vs.index_generation, mf.library_id, mf.path
+                FROM video_scenes vs
+                JOIN media_files mf ON mf.id = vs.file_id
+                WHERE vs.id = %s
+                """,
+                (scene_id,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f"Video scene not found: {scene_id}")
+        return {
+            "id": str(row[0]),
+            "file_id": str(row[1]),
+            "scene_key": row[2],
+            "start_time_seconds": float(row[3]) if row[3] is not None else None,
+            "end_time_seconds": float(row[4]) if row[4] is not None else None,
+            "index_generation": int(row[5]) if row[5] is not None else 0,
+            "library_id": str(row[6]),
+            "path": row[7],
+        }
+
+    def list_scene_frames(self, scene_id):
+        # 按正式 video_scenes.id 取该场景下按时间排序的视频帧 asset（scene_id 外键列），
+        # 取代旧的 metadata_json.scene_id 匹配。
         with self.connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT
                   ma.id, ma.file_id, ma.asset_type, COALESCE(ma.path, mf.path) AS path,
-                  ma.frame_time_seconds, ma.content_hash, ma.metadata_json,
-                  mf.library_id, mf.media_type
+                  ma.frame_time_seconds, ma.content_hash, ma.metadata_json
                 FROM media_assets ma
                 JOIN media_files mf ON mf.id = ma.file_id
-                WHERE ma.file_id = %s
+                WHERE ma.scene_id = %s
                   AND ma.asset_type = 'video_frame'
-                  AND ma.metadata_json->>'scene_id' = %s
                   AND COALESCE(ma.metadata_json->>'stale', 'false') <> 'true'
                 ORDER BY ma.frame_time_seconds ASC, ma.id ASC
                 """,
-                (file_id, scene_id),
+                (scene_id,),
             )
             rows = cursor.fetchall()
         return [
@@ -452,86 +534,9 @@ class PostgresMediaRepository:
                 "frame_time_seconds": float(row[4]) if row[4] is not None else None,
                 "content_hash": row[5],
                 "metadata_json": row[6] or {},
-                "library_id": str(row[7]),
-                "media_type": row[8],
             }
             for row in rows
         ]
-
-    def invalidate_video_index_assets(
-        self,
-        file_id,
-        segment_strategy,
-        keyframe_density=None,
-        index_layout_version=None,
-    ):
-        # Changing segmentation strategy or keyframe density can leave old video_segment/video_frame rows around.
-        # Mark them stale instead of deleting so existing references remain auditable and safe to ignore in reads.
-        stale_metadata = json.dumps({
-            "stale": True,
-            "stale_reason": "video_reindex",
-        })
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT id
-                FROM media_assets
-                WHERE file_id = %s
-                  AND asset_type IN ('video_segment', 'video_frame')
-                  AND (
-                    metadata_json->>'segment_strategy' IS DISTINCT FROM %s
-                    OR metadata_json->>'keyframe_density' IS DISTINCT FROM %s
-                    OR metadata_json->>'index_layout_version' IS DISTINCT FROM %s
-                  )
-                """,
-                (file_id, segment_strategy, keyframe_density, index_layout_version),
-            )
-            asset_ids = [row[0] for row in cursor.fetchall()]
-            if not asset_ids:
-                self.connection.commit()
-                return {"assets_invalidated": 0, "vector_refs_invalidated": 0}
-
-            cursor.execute(
-                """
-                UPDATE vector_refs
-                SET status = 'stale',
-                    updated_at = now()
-                WHERE asset_id = ANY(%s)
-                  AND status <> 'stale'
-                """,
-                (asset_ids,),
-            )
-            vector_refs_invalidated = cursor.rowcount
-            cursor.execute(
-                """
-                UPDATE media_assets
-                SET metadata_json = metadata_json || %s::jsonb
-                WHERE id = ANY(%s)
-                """,
-                (stale_metadata, asset_ids),
-            )
-            assets_invalidated = cursor.rowcount
-        self.connection.commit()
-        return {
-            "assets_invalidated": assets_invalidated,
-            "vector_refs_invalidated": vector_refs_invalidated,
-        }
-
-    def mark_video_segment_vector_refs_stale(self, file_id):
-        with self.connection.cursor() as cursor:
-            cursor.execute(
-                """
-                UPDATE vector_refs
-                SET status = 'stale', updated_at = now()
-                WHERE file_id = %s
-                  AND collection_name = 'video_segment_vectors'
-                  AND status <> 'stale'
-                """,
-                (file_id,),
-            )
-            stale_count = cursor.rowcount
-        self.connection.commit()
-        return stale_count
 
     def mark_vector_ref_indexed(self, point_id):
         with self.connection.cursor() as cursor:
@@ -558,46 +563,61 @@ class PostgresMediaRepository:
             )
         self.connection.commit()
 
-    def get_media_asset_for_ocr(self, asset_id):
+    def list_vector_refs_for_file(self, file_id):
+        # 阶段 3 purge 用：列出某文件全部 vector_ref 的 (collection, point_id)，供 Worker 从 Qdrant 删除。
         with self.connection.cursor() as cursor:
             cursor.execute(
-                """
-                SELECT
-                  ma.id, ma.file_id, ma.asset_type, COALESCE(ma.path, mf.path) AS path,
-                  ma.frame_time_seconds, ma.metadata_json
-                FROM media_assets ma
-                JOIN media_files mf ON mf.id = ma.file_id
-                WHERE ma.id = %s
-                  AND ma.asset_type IN ('image', 'video_frame')
-                """,
-                (asset_id,),
+                "SELECT collection_name, point_id FROM vector_refs WHERE file_id = %s",
+                (file_id,),
+            )
+            rows = cursor.fetchall()
+        return [{"collection_name": row[0], "point_id": str(row[1])} for row in rows]
+
+    def purge_file_index(self, file_id):
+        """单文件破坏性清理索引派生数据，并在状态为 purge_queued 时递增 index_generation。
+
+        全程一个事务：先锁住 media_files 行，删除 vector_refs / 视频帧与 Caption 资产 / video_scenes，
+        再按 index_status 条件递增 generation 并翻回 pending。删除语句本身幂等；generation 递增只在
+        purge_queued 时发生，因此 purge 重试（上一轮已成功翻回 pending）不会重复递增。
+        Qdrant 已删但本事务失败时会抛异常并回滚，调用方据此让任务失败并可安全重试。
+        """
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT index_status, index_generation FROM media_files WHERE id = %s FOR UPDATE",
+                (file_id,),
             )
             row = cursor.fetchone()
-        if row is None:
-            raise ValueError(f"OCR asset not found: {asset_id}")
-        return {
-            "id": str(row[0]),
-            "file_id": str(row[1]),
-            "asset_type": row[2],
-            "path": row[3],
-            "frame_time_seconds": float(row[4]) if row[4] is not None else None,
-            "metadata_json": row[5] or {},
-        }
+            if row is None:
+                self.connection.rollback()
+                raise ValueError(f"Media file not found: {file_id}")
+            index_status, index_generation = row
 
-    def update_asset_ocr_text(self, asset_id, *, text_content, ocr_metadata):
-        # OCR writes text back to the original image/video_frame asset so FTS can use the same text_tsv column.
-        ocr_patch = json.dumps({"ocr": ocr_metadata})
-        with self.connection.cursor() as cursor:
+            cursor.execute("DELETE FROM vector_refs WHERE file_id = %s", (file_id,))
+            vector_refs_deleted = cursor.rowcount
             cursor.execute(
-                """
-                UPDATE media_assets
-                SET text_content = %s,
-                    metadata_json = metadata_json || %s::jsonb
-                WHERE id = %s
-                """,
-                (text_content, ocr_patch, asset_id),
+                "DELETE FROM media_assets WHERE file_id = %s AND asset_type IN ('image', 'video_frame', 'caption')",
+                (file_id,),
             )
+            assets_deleted = cursor.rowcount
+            cursor.execute("DELETE FROM video_scenes WHERE file_id = %s", (file_id,))
+            scenes_deleted = cursor.rowcount
+
+            if index_status == "purge_queued":
+                cursor.execute(
+                    "UPDATE media_files SET index_generation = index_generation + 1, index_status = 'pending', updated_at = now() WHERE id = %s",
+                    (file_id,),
+                )
+                index_generation = (index_generation or 0) + 1
+            else:
+                # 重试路径：上一轮已翻回 pending，不重复递增 generation。
+                cursor.execute("UPDATE media_files SET updated_at = now() WHERE id = %s", (file_id,))
         self.connection.commit()
+        return {
+            "vector_refs_deleted": vector_refs_deleted,
+            "assets_deleted": assets_deleted,
+            "scenes_deleted": scenes_deleted,
+            "index_generation": int(index_generation or 0),
+        }
 
 
 def connect_from_env():

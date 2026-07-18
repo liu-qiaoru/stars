@@ -8,8 +8,8 @@ from .embedding_worker import EmbedImageHandler, EmbedTextAssetHandler, EmbedVid
 from .embeddings import SiglipEmbedder
 from .env import load_project_env
 from .indexing import IndexMediaHandler
-from .ocr import OcrHandler
 from .probe import ProbeHandler
+from .purging import PurgeVideoIndexHandler
 from .qdrant import QdrantHttpClient
 from .repository import PostgresJobRepository, PostgresMediaRepository, connect_from_env
 from .scan import ScanHandler
@@ -28,18 +28,19 @@ def build_runner(
 ):
     shared_embedder = embedder or SiglipEmbedder()
     shared_text_embedder = text_embedder or embedder
+    # OCR 处理器（PaddleOCR）已在阶段 2 删除，不再装配；run_ocr 任务不再被创建或路由。
     return WorkerRunner(
         worker_id=worker_id,
         job_repository=job_repository,
         scan_handler=ScanHandler(media_repository, job_repository=job_repository),
         probe_handler=ProbeHandler(media_repository, job_repository=job_repository),
         index_handler=IndexMediaHandler(media_repository, job_repository=job_repository),
+        purge_handler=PurgeVideoIndexHandler(media_repository, qdrant_client, job_repository=job_repository),
         generate_caption_handler=GenerateCaptionHandler(media_repository),
         embed_image_handler=EmbedImageHandler(media_repository, qdrant_client, shared_embedder),
         embed_video_frame_handler=EmbedVideoFrameHandler(media_repository, qdrant_client, shared_embedder),
         embed_text_asset_handler=EmbedTextAssetHandler(media_repository, qdrant_client, shared_text_embedder),
         transcribe_handler=TranscribeHandler(media_repository),
-        ocr_handler=OcrHandler(media_repository),
         export_handler=ExportClipHandler(media_repository),
     )
 

@@ -1,4 +1,4 @@
-export type HybridReason = 'vector_match' | 'transcript_match' | 'ocr_match' | 'caption_match'
+export type HybridReason = 'vector_match' | 'transcript_match' | 'caption_match'
 
 export interface HybridCandidateInput {
   asset_id: string
@@ -33,7 +33,6 @@ const MULTI_SIGNAL_BONUS = 0.08
 const MIN_HYBRID_SOURCE_SCORE = 0.1
 const REASON_TIE_BREAK_ORDER: HybridReason[] = [
   'transcript_match',
-  'ocr_match',
   'caption_match',
   'vector_match',
 ]
@@ -381,9 +380,6 @@ function reasonForSource(sourceKey: string, reasons: HybridReason[]): HybridReas
   if (reasons.includes('transcript_match')) {
     return 'transcript_match'
   }
-  if (reasons.includes('ocr_match')) {
-    return 'ocr_match'
-  }
   if (reasons.includes('caption_match')) {
     return 'caption_match'
   }
@@ -429,10 +425,7 @@ function reasonSortOrder(reason: HybridReason) {
   if (reason === 'transcript_match') {
     return 1
   }
-  if (reason === 'ocr_match') {
-    return 2
-  }
-  return 3
+  return 2
 }
 
 function uniqueStrings(values: string[]) {
