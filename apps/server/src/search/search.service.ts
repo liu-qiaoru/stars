@@ -28,10 +28,7 @@ import {
 } from './search-hybrid.js'
 import { SearchQueryVectorService } from './search-query-vector.service.js'
 import { routeQueryVariantsForCollection } from './search-query-routing.js'
-import {
-  buildRrfSearchResults,
-  type RrfSourceCandidate,
-} from './search-rrf.js'
+import { buildRrfSearchResults, type RrfSourceCandidate } from './search-rrf.js'
 
 const baseSearchCollections = [
   { collection: 'image_vectors', mediaTypes: ['image'] },
@@ -107,7 +104,10 @@ export class SearchService {
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
-    @Inject(QDRANT_CLIENT) private readonly qdrantClient: Pick<QdrantClient, 'search' | 'searchPointGroups'>,
+    @Inject(QDRANT_CLIENT) private readonly qdrantClient: Pick<
+      QdrantClient,
+      'search' | 'searchPointGroups'
+    >,
     @Inject(SearchQueryVectorService) private readonly queryVectorService: SearchQueryVectorService,
     @Inject(QueryExpansionService) private readonly queryExpansionService: QueryExpansionService,
     @Inject(SETTINGS) private readonly settings: Settings,
@@ -115,7 +115,7 @@ export class SearchService {
 
   async search(
     input: SearchRequest,
-    options: { sourceLimit?: number } = {},
+    options: { sourceLimit?: number; strictIntegrity?: boolean } = {},
   ) {
     const searchStartedAt = performance.now()
     const request = this.parseRequest(input)
@@ -184,6 +184,11 @@ export class SearchService {
             queryVariantHitsByPointId: collectionResult.queryVariantHitsByPointId,
           },
         )
+        if (options.strictIntegrity && results.length !== collectionResult.points.length) {
+          throw new Error(
+            `search point hydration incomplete collection=${collection} points=${collectionResult.points.length} hydrated=${results.length}`,
+          )
+        }
 
         return {
           collection,
@@ -239,6 +244,28 @@ export class SearchService {
           }
         : {}),
     }
+  }
+
+  /**
+   * 评测仍复用正式搜索的召回、回表、场景折叠和 RRF，只额外从同一份 groups 计算
+   * current 对照排序。一次查询只有一份候选快照，避免连续调用两次 Qdrant 时索引变化。
+   */
+  async searchForEvaluation(input: SearchRequest, sourceLimit = 20) {
+    const rrf = await this.search(
+      { ...input, ranking_mode: 'rrf', include_diagnostics: true },
+      { sourceLimit, strictIntegrity: true },
+    )
+    const current = buildHybridResults(await this.toHybridCandidates(rrf.groups), {
+      limit: input.limit ?? 20,
+      offset: input.offset ?? 0,
+    })
+    const sourceCandidates = this.toRrfCandidates(rrf.groups)
+    const fullRrf = buildRrfSearchResults(sourceCandidates, {
+      limit: sourceCandidates.length,
+      offset: 0,
+      includeDiagnostics: true,
+    })
+    return { ...rrf, comparison_results: { current, rrf: rrf.results, full_rrf: fullRrf } }
   }
 
   private parseRequest(input: SearchRequest): ParsedSearchRequest {
@@ -630,11 +657,7 @@ export class SearchService {
   }
 
   private hybridReason(reason: string): HybridReason | undefined {
-    if (
-      reason === 'vector_match' ||
-      reason === 'transcript_match' ||
-      reason === 'caption_match'
-    ) {
+    if (reason === 'vector_match' || reason === 'transcript_match' || reason === 'caption_match') {
       return reason
     }
     return undefined

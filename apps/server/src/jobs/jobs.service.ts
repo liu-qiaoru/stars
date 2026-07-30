@@ -41,6 +41,27 @@ export class JobsService {
     return this.toResponse(row, filePathsByJobId.get(row.id) ?? [])
   }
 
+  async retryJob(id: string) {
+    const failed = await getJob(this.db, id)
+    if (!failed) {
+      throw new NotFoundException('Job not found')
+    }
+    if (failed.status !== 'failed') {
+      throw new ConflictException('Only failed jobs can be retried')
+    }
+    // 重试创建新的 queued 审计行，而不把原失败行改回 queued。这样用户仍能看到原错误，
+    // Python Worker 也只会领取新任务；输入仍由原任务创建时通过的共享 Job Schema 约束。
+    const replacement = await createJob(this.db, {
+      jobType: failed.jobType,
+      priority: failed.priority,
+      maxAttempts: failed.maxAttempts,
+      timeoutSeconds: failed.timeoutSeconds,
+      fileId: failed.fileId ?? undefined,
+      inputJson: failed.inputJson as never,
+    })
+    return { job_id: replacement.id, status: replacement.status }
+  }
+
   async requestVideoReindex(input: { fileId: string }) {
     // 阶段 3：单文件破坏性重索引入口。先确认文件存在且没有正在运行的媒体索引任务，
     // 再在同一事务里把文件标记为 purge_queued 并创建 purge_video_index 任务；

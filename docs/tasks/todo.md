@@ -10,9 +10,9 @@
 
 ## 当前进度
 
-- 当前阶段：视频检索重建 Phase 5 已完成（搜索范围、正式 RRF 排序和场景候选完整性保护）。
-- 最近更新：2026-07-30，完成 `visual|spoken|all` 路由、`current|rrf` 排序选择和生产 RRF 接线。
-- 下一步：等待确认后进入视频检索重建 Phase 6，完善核心 Web 搜索与任务反馈，并重建评测运行层。
+- 当前阶段：视频检索重建 Phase 6 已完成（核心 Web 搜索、任务失败反馈与评测运行层）。
+- 最近更新：2026-07-30，完成最终搜索契约 Web 接线、结构化失败重试和正式场景评测重建。
+- 下一步：等待确认后进入 Phase 7，压缩开发迁移并重建本地服务与素材索引。
 
 ## 视频检索重建 Phase 4：Caption 文本向量与 SigLIP2 模型一致性
 
@@ -69,6 +69,38 @@ Review：
   `corepack pnpm check` 通过：Shared Schema 6 项、Web 39 项及生产构建、Server 122 项测试；
   Python Worker 73 项测试通过；`git diff --cached --check` 通过。规格与工程规范双轴复核
   最终均无阻断问题。本阶段无数据库迁移、无模型重装或媒体重索引要求。
+
+## 视频检索重建 Phase 6：核心 Web 搜索、任务反馈与评测运行层
+
+- Start：2026-07-30。目标是让用户能在 Web 选择视觉、语音或全部范围以及当前/RRF
+  排序；让媒体处理失败具备结构化详情和人工重试入口；并在最终 Search API、正式
+  `video_scenes.id` 和公共指标函数之上重建可盲标、可冻结的评测运行层。
+- 验证计划：先增加失败测试覆盖搜索控件、任务错误/重试、六张评测表、正式场景目标、
+  运行失败原子性、证据隐藏和快照不可变；实现后运行 Server/Web/Shared/Python 全量检查、
+  当前迁移 PGlite 空库验证、`git diff --check` 和双轴代码审查。
+
+- [x] Web 搜索页显示搜索范围与排序方式，并把选择同步传给正式 Search API。
+- [x] 诊断界面显示来源名次、RRF 贡献、场景边界和 SigLIP2 最佳帧时间。
+- [x] Jobs 页面显示场景检测、抽帧、Embedding、Caption 结构化错误与人工重试入口。
+- [x] 定义六张评测表并生成第二个开发迁移，PGlite 可从空库直接创建。
+- [x] 指定目标使用正式 `video_scenes.id`，随机目标选择器不读取旧 video segment Asset。
+- [x] 重建 Evaluation Controller、Service、Module、Web API Client 和 `/evaluation` 页面。
+- [x] 评测复用正式 Search API、公共 RRF 证据与指标；完整性失败时整次运行失败。
+- [x] 冻结查询版本、候选快照和盲标证据边界，完成最小 Fixture 回归测试。
+- [x] 更新 API/架构文档，运行完整验证与双轴代码审查并记录 Review。
+
+Review：
+
+- Result：Phase 6 已完成。搜索页可明确选择视觉、语音或全部范围以及 current/RRF
+  排序；诊断显示通道名次、RRF 贡献、场景边界和 SigLIP2 最佳帧。Jobs 页面显示结构化
+  错误并以新任务重试。评测域已用六张表、正式场景 UUID、同一份生产搜索快照、盲标和
+  公共指标重建，普通搜索路径改为相对路径，避免泄露本机绝对目录。
+- Notes：开发迁移为 `0006_cloudy_shockwave.sql`；新环境由 PGlite 空库测试验证，已有本地
+  PostgreSQL 需在启动前运行 `db:migrate`。完整检查通过：Shared 6 项、Web 41 项及生产
+  构建、Server 127 项、Python Worker 73 项，Oxlint 与 `git diff --check` 通过。双轴审查
+  首轮发现的媒体快照外键、current 独有候选、运行原子性、报告后改标、随机目标稳定性、
+  视频目标缺场景、盲标操作不完整、绝对路径和模型任务结构化错误均已修复；Phase 7 的
+  迁移压缩和正式基线样本未提前实施。
 
 ## 代码可读性：关键路径注释补强
 

@@ -62,7 +62,8 @@ describe('jobs workspace', () => {
     expect(screen.getByText('第 2 / 7 页')).toBeInTheDocument()
   })
 
-  test('shows the failure reason for failed jobs', () => {
+  test('shows structured failure details and retries as a new queued job', async () => {
+    const retryJob = vi.fn().mockResolvedValue({ job_id: 'retry-1', status: 'queued' })
     render(
       <JobsWorkspace
         jobs={[
@@ -71,15 +72,24 @@ describe('jobs workspace', () => {
             id: 'failed-job',
             status: 'failed',
             error_message: 'ffprobe exited with code 1',
+            error_code: 'SCENE_DETECTION_FAILED',
+            error_details: { stage: 'scene_detection', stderr: 'invalid stream' },
           },
         ]}
         total={1}
         limit={500}
         offset={0}
+        apiClient={{ retryJob }}
       />,
     )
 
     expect(screen.getByText('失败原因：ffprobe exited with code 1')).toBeInTheDocument()
+    expect(screen.getByText('错误码：SCENE_DETECTION_FAILED')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('查看技术详情'))
+    expect(screen.getByText(/invalid stream/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '修复后重试' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('已创建重试任务 retry-1')
+    expect(retryJob).toHaveBeenCalledWith('failed-job')
   })
 
   test('shows the file path associated with each job', () => {

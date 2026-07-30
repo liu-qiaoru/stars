@@ -11,6 +11,7 @@ from media_agent_worker.embeddings import (
     normalize_vector,
     select_torch_device,
 )
+from media_agent_worker.errors import JobError
 from media_agent_worker.model_service import EmbeddingModelRouter, handle_embed_text_request
 from media_agent_worker.worker import WorkerRunner
 
@@ -333,8 +334,8 @@ class EmbeddingWorkerTest(unittest.TestCase):
             def mark_succeeded(self, _job_id, _result):
                 raise AssertionError("mismatched model must not succeed")
 
-            def mark_failed(self, job_id, message):
-                self.failure = (job_id, message)
+            def mark_failed(self, job_id, message, *, error_code=None, error_details=None):
+                self.failure = (job_id, message, error_code, error_details)
 
         job_repository = SingleCaptionJobRepository()
         runner = WorkerRunner(
@@ -345,7 +346,9 @@ class EmbeddingWorkerTest(unittest.TestCase):
 
         self.assertFalse(runner.run_once())
         self.assertEqual(job_repository.failure[0], "embed-caption-1")
-        self.assertIn("Embedding model mismatch", job_repository.failure[1])
+        self.assertEqual(job_repository.failure[1], "Caption 文本 Embedding 任务失败")
+        self.assertEqual(job_repository.failure[2], "EMBEDDING_FAILED")
+        self.assertEqual(job_repository.failure[3]["stage"], "caption_text_embedding")
         self.assertEqual(qdrant.points, [])
         self.assertEqual(media_repository.indexed, [])
 
@@ -457,9 +460,11 @@ class EmbeddingWorkerTest(unittest.TestCase):
             outputs.append(command[-1])
             raise RuntimeError("ffmpeg failed")
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(JobError) as raised:
             extract_video_frame("/media/clip.mp4", 12.0, runner=failing_run)
 
+        self.assertEqual(raised.exception.error_code, "FRAME_EXTRACTION_FAILED")
+        self.assertEqual(raised.exception.details["stage"], "frame_extraction")
         self.assertEqual(len(outputs), 1)
         self.assertFalse(Path(outputs[0]).exists())
 

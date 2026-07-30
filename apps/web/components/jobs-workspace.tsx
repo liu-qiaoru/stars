@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { RefreshCw } from 'lucide-react'
 import type { JobSummary } from '../lib/api-client'
+import { createApiClient } from '../lib/api-client'
 import { formatJobType, formatStatus } from '../lib/display-labels'
 
 export function JobsWorkspace({
@@ -12,11 +13,13 @@ export function JobsWorkspace({
   total,
   limit,
   offset,
+  apiClient = createApiClient(),
 }: {
   jobs: JobSummary[]
   total: number
   limit: number
   offset: number
+  apiClient?: Pick<ReturnType<typeof createApiClient>, 'retryJob'>
 }) {
   // Jobs 页面是 PostgreSQL-backed 队列的只读窗口；worker 进度、失败原因和完成状态都来自后端。
   const router = useRouter()
@@ -27,6 +30,20 @@ export function JobsWorkspace({
   const currentPage = total === 0 ? 1 : Math.floor(offset / limit) + 1
   const totalPages = Math.max(1, Math.ceil(total / limit))
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null)
+  const [retryNotice, setRetryNotice] = useState<string | null>(null)
+
+  async function retryJob(id: string) {
+    setRetryingJobId(id)
+    setRetryNotice(null)
+    try {
+      const result = await apiClient.retryJob(id)
+      setRetryNotice(`已创建重试任务 ${result.job_id}`)
+      router.refresh()
+    } finally {
+      setRetryingJobId(null)
+    }
+  }
 
   function refreshJobs() {
     if (isRefreshing || document.visibilityState === 'hidden') {
@@ -94,6 +111,11 @@ export function JobsWorkspace({
         </div>
       </div>
       <div className="job-list mt-5">
+        {retryNotice ? (
+          <p role="status" className="muted">
+            {retryNotice}
+          </p>
+        ) : null}
         {jobs.length > 0 ? (
           jobs.map((job) => (
             <article key={job.id} className="job-row">
@@ -104,7 +126,26 @@ export function JobsWorkspace({
                   <p className="muted mt-1 truncate">{formatJobFilePaths(job.file_paths)}</p>
                 ) : null}
                 {job.status === 'failed' && job.error_message ? (
-                  <p className="muted mt-2">失败原因：{job.error_message}</p>
+                  <div className="mt-2 space-y-2">
+                    <p className="muted">失败原因：{job.error_message}</p>
+                    {job.error_code ? <p className="muted">错误码：{job.error_code}</p> : null}
+                    {job.error_details ? (
+                      <details className="text-sm">
+                        <summary className="cursor-pointer">查看技术详情</summary>
+                        <pre className="mt-2 overflow-auto rounded bg-slate-100 p-2 text-xs">
+                          {JSON.stringify(job.error_details, null, 2)}
+                        </pre>
+                      </details>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="secondary-action"
+                      disabled={retryingJobId === job.id}
+                      onClick={() => void retryJob(job.id)}
+                    >
+                      {retryingJobId === job.id ? '正在创建' : '修复后重试'}
+                    </button>
+                  </div>
                 ) : null}
               </div>
               <div

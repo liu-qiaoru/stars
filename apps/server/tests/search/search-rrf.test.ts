@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import {
-  buildRrfSearchResults,
-  type RrfSourceCandidate,
-} from '../../src/search/search-rrf.js'
+import { buildRrfSearchResults, type RrfSourceCandidate } from '../../src/search/search-rrf.js'
 
 function candidate(
   overrides: Partial<RrfSourceCandidate> & Pick<RrfSourceCandidate, 'asset_id' | 'source_signal'>,
@@ -103,6 +100,34 @@ describe('RRF production search adapter', () => {
     expect(results.map((result) => result.scene_id)).toEqual(['scene-b', 'scene-a'])
     expect(results[0]?.ranking_diagnostics?.source_ranks).toEqual({ visual: 2, caption: 1 })
     expect(results[1]?.ranking_diagnostics?.source_ranks).toEqual({ visual: 1 })
+  })
+
+  test('ranks image and video collections as one continuous visual signal', () => {
+    const results = buildRrfSearchResults(
+      [
+        candidate({
+          asset_id: 'video-frame',
+          source_signal: 'visual',
+          source_key: 'video_frame_vectors',
+          source_score: 0.7,
+        }),
+        candidate({
+          asset_id: 'image-asset',
+          file_id: 'image-file',
+          media_type: 'image',
+          path: 'image.jpg',
+          scene_id: null,
+          start_time_seconds: null,
+          end_time_seconds: null,
+          source_signal: 'visual',
+          source_key: 'image_vectors',
+          source_score: 0.9,
+        }),
+      ],
+      { limit: 10, offset: 0, includeDiagnostics: true },
+    )
+
+    expect(results.map((result) => result.ranking_diagnostics?.source_ranks.visual)).toEqual([1, 2])
   })
 
   test('uses image Asset ID and transcript Asset ID when no video scene exists', () => {

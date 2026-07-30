@@ -1,0 +1,311 @@
+'use client'
+
+import { useState, type FormEvent } from 'react'
+import {
+  createApiClient,
+  type EvaluationRun,
+  type EvaluationSet,
+  type EvaluationTarget,
+  type EvaluationVersion,
+  type LibrarySummary,
+} from '../lib/api-client'
+
+/**
+ * 本地评测工作台：草稿阶段选择正式图片或 video_scenes 场景目标；运行后逐条盲标。
+ * 页面不接触 Qdrant，也不显示未完成标注的来源分数，防止判断被算法名次影响。
+ */
+export function EvaluationWorkspace({
+  initialSets,
+  libraries,
+  apiClient = createApiClient(),
+}: {
+  initialSets: EvaluationSet[]
+  libraries: LibrarySummary[]
+  apiClient?: ReturnType<typeof createApiClient>
+}) {
+  const [sets, setSets] = useState(initialSets)
+  const [version, setVersion] = useState<
+    (EvaluationVersion & { queries: Array<{ id: string; query_text: string }> }) | null
+  >(null)
+  const [targets, setTargets] = useState<EvaluationTarget[]>([])
+  const [targetKey, setTargetKey] = useState('')
+  const [run, setRun] = useState<EvaluationRun | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function guard(action: () => Promise<void>) {
+    setError(null)
+    try {
+      await action()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  async function openVersion(id: string) {
+    await guard(async () => setVersion(await apiClient.getEvaluationVersion(id)))
+  }
+
+  async function createSet(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const name = String(new FormData(form).get('name'))
+    await guard(async () => {
+      const created = await apiClient.createEvaluationSet({ name })
+      const latest = {
+        id: created.version_id,
+        set_id: created.id,
+        version: 1,
+        status: 'draft' as const,
+        frozen_at: null,
+      }
+      setSets((current) => [...current, { ...created, latest_version: latest }])
+      setVersion({ ...latest, queries: [] })
+      form.reset()
+    })
+  }
+
+  async function loadTargets() {
+    await guard(async () => {
+      const response = await apiClient.listEvaluationTargets({ limit: 20, seed: 'phase6-ui' })
+      setTargets(response.items)
+      setTargetKey(response.items[0] ? identity(response.items[0]) : '')
+    })
+  }
+
+  async function addQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!version) return
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const selected = targets.find((target) => identity(target) === targetKey)
+    await guard(async () => {
+      await apiClient.addEvaluationQuery(version.id, {
+        query_text: String(data.get('query_text')),
+        query_type: selected ? 'known_target' : 'discovery',
+        intent_category: String(data.get('intent_category')),
+        must_have: String(data.get('must_have'))
+          .split('\n')
+          .map((item) => item.trim())
+          .filter(Boolean),
+        optional: [],
+        exclusions: [],
+        target_file_id: selected?.file_id ?? null,
+        // 视频目标来自 GET /targets/random 返回的正式 video_scenes.id；图片保持 null。
+        target_scene_id: selected?.scene_id ?? null,
+      })
+      setVersion(await apiClient.getEvaluationVersion(version.id))
+      form.reset()
+    })
+  }
+
+  const next = run?.candidates.find((candidate) => !candidate.judgment)
+  return (
+    <section className="space-y-6">
+      <header>
+        <p className="eyebrow">内部工具</p>
+        <h1 className="page-title">检索评测</h1>
+        <p className="muted">候选完成盲标前隐藏来源名次和 RRF 贡献；RRF 分数不是相关概率。</p>
+      </header>
+      {error ? <p role="alert">操作失败：{error}</p> : null}
+      <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
+        <aside className="panel space-y-3">
+          <h2 className="section-title">评测集</h2>
+          {sets.map((set) => (
+            <button
+              key={set.id}
+              className="secondary-action w-full"
+              disabled={!set.latest_version}
+              onClick={() => void openVersion(set.latest_version!.id)}
+            >
+              {set.name} · v{set.latest_version?.version}
+            </button>
+          ))}
+          <form className="space-y-2" onSubmit={createSet}>
+            <input
+              name="name"
+              required
+              aria-label="评测集名称"
+              className="w-full rounded border p-2"
+            />
+            <button className="primary-action w-full justify-center">创建评测集</button>
+          </form>
+        </aside>
+        <div className="panel space-y-4">
+          {!version ? (
+            <p className="muted">请选择或创建评测集。</p>
+          ) : (
+            <>
+              <h2 className="section-title">
+                版本 {version.version} · {version.status}
+              </h2>
+              <ul>
+                {version.queries.map((query) => (
+                  <li key={query.id}>{query.query_text}</li>
+                ))}
+              </ul>
+              {version.status === 'draft' ? (
+                <form className="space-y-2" onSubmit={addQuery}>
+                  <input
+                    name="query_text"
+                    required
+                    placeholder="查询文本"
+                    className="w-full rounded border p-2"
+                  />
+                  <input
+                    name="intent_category"
+                    required
+                    placeholder="意图分类"
+                    className="w-full rounded border p-2"
+                  />
+                  <textarea
+                    name="must_have"
+                    required
+                    placeholder="必须满足，每行一项"
+                    className="w-full rounded border p-2"
+                  />
+                  <button
+                    type="button"
+                    className="secondary-action"
+                    onClick={() => void loadTargets()}
+                  >
+                    从正式场景选择目标
+                  </button>
+                  {targets.length ? (
+                    <select
+                      aria-label="评测目标"
+                      value={targetKey}
+                      onChange={(event) => setTargetKey(event.target.value)}
+                      className="w-full rounded border p-2"
+                    >
+                      <option value="">自然发现查询（无指定目标）</option>
+                      {targets.map((target) => (
+                        <option key={identity(target)} value={identity(target)}>
+                          {target.relative_path}
+                          {target.scene_id ? ` · 场景 ${target.scene_id}` : ' · 图片'}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                  <button className="primary-action">添加查询</button>
+                </form>
+              ) : null}
+              {version.status === 'draft' ? (
+                <button
+                  className="secondary-action"
+                  disabled={!version.queries.length}
+                  onClick={() =>
+                    void guard(async () => {
+                      const frozen = await apiClient.freezeEvaluationVersion(version.id)
+                      setVersion({ ...frozen, queries: version.queries })
+                    })
+                  }
+                >
+                  冻结版本
+                </button>
+              ) : (
+                <button
+                  className="primary-action"
+                  onClick={() =>
+                    void guard(async () =>
+                      setRun(
+                        await apiClient.startEvaluationRun(
+                          version.id,
+                          libraries.map((library) => library.id),
+                        ),
+                      ),
+                    )
+                  }
+                >
+                  运行评测
+                </button>
+              )}
+            </>
+          )}
+          {run ? (
+            <section aria-label="评测运行" className="space-y-3">
+              <h2>运行状态：{run.status}</h2>
+              {run.error_message ? (
+                <p role="alert">
+                  {run.error_code}：{run.error_message}
+                </p>
+              ) : null}
+              {next ? (
+                <>
+                  <p>请只根据媒体内容判断。</p>
+                  <p className="font-medium">查询：{next.query_text}</p>
+                  {next.media_type === 'image' ? (
+                    <img
+                      alt="待标注候选"
+                      className="max-h-96 rounded object-contain"
+                      src={apiClient.mediaContentUrl(next.file_id)}
+                    />
+                  ) : (
+                    <video
+                      aria-label="待标注候选"
+                      className="max-h-96 w-full rounded"
+                      controls
+                      src={apiClient.mediaContentUrl(next.file_id, {
+                        startTimeSeconds: next.start_time_seconds,
+                        endTimeSeconds: next.end_time_seconds,
+                      })}
+                    />
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      [2, '高度相关'],
+                      [1, '部分相关'],
+                      [0, '不相关'],
+                    ].map(([relevance, label]) => (
+                      <button
+                        key={relevance}
+                        className="secondary-action"
+                        onClick={() =>
+                          void guard(async () =>
+                            setRun(
+                              await apiClient.saveEvaluationJudgment(run.id, next.id, {
+                                relevance: Number(relevance),
+                              }),
+                            ),
+                          )
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <button
+                      className="secondary-action"
+                      onClick={() =>
+                        void guard(async () =>
+                          setRun(
+                            await apiClient.saveEvaluationJudgment(run.id, next.id, {
+                              unjudgeable: true,
+                            }),
+                          ),
+                        )
+                      }
+                    >
+                      无法判断
+                    </button>
+                  </div>
+                </>
+              ) : run.status === 'ready_for_labeling' || run.status === 'labeled' ? (
+                <button
+                  className="primary-action"
+                  onClick={() =>
+                    void guard(async () => setRun(await apiClient.finalizeEvaluationRun(run.id)))
+                  }
+                >
+                  生成报告
+                </button>
+              ) : null}
+            </section>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function identity(target: EvaluationTarget) {
+  return `${target.file_id}:${target.scene_id ?? 'image'}`
+}

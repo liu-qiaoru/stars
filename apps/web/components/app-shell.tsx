@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Briefcase, Folder, Search, Sparkles } from 'lucide-react'
+import { BarChart3, Briefcase, Folder, Search, Sparkles } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { HealthIndicator } from './health-indicator'
 
@@ -10,6 +10,7 @@ const navItems = [
   { href: '/libraries', label: '素材库', icon: Folder },
   { href: '/search', label: '搜索', icon: Search },
   { href: '/jobs', label: '任务', icon: Briefcase },
+  { href: '/evaluation', label: '评测', icon: BarChart3 },
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {

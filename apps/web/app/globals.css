@@ -321,6 +321,53 @@ button:disabled {
   padding: 0;
 }
 
+.search-contract-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 1rem;
+  background: white;
+}
+
+.search-contract-controls fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.search-contract-controls legend {
+  float: left;
+  margin-right: 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.search-contract-controls label {
+  cursor: pointer;
+}
+
+.search-contract-controls input {
+  position: absolute;
+  opacity: 0;
+}
+
+.search-contract-controls span {
+  display: inline-flex;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.search-contract-controls input:checked + span {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: white;
+}
+
 .search-mode-options legend {
   margin-bottom: 0.625rem;
   color: var(--ink);

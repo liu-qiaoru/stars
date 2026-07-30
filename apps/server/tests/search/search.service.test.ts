@@ -199,6 +199,7 @@ describe('search service', () => {
     )
     const videoResult = result.results.find((item) => item.media_type === 'video')
     expect(videoResult).toMatchObject({
+      path: 'clip.mp4',
       scene_id: scene.id,
       start_time_seconds: 30,
       end_time_seconds: 60,

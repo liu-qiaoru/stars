@@ -34,6 +34,8 @@ export interface JobSummary {
   progress: number
   file_paths: string[]
   error_message: string | null
+  error_code?: string | null
+  error_details?: unknown
   created_at: string
   updated_at: string
 }
@@ -120,6 +122,65 @@ export interface SearchResponse {
       source: 'original' | 'deepseek'
     }>
   }
+}
+
+export interface EvaluationVersion {
+  id: string
+  set_id: string
+  version: number
+  status: 'draft' | 'frozen'
+  frozen_at: string | null
+  queries?: EvaluationQuery[]
+}
+
+export interface EvaluationQuery {
+  id: string
+  version_id: string
+  query_text: string
+  query_type: 'known_target' | 'discovery'
+  intent_category: string
+  must_have: string[]
+  optional: string[]
+  exclusions: string[]
+  target_file_id: string | null
+  target_scene_id: string | null
+}
+
+export interface EvaluationSet {
+  id: string
+  name: string
+  description: string | null
+  latest_version: EvaluationVersion | null
+}
+
+export interface EvaluationTarget {
+  file_id: string
+  scene_id: string | null
+  media_type: MediaType
+  relative_path: string
+  start_time_seconds: number | null
+  end_time_seconds: number | null
+}
+
+export interface EvaluationRun {
+  id: string
+  version_id: string
+  status: string
+  error_code: string | null
+  error_message: string | null
+  report: unknown
+  candidates: Array<{
+    id: string
+    query_id: string
+    query_text: string
+    candidate_key: string
+    file_id: string
+    scene_id: string | null
+    media_type: MediaType
+    start_time_seconds: number | null
+    end_time_seconds: number | null
+    judgment: { relevance: number | null; unjudgeable: boolean } | null
+  }>
 }
 
 export interface MediaAsset {
@@ -248,6 +309,8 @@ export function createApiClient(options: ApiClientOptions = {}) {
       }),
     listJobs: (input: { limit?: number; offset?: number } = {}) =>
       request<JobListResponse>(withQuery('/jobs', input), { method: 'GET' }),
+    retryJob: (id: string) =>
+      request<{ job_id: string; status: string }>(`/jobs/${id}/retry`, { method: 'POST' }),
     mediaContentUrl: (
       id: string,
       input: { startTimeSeconds?: number | null; endTimeSeconds?: number | null } = {},
@@ -267,6 +330,49 @@ export function createApiClient(options: ApiClientOptions = {}) {
     },
     searchMedia: (input: SearchRequest) =>
       request<SearchResponse>('/search', { method: 'POST', body: JSON.stringify(input) }),
+    listEvaluationSets: () =>
+      request<{ items: EvaluationSet[] }>('/evaluation/sets', { method: 'GET' }),
+    createEvaluationSet: (input: { name: string }) =>
+      request<EvaluationSet & { version_id: string }>('/evaluation/sets', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    getEvaluationVersion: (id: string) =>
+      request<EvaluationVersion & { queries: EvaluationQuery[] }>(`/evaluation/versions/${id}`, {
+        method: 'GET',
+      }),
+    listEvaluationTargets: (input: { libraryId?: string; limit?: number; seed?: string } = {}) =>
+      request<{ items: EvaluationTarget[] }>(
+        withQuery('/evaluation/targets/random', {
+          library_id: input.libraryId,
+          limit: input.limit,
+          seed: input.seed,
+        }),
+        { method: 'GET' },
+      ),
+    addEvaluationQuery: (versionId: string, input: Omit<EvaluationQuery, 'id' | 'version_id'>) =>
+      request<EvaluationQuery>(`/evaluation/versions/${versionId}/queries`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    freezeEvaluationVersion: (id: string) =>
+      request<EvaluationVersion>(`/evaluation/versions/${id}/freeze`, { method: 'POST' }),
+    startEvaluationRun: (id: string, libraryIds: string[]) =>
+      request<EvaluationRun>(`/evaluation/versions/${id}/runs`, {
+        method: 'POST',
+        body: JSON.stringify({ library_ids: libraryIds }),
+      }),
+    saveEvaluationJudgment: (
+      runId: string,
+      candidateId: string,
+      input: { relevance?: number; unjudgeable?: boolean },
+    ) =>
+      request<EvaluationRun>(`/evaluation/runs/${runId}/candidates/${candidateId}/judgment`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    finalizeEvaluationRun: (id: string) =>
+      request<EvaluationRun>(`/evaluation/runs/${id}/finalize`, { method: 'POST' }),
     getMedia: (id: string) =>
       request<MediaDetail>(`/media/${id}?include_assets=true&assets_limit=50&assets_offset=0`, {
         method: 'GET',

@@ -196,6 +196,127 @@ export const jobs = pgTable(
   ],
 )
 
+// 六张 evaluation_* 表把“可编辑查询”“一次不可变召回快照”和“人工判断”分开保存。
+// 指定视频目标与候选都直接引用 video_scenes.id；不再从 metadata_json 猜测场景身份。
+export const evaluationSets = pgTable('evaluation_sets', {
+  id: uuid('id').primaryKey().notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  ...timestamps,
+})
+
+export const evaluationVersions = pgTable(
+  'evaluation_versions',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    setId: uuid('set_id')
+      .notNull()
+      .references(() => evaluationSets.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    status: text('status').notNull().default('draft'),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex('evaluation_versions_set_version_unique').on(table.setId, table.version)],
+)
+
+export const evaluationQueries = pgTable(
+  'evaluation_queries',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => evaluationVersions.id, { onDelete: 'cascade' }),
+    queryText: text('query_text').notNull(),
+    queryType: text('query_type').notNull(),
+    intentCategory: text('intent_category').notNull(),
+    mustHaveJson: jsonb('must_have_json').notNull().default([]),
+    optionalJson: jsonb('optional_json').notNull().default([]),
+    exclusionsJson: jsonb('exclusions_json').notNull().default([]),
+    // 冻结版本保留目标 UUID；不以外键阻塞后续媒体重索引删除，创建查询时显式校验。
+    targetFileId: uuid('target_file_id'),
+    targetSceneId: uuid('target_scene_id'),
+    // 图片的 RRF 语义身份是 Asset UUID，因此在查询创建时冻结，不能在报告阶段重新查询。
+    targetAssetId: uuid('target_asset_id'),
+    ...timestamps,
+  },
+  (table) => [index('evaluation_queries_version_idx').on(table.versionId)],
+)
+
+export const evaluationRuns = pgTable(
+  'evaluation_runs',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => evaluationVersions.id),
+    status: text('status').notNull().default('pending'),
+    libraryIdsJson: jsonb('library_ids_json').notNull().default([]),
+    configJson: jsonb('config_json').notNull(),
+    corpusJson: jsonb('corpus_json').notNull().default({}),
+    reportJson: jsonb('report_json'),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    ...timestamps,
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [index('evaluation_runs_version_idx').on(table.versionId)],
+)
+
+export const evaluationCandidates = pgTable(
+  'evaluation_candidates',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => evaluationRuns.id, { onDelete: 'cascade' }),
+    queryId: uuid('query_id')
+      .notNull()
+      .references(() => evaluationQueries.id, { onDelete: 'cascade' }),
+    candidateKey: text('candidate_key').notNull(),
+    // 快照只保存当时的 UUID，不建立到可重索引媒体表的外键。否则清理旧 Asset/Scene
+    // 会被历史评测阻塞；写快照前仍由 EvaluationService 显式验证身份与 generation。
+    assetId: uuid('asset_id').notNull(),
+    fileId: uuid('file_id').notNull(),
+    sceneId: uuid('scene_id'),
+    fileGeneration: integer('file_generation').notNull(),
+    mediaType: text('media_type').notNull(),
+    startTimeSeconds: numeric('start_time_seconds'),
+    endTimeSeconds: numeric('end_time_seconds'),
+    sourceEvidenceJson: jsonb('source_evidence_json').notNull().default([]),
+    currentRank: integer('current_rank'),
+    rrfRank: integer('rrf_rank'),
+    blindOrder: integer('blind_order').notNull(),
+    labelStatus: text('label_status').notNull().default('pending'),
+    primaryPool: boolean('primary_pool').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('evaluation_candidates_run_query_key_unique').on(
+      table.runId,
+      table.queryId,
+      table.candidateKey,
+    ),
+    index('evaluation_candidates_run_idx').on(table.runId),
+  ],
+)
+
+export const evaluationJudgments = pgTable(
+  'evaluation_judgments',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    candidateId: uuid('candidate_id')
+      .notNull()
+      .references(() => evaluationCandidates.id, { onDelete: 'cascade' }),
+    relevance: integer('relevance'),
+    unjudgeable: boolean('unjudgeable').notNull().default(false),
+    diagnosisJson: jsonb('diagnosis_json'),
+    notes: text('notes'),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex('evaluation_judgments_candidate_unique').on(table.candidateId)],
+)
+
 // agent_* 表保存一次 Agent 运行的 prompt、事件流和工具调用审计。
 // 有副作用的 tool 会先进入 waiting_for_confirmation，确认后再创建真正的 job。
 export const agentRuns = pgTable('agent_runs', {

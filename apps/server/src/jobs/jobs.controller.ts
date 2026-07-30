@@ -30,6 +30,11 @@ export class JobsController {
     return this.jobsService.getJob(id)
   }
 
+  @Post(':id/retry')
+  retryJob(@Param('id') id: string) {
+    return this.jobsService.retryJob(id)
+  }
+
   @Post('embedding/queue-pending')
   queuePendingEmbeddingJobs(@Body() body: { limit?: number }) {
     // 手动补队列入口：扫描 pending vector_refs 并创建 embedding jobs，适合重建 collection 后使用。

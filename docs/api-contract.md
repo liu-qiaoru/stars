@@ -317,7 +317,7 @@ Response：
       ],
       "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
       "media_type": "video",
-      "path": "/Volumes/Media/video.mp4",
+      "path": "video.mp4",
       "start_time_seconds": 120.0,
       "end_time_seconds": 150.0,
       "scene_id": "scene-0007",
@@ -340,7 +340,7 @@ Response：
           "asset_id": "75c1157b-21b7-4a90-8c2f-2aa4ae7c9331",
           "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
           "media_type": "video",
-          "path": "/Volumes/Media/video.mp4",
+          "path": "video.mp4",
           "start_time_seconds": 120.0,
           "end_time_seconds": 150.0,
           "scene_id": "scene-0007",
@@ -357,7 +357,7 @@ Response：
           "asset_id": "asset-uuid",
           "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
           "media_type": "video",
-          "path": "/Volumes/Media/video.mp4",
+          "path": "video.mp4",
           "start_time_seconds": 120.0,
           "end_time_seconds": 150.0,
           "scene_id": "scene-0007",
@@ -374,7 +374,7 @@ Response：
           "asset_id": "asset-uuid",
           "file_id": "file-uuid",
           "media_type": "audio",
-          "path": "/Volumes/Media/interview.mp3",
+          "path": "interview.mp3",
           "start_time_seconds": 30.0,
           "end_time_seconds": 55.0,
           "scene_id": null,
@@ -644,3 +644,13 @@ Response（`ALLOW_EXTERNAL_LLM=false`）：
 - `POST /evaluation/runs/{id}/finalize`：全部主池候选完成判断后计算 current/RRF 报告。
 
 运行状态为 `pending | retrieving | ready_for_labeling | labeled | reported | failed`。所需来源、元数据或场景边界失败时必须进入 `failed`，不得省略来源后生成成功报告。RRF score 只是排序值，不是概率或百分比。
+
+Phase 6 重建后，视频目标和候选的 `scene_id` 均为正式 `video_scenes.id` UUID，并且必须
+与文件当前 `index_generation` 一致。候选快照保存文件 generation、来源名次、RRF 贡献和
+current/RRF 名次；人工标注完成前普通读取隐藏这些证据。运行固定调用正式 Search API 的
+`search_scope=all`、`query_expansion_mode=original`，不维护第二套召回或 RRF 公式。任一
+必需通道缺失、Qdrant Point 无法回表或 generation 不一致时，会清空该运行的候选并把整次
+运行标为 `failed`。
+
+`POST /jobs/{id}/retry` 只接受 `failed` 任务，并复制原任务已经校验的输入创建新的
+`queued` 任务。原失败任务保持不变，便于保留错误详情和审计链。

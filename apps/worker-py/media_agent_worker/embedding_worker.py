@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 
 from .embeddings import SiglipEmbedder, TransformerTextEmbedder
+from .errors import JobError
 
 
 def extract_video_frame(source_path, frame_time_seconds, runner=subprocess.run):
@@ -23,12 +24,22 @@ def extract_video_frame(source_path, frame_time_seconds, runner=subprocess.run):
     try:
         runner(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return output.name
-    except Exception:
+    except Exception as error:
         try:
             os.unlink(output.name)
         except FileNotFoundError:
             pass
-        raise
+        # ffmpeg 的 stderr 可能含绝对路径，不能直接放进结构化详情；用户仍可通过短消息
+        # 看到异常类，Jobs 页面则用稳定错误码区分“抽帧失败”和后续模型 Embedding 失败。
+        raise JobError(
+            "FRAME_EXTRACTION_FAILED",
+            "无法从视频提取检索帧",
+            {
+                "stage": "frame_extraction",
+                "exception_type": type(error).__name__,
+                "frame_time_seconds": frame_time_seconds,
+            },
+        ) from error
 
 
 class BaseEmbeddingHandler:

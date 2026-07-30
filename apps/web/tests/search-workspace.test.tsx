@@ -3,6 +3,31 @@ import { describe, expect, test, vi } from 'vitest'
 import { SearchWorkspace } from '../components/search-workspace'
 
 describe('SearchWorkspace', () => {
+  test('defaults to visual RRF and sends the selected search scope and ranking mode', async () => {
+    const searchMedia = vi.fn().mockResolvedValue({ limit: 20, offset: 0, results: [], groups: [] })
+    render(
+      <SearchWorkspace
+        libraries={[]}
+        initialQuery=""
+        initialResults={{ limit: 20, offset: 0, results: [], groups: [] }}
+        apiClient={{ searchMedia }}
+      />,
+    )
+
+    expect(screen.getByRole('radio', { name: '视觉' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'RRF（默认）' })).toBeChecked()
+    fireEvent.click(screen.getByRole('radio', { name: '全部' }))
+    fireEvent.click(screen.getByRole('radio', { name: '当前混合排序' }))
+    fireEvent.change(screen.getByLabelText('搜索关键词'), { target: { value: '海边对话' } })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+
+    await waitFor(() =>
+      expect(searchMedia).toHaveBeenCalledWith(
+        expect.objectContaining({ search_scope: 'all', ranking_mode: 'current' }),
+      ),
+    )
+  })
+
   test('sends the selected query expansion mode and diagnostics option', async () => {
     const searchMedia = vi.fn().mockResolvedValue({ limit: 20, offset: 0, results: [], groups: [] })
     render(
@@ -204,7 +229,9 @@ describe('SearchWorkspace', () => {
       'src',
       'http://127.0.0.1:4000/media/file-scene-1/content#t=12.4',
     )
-    expect(within(visualRegion).queryByLabelText('scene-1 在 14.10 秒的命中帧')).not.toBeInTheDocument()
+    expect(
+      within(visualRegion).queryByLabelText('scene-1 在 14.10 秒的命中帧'),
+    ).not.toBeInTheDocument()
     expect(within(visualRegion).queryByText('scene-6')).not.toBeInTheDocument()
   })
 

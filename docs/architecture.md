@@ -21,9 +21,9 @@ docs            架构、API 和实施文档
 
 ## 检索评测域
 
-评测域是独立于普通搜索的本地维护工具。它把冻结查询、同一次多来源召回快照、盲标判断、当前 hybrid 排名、正式 RRF 排名及指标持久化到 PostgreSQL。Phase 5 起普通搜索默认使用 RRF；`ranking_mode=current` 仍保留旧 hybrid 排序用于对照。
+评测域是独立于普通搜索的本地维护工具。它把冻结查询、正式 SearchService 返回的候选快照、盲标判断、当前 hybrid 排名、正式 RRF 排名及指标持久化到 PostgreSQL。Phase 5 起普通搜索默认使用 RRF；`ranking_mode=current` 仍保留旧 hybrid 排序用于对照。Phase 6 的评测视频目标直接引用 `video_scenes.id`，候选同时冻结文件 generation，禁止依赖旧 `video_segment` 或 `metadata_json.scene_id`。
 
-评测候选以图片文件或视频场景为语义实体。visual、caption、lexical 是三个独立信号；视频帧在分配来源排名前按场景 MaxSim 折叠。运行所需来源失败时整次运行失败，禁止生成部分指标。
+评测候选以图片 Asset 或正式视频场景为语义实体。visual、caption、lexical 是三个独立信号；视频帧的场景 MaxSim 折叠和 RRF 都由生产 SearchService 完成，评测层只保存结果和调用公共指标函数。运行所需来源、Point 回表或 generation 校验失败时整次运行失败，禁止生成部分指标。
 
 仓库统一管理，但前端、TypeScript API server、Python worker 保持独立进程、独立依赖和清晰边界。这样既能让主要业务逻辑使用 TypeScript，也能保留 Python 在媒体处理和多模态模型上的生态优势。
 

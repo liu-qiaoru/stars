@@ -87,5 +87,35 @@ class WorkerRunner:
             )
             return False
         except Exception as error:
-            self.job_repository.mark_failed(job["id"], str(error))
+            # 模型与媒体任务即使抛出第三方库的普通异常，也要留下稳定分类；详情只记录
+            # job_type/异常类，不复制本地路径、Caption 或模型返回内容。
+            structured = {
+                "index_media": ("MEDIA_INDEX_FAILED", "scene_or_frame_indexing", "媒体索引任务失败"),
+                "embed_image": ("EMBEDDING_FAILED", "image_embedding", "图片 Embedding 任务失败"),
+                "embed_video_frame": (
+                    "EMBEDDING_FAILED",
+                    "video_frame_embedding",
+                    "视频帧 Embedding 任务失败",
+                ),
+                "embed_text_asset": (
+                    "EMBEDDING_FAILED",
+                    "caption_text_embedding",
+                    "Caption 文本 Embedding 任务失败",
+                ),
+                "generate_caption": ("CAPTION_FAILED", "caption_generation", "Caption 生成任务失败"),
+            }.get(job["job_type"])
+            if structured:
+                error_code, stage, safe_message = structured
+                self.job_repository.mark_failed(
+                    job["id"],
+                    safe_message,
+                    error_code=error_code,
+                    error_details={
+                        "stage": stage,
+                        "job_type": job["job_type"],
+                        "exception_type": type(error).__name__,
+                    },
+                )
+            else:
+                self.job_repository.mark_failed(job["id"], str(error))
             return False

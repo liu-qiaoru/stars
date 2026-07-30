@@ -5,6 +5,8 @@ import { FileAudio, Filter, Search, SlidersHorizontal, X } from 'lucide-react'
 import type {
   LibrarySummary,
   QueryExpansionMode,
+  RankingMode,
+  SearchScope,
   SearchResponse,
   SearchResultItem,
 } from '../lib/api-client'
@@ -65,6 +67,10 @@ export function SearchWorkspace({
   ])
   const [results, setResults] = useState(initialResults)
   const [queryExpansionMode, setQueryExpansionMode] = useState<QueryExpansionMode>('expand')
+  // Phase 5 的服务端默认值也是 visual + rrf；在检索前明确展示，避免用户误以为
+  // “全部媒体类型”筛选等同于同时启用了语音召回。
+  const [searchScope, setSearchScope] = useState<SearchScope>('visual')
+  const [rankingMode, setRankingMode] = useState<RankingMode>('rrf')
   const [includeDiagnostics, setIncludeDiagnostics] = useState(false)
   const [isSearchSettingsOpen, setIsSearchSettingsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -119,6 +125,8 @@ export function SearchWorkspace({
         offset: 0,
         query_expansion_mode: queryExpansionMode,
         include_diagnostics: includeDiagnostics,
+        search_scope: searchScope,
+        ranking_mode: rankingMode,
       })
       setResults(response)
     } catch (error) {
@@ -152,12 +160,7 @@ export function SearchWorkspace({
             }}
           >
             <Search aria-hidden="true" size={18} />
-            <input
-              name="query"
-              defaultValue={query}
-              aria-label="搜索关键词"
-              disabled={isLoading}
-            />
+            <input name="query" defaultValue={query} aria-label="搜索关键词" disabled={isLoading} />
             <button type="submit" className="primary-action" disabled={isLoading}>
               {isLoading ? '搜索中' : '搜索'}
             </button>
@@ -264,6 +267,46 @@ export function SearchWorkspace({
             {library.name}
           </span>
         ))}
+      </section>
+
+      <section className="search-contract-controls" aria-label="检索策略">
+        <fieldset>
+          <legend>搜索范围</legend>
+          {[
+            ['visual', '视觉'],
+            ['spoken', '语音'],
+            ['all', '全部'],
+          ].map(([value, label]) => (
+            <label key={value}>
+              <input
+                type="radio"
+                name="search-scope"
+                checked={searchScope === value}
+                onChange={() => setSearchScope(value as SearchScope)}
+                disabled={isLoading}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </fieldset>
+        <fieldset>
+          <legend>排序方式</legend>
+          {[
+            ['current', '当前混合排序'],
+            ['rrf', 'RRF（默认）'],
+          ].map(([value, label]) => (
+            <label key={value}>
+              <input
+                type="radio"
+                name="ranking-mode"
+                checked={rankingMode === value}
+                onChange={() => setRankingMode(value as RankingMode)}
+                disabled={isLoading}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </fieldset>
       </section>
 
       <div className="space-y-8">
@@ -388,7 +431,8 @@ function SearchDiagnosticsPanel({
           </div>
           {visualFrameDiagnostics.incompleteCount ? (
             <p className="diagnostic-frame-warning" role="status">
-              {visualFrameDiagnostics.incompleteCount} 条视觉帧缺少 scene_id、准确时间或诊断信息，已跳过。
+              {visualFrameDiagnostics.incompleteCount} 条视觉帧缺少
+              scene_id、准确时间或诊断信息，已跳过。
             </p>
           ) : null}
           {visualFrameDiagnostics.frames.length ? (
@@ -405,6 +449,34 @@ function SearchDiagnosticsPanel({
         </section>
       ) : null}
       <div className="space-y-2">
+        {(results.results ?? [])
+          .filter((item) => item.ranking_diagnostics)
+          .map((item) => (
+            <details
+              key={`rrf-${item.file_id}-${item.scene_id ?? item.asset_id}`}
+              className="rounded border bg-white p-3 text-sm"
+            >
+              <summary className="cursor-pointer font-medium">
+                RRF 证据 · {item.scene_id ?? item.asset_id}
+              </summary>
+              <p className="mt-2">
+                场景边界：{item.start_time_seconds ?? '—'}–{item.end_time_seconds ?? '—'} 秒
+                {item.best_frame_time_seconds !== null && item.best_frame_time_seconds !== undefined
+                  ? ` · SigLIP2 最佳帧：${item.best_frame_time_seconds} 秒`
+                  : ''}
+              </p>
+              <ul className="mt-2">
+                {Object.entries(item.ranking_diagnostics!.source_ranks).map(([signal, rank]) => (
+                  <li key={signal}>
+                    {formatRankingSignal(signal)}：来源第 {rank} 名 · RRF 贡献{' '}
+                    {item.ranking_diagnostics?.rrf_contributions[
+                      signal as 'visual' | 'caption' | 'lexical'
+                    ]?.toFixed(6) ?? '—'}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ))}
         {sourceResults.map(({ collection, item }) => (
           <details
             key={`${collection}-${item.asset_id}`}
@@ -435,6 +507,10 @@ function SearchDiagnosticsPanel({
       </div>
     </section>
   )
+}
+
+function formatRankingSignal(signal: string) {
+  return { visual: 'SigLIP2 视觉', caption: 'Caption', lexical: '语音全文' }[signal] ?? signal
 }
 
 /**

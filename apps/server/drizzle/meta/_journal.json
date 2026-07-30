@@ -43,6 +43,13 @@
       "when": 1783958400001,
       "tag": "0005_rebuild_scene_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785411451084,
+      "tag": "0006_cloudy_shockwave",
+      "breakpoints": true
     }
   ]
 }

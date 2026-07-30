@@ -472,32 +472,35 @@ export async function listSearchResultMetadata(
   // 模型版本一致性由确定性 point_id + status='indexed' 保证：模型变化会改变 point_id 并把旧 ref
   // 重置为 pending，旧 Qdrant point 回表时找不到 indexed ref 即被拒绝，无需在此再按模型名过滤。
 
-  return db
-    .select({
-      pointId: vectorRefs.pointId,
-      assetId: mediaAssets.id,
-      assetType: mediaAssets.assetType,
-      fileId: mediaFiles.id,
-      mediaType: mediaFiles.mediaType,
-      path: mediaFiles.path,
-      // scene_id 是正式列：视频帧/caption 引用真实 video_scenes 行，图片为 null。
-      sceneId: mediaAssets.sceneId,
-      startTimeSeconds: mediaAssets.startTimeSeconds,
-      endTimeSeconds: mediaAssets.endTimeSeconds,
-      // 视频场景边界来自 video_scenes；用于搜索结果的时间窗口与诊断展示。
-      sceneStartTimeSeconds: videoScenes.startTimeSeconds,
-      sceneEndTimeSeconds: videoScenes.endTimeSeconds,
-      frameTimeSeconds: mediaAssets.frameTimeSeconds,
-      textContent: mediaAssets.textContent,
-      metadataJson: mediaAssets.metadataJson,
-    })
-    .from(vectorRefs)
-    .innerJoin(mediaAssets, eq(vectorRefs.assetId, mediaAssets.id))
-    .innerJoin(mediaFiles, eq(vectorRefs.fileId, mediaFiles.id))
-    .innerJoin(libraries, eq(vectorRefs.libraryId, libraries.id))
-    // LEFT JOIN：图片资产 scene_id 为 null；视频资产 scene_id 指向 video_scenes。
-    .leftJoin(videoScenes, eq(mediaAssets.sceneId, videoScenes.id))
-    .where(and(...conditions))
+  return (
+    db
+      .select({
+        pointId: vectorRefs.pointId,
+        assetId: mediaAssets.id,
+        assetType: mediaAssets.assetType,
+        fileId: mediaFiles.id,
+        mediaType: mediaFiles.mediaType,
+        // Search API 只返回素材库内相对路径；绝对磁盘路径留在 PostgreSQL，避免普通响应泄露。
+        path: mediaFiles.relativePath,
+        // scene_id 是正式列：视频帧/caption 引用真实 video_scenes 行，图片为 null。
+        sceneId: mediaAssets.sceneId,
+        startTimeSeconds: mediaAssets.startTimeSeconds,
+        endTimeSeconds: mediaAssets.endTimeSeconds,
+        // 视频场景边界来自 video_scenes；用于搜索结果的时间窗口与诊断展示。
+        sceneStartTimeSeconds: videoScenes.startTimeSeconds,
+        sceneEndTimeSeconds: videoScenes.endTimeSeconds,
+        frameTimeSeconds: mediaAssets.frameTimeSeconds,
+        textContent: mediaAssets.textContent,
+        metadataJson: mediaAssets.metadataJson,
+      })
+      .from(vectorRefs)
+      .innerJoin(mediaAssets, eq(vectorRefs.assetId, mediaAssets.id))
+      .innerJoin(mediaFiles, eq(vectorRefs.fileId, mediaFiles.id))
+      .innerJoin(libraries, eq(vectorRefs.libraryId, libraries.id))
+      // LEFT JOIN：图片资产 scene_id 为 null；视频资产 scene_id 指向 video_scenes。
+      .leftJoin(videoScenes, eq(mediaAssets.sceneId, videoScenes.id))
+      .where(and(...conditions))
+  )
 }
 
 export async function listTextSearchResultMetadata(
@@ -531,7 +534,7 @@ export async function listTextSearchResultMetadata(
       assetType: mediaAssets.assetType,
       fileId: mediaFiles.id,
       mediaType: mediaFiles.mediaType,
-      path: mediaFiles.path,
+      path: mediaFiles.relativePath,
       sceneId: mediaAssets.sceneId,
       startTimeSeconds: mediaAssets.startTimeSeconds,
       endTimeSeconds: mediaAssets.endTimeSeconds,

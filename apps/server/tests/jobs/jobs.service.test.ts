@@ -12,7 +12,6 @@ import {
   createVectorRef,
 } from '../../src/database/repositories.js'
 import { jobs, mediaFiles, vectorRefs } from '../../src/database/schema.js'
-import { JobsController } from '../../src/jobs/jobs.controller.js'
 import { JobsModule } from '../../src/jobs/jobs.module.js'
 import { JobsService } from '../../src/jobs/jobs.service.js'
 import { createTestDatabase } from '../database/test-db.js'
@@ -60,6 +59,28 @@ afterEach(async () => {
 })
 
 describe('jobs service', () => {
+  test('failed media job retry creates a new queued job without rewriting the audit row', async () => {
+    const failed = await createJob(db, {
+      jobType: 'generate_caption',
+      inputJson: { asset_id: '11111111-1111-4111-8111-111111111111' },
+    })
+    await db
+      .update(jobs)
+      .set({ status: 'failed', errorCode: 'CAPTION_FAILED', errorMessage: 'model unavailable' })
+      .where(eq(jobs.id, failed.id))
+
+    const retried = await service.retryJob(failed.id)
+    const original = await service.getJob(failed.id)
+    const replacement = await service.getJob(retried.job_id)
+
+    expect(original.status).toBe('failed')
+    expect(replacement).toMatchObject({
+      status: 'queued',
+      job_type: 'generate_caption',
+      input: { asset_id: '11111111-1111-4111-8111-111111111111' },
+    })
+  })
+
   test('按优先级 claim queued job 并写入 worker lock', async () => {
     await createJob(db, {
       jobType: 'scan_library',
