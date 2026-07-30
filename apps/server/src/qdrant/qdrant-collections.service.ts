@@ -11,6 +11,10 @@ type ResetVectorRefs = (
   collectionName: VectorCollectionName,
   config: VectorCollectionConfig,
 ) => Promise<void>
+type HasVectorRefConfigMismatch = (
+  collectionName: VectorCollectionName,
+  config: VectorCollectionConfig,
+) => Promise<boolean>
 
 // vector-index-design.md: payload keyword indexes 用于搜索时按 library_id / media_type 高效过滤
 const PAYLOAD_INDEXES = [
@@ -29,6 +33,7 @@ export class QdrantCollectionsService implements OnApplicationBootstrap {
       Record<VectorCollectionName, VectorCollectionConfig>
     > = VECTOR_COLLECTIONS,
     private readonly resetVectorRefsForCollection?: ResetVectorRefs,
+    private readonly hasVectorRefConfigMismatch?: HasVectorRefConfigMismatch,
   ) {
     this.qdrantUrl =
       typeof settingsOrUrl === 'string'
@@ -61,10 +66,21 @@ export class QdrantCollectionsService implements OnApplicationBootstrap {
       const collectionUrl = `${this.qdrantUrl}/collections/${name}`
       const response = await this.fetcher(collectionUrl, { method: 'GET' })
       if (response.ok) {
-        if (await this.needsRecreate(response, config)) {
-          await this.fetcher(collectionUrl, { method: 'DELETE' })
-          await this.createCollection(collectionUrl, name, config)
+        const dimensionMismatch = await this.hasDimensionMismatch(response, config)
+        const modelConfigMismatch =
+          (await this.hasVectorRefConfigMismatch?.(name, config)) ?? false
+        if (dimensionMismatch || modelConfigMismatch) {
+          // 先把 PostgreSQL 引用原子地置为 pending，再操作外部 Qdrant。两个系统无法共享
+          // 一个数据库事务；这个顺序保证后续任何删除/创建失败都只会留下“等待重写”的安全状态，
+          // 不会让不存在的 Point 继续显示为 indexed。下次启动会再次尝试恢复 Collection。
           await this.resetVectorRefsForCollection?.(name, config)
+          const deleteResponse = await this.fetcher(collectionUrl, { method: 'DELETE' })
+          if (!deleteResponse.ok) {
+            throw new Error(
+              `Failed to delete Qdrant collection ${name}: HTTP ${deleteResponse.status}`,
+            )
+          }
+          await this.createCollection(collectionUrl, name, config)
           recreated.push(name)
           continue
         }
@@ -72,6 +88,17 @@ export class QdrantCollectionsService implements OnApplicationBootstrap {
         continue
       }
 
+      // 只有 404（Not Found，资源不存在）能证明 Collection 缺失。401、429、500 等状态
+      // 分别可能表示鉴权、限流或服务端临时故障；若把它们误判成缺失，会把整个素材库的
+      // Vector Ref 重置为 pending，并触发昂贵且没有必要的全量重新向量化。
+      if (response.status !== 404) {
+        throw new Error(`Failed to inspect Qdrant collection ${name}: HTTP ${response.status}`)
+      }
+
+      // Collection 缺失意味着 Qdrant 中没有任何可检索 Point；PostgreSQL 里即使还保留
+      // indexed Vector Ref 也不能继续当成成功。统一重置为 pending 后，协调器会重新创建
+      // embedding 任务，从而恢复数据库事实状态与真实向量状态的一致性。
+      await this.resetVectorRefsForCollection?.(name, config)
       await this.createCollection(collectionUrl, name, config)
       created.push(name)
     }
@@ -82,7 +109,7 @@ export class QdrantCollectionsService implements OnApplicationBootstrap {
     return recreated.length ? { created, existing, recreated } : { created, existing }
   }
 
-  private async needsRecreate(response: Response, config: VectorCollectionConfig) {
+  private async hasDimensionMismatch(response: Response, config: VectorCollectionConfig) {
     try {
       const body = (await response.json()) as {
         result?: { config?: { params?: { vectors?: { size?: number } } } }

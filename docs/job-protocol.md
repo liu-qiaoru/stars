@@ -247,17 +247,14 @@ Input：
 ```json
 {
   "file_id": "uuid",
-  "index_profile": "balanced",
-  "segment_strategy": "fixed_30s"
+  "index_profile": "balanced"
 }
 ```
 
-`segment_strategy` 取值：
-
-- `fixed_30s`：固定 30 秒切片（Phase 5/10 默认）。
-- `scene_detection`：用 PySceneDetect 检测镜头边界；短 scene 先按 `SCENE_MIN_SECONDS` 合并，长 scene 再按 `SCENE_MAX_SECONDS`（默认 30s）拆成稳定子窗口。每个窗口创建一个 `video_segment` 边界容器和至少一个中点 `video_frame`，额外帧由 `KEYFRAME_DENSITY` 决定；所有视觉向量只写 `video_frame_vectors`。检测失败时使用带稳定 `segment-0001` scene ID 的固定 30 秒窗口。启用 caption 后，视频 segment 自动创建 `scene-caption-v2`，VLM 读取同窗口最多 `SCENE_CAPTION_MAX_FRAMES` 张有序关键帧。
-
-仅视频受 `segment_strategy` 影响；图片固定走 `image_vectors` 单 asset 路径。
+图片创建一个 `image` Asset 和一个 `image_vectors` pending Vector Ref。视频必须通过
+PySceneDetect 生成正式 `video_scenes`；短于 0.5 秒的噪声场景合并，超过 30 秒的场景拆窗，
+随后每 2.5 秒创建一个引用正式 `scene_id` 的 `video_frame` Asset。检测器不可用或视频解码
+失败时任务结构化失败，不再回退固定窗口，也不再创建 `video_segment`。
 
 Result：
 
@@ -265,18 +262,17 @@ Result：
 {
   "assets_created": 120,
   "vector_refs_created": 120,
-  "collections": ["video_segment_vectors", "video_frame_vectors"],
-  "segment_strategy": "scene_detection",
-  "fallback": false
+  "collections": ["video_frame_vectors"],
+  "scenes_detected": 30,
+  "frames_created": 120
 }
 ```
-
-`segment_strategy` 记录实际使用的策略（fallback 触发时为 `fixed_30s` 且 `fallback=true`）。
 
 Python worker 可写字段：
 
 ```text
-media_assets（scene/keyframe/strategy 写入 metadata_json）
+video_scenes
+media_assets（视频帧通过正式 scene_id 外键引用场景）
 vector_refs
 jobs.*
 ```
@@ -285,7 +281,7 @@ jobs.*
 
 ```text
 1. TypeScript server 创建 index_media job。
-2. Python worker 执行 index_media，按 segment_strategy 创建 assets（图片为 image；视频为 video_segment + video_frame）和 pending vector_refs。重索引/策略切换时先失效该 file 下旧 video_segment/video_frame assets 及 vector_refs。
+2. Python Worker 执行 index_media，创建图片 Asset，或创建 `video_scenes`、视频帧 Asset 和 pending Vector Ref。
 3. TypeScript server 的 `JobsCoordinatorService` 定期扫描 pending vector_refs。
 4. 协调任务按 collection 和 asset_type 创建 embed_image 或 embed_video_frame jobs。`POST /jobs/embedding/queue-pending` 保留为手动补漏入口。
 ```
@@ -301,8 +297,8 @@ Input：
   "asset_id": "uuid",
   "path": "/Volumes/Media/image.jpg",
   "collection": "image_vectors",
-  "model_name": "google/siglip-base-patch16-224",
-  "model_version": "siglip-base-patch16-224"
+  "model_name": "google/siglip2-base-patch16-224",
+  "model_version": "siglip2-base-patch16-224"
 }
 ```
 
@@ -313,8 +309,8 @@ Result：
   "point_id": "uuid",
   "collection": "image_vectors",
   "vector_dim": 768,
-  "model_name": "google/siglip-base-patch16-224",
-  "model_version": "siglip-base-patch16-224"
+  "model_name": "google/siglip2-base-patch16-224",
+  "model_version": "siglip2-base-patch16-224"
 }
 ```
 
@@ -327,9 +323,9 @@ Input：
   "asset_id": "uuid",
   "frame_path": "/Volumes/Media/video.mp4",
   "frame_time_seconds": 45.0,
-  "collection": "video_segment_vectors",
-  "model_name": "google/siglip-base-patch16-224",
-  "model_version": "siglip-base-patch16-224"
+  "collection": "video_frame_vectors",
+  "model_name": "google/siglip2-base-patch16-224",
+  "model_version": "siglip2-base-patch16-224"
 }
 ```
 
@@ -338,10 +334,10 @@ Result：
 ```json
 {
   "point_id": "uuid",
-  "collection": "video_segment_vectors",
+  "collection": "video_frame_vectors",
   "vector_dim": 768,
-  "model_name": "google/siglip-base-patch16-224",
-  "model_version": "siglip-base-patch16-224"
+  "model_name": "google/siglip2-base-patch16-224",
+  "model_version": "siglip2-base-patch16-224"
 }
 ```
 

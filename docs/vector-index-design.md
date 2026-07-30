@@ -12,21 +12,19 @@
 - point id 必须可重复生成，支持幂等 upsert。
 - 模型名称、模型版本、向量维度和距离算法必须被记录，方便后续重建索引。
 
-不同模型的 raw cosine 分布不可跨 collection 直接比较。SigLIP visual cosine 与 Caption 文本 Embedding cosine 都只在各自来源内部用于排序，不是统一相关概率。实验评测使用来源内 rank 计算无权重 RRF，同时保留 raw score、source rank 和逐信号贡献用于诊断。
+不同模型的 raw cosine 分布不可跨 collection 直接比较。SigLIP2 visual cosine 与 Caption 文本 Embedding cosine 都只在各自来源内部用于排序，不是统一相关概率。实验评测使用来源内 rank 计算无权重 RRF，同时保留 raw score、source rank 和逐信号贡献用于诊断。
 
 ## Qdrant Collection 划分
 
-第一版按模态和用途拆 collection：
+Phase 4 只保留三个实际写入的 Collection：
 
 ```text
 image_vectors
 video_frame_vectors
-video_segment_vectors
-audio_segment_vectors
-text_chunk_vectors
+caption_text_vectors
 ```
 
-不要在第一版把所有向量放进一个 collection。不同模态的模型、向量维度、过滤字段和 reranking 逻辑可能不同，拆开更容易重建和排查。
+不同模型的向量空间不可混合。视觉与 Caption 分开保存，便于独立重建、路由查询和排查错误。
 
 ### image_vectors
 
@@ -51,98 +49,56 @@ text_chunk_vectors
 
 - `media_assets.asset_type = video_frame`
 
-### video_segment_vectors
+### caption_text_vectors
 
 用途：
 
-- 视频片段级召回。
-- MVP 阶段使用代表帧 embedding 作为片段向量。
-- 不默认对多个差异很大的关键帧做简单平均，避免抹平 scene 内部差异。
-- 后续如果引入聚合，必须在 `vector_kind` 或 payload 中记录聚合策略。
+- 保存 Qwen2.5-VL 为图片或视频场景生成的 Caption 文本向量。
+- 使用中文原查询召回画面描述，再通过正式 `scene_id` 与视频视觉候选合并。
 
 典型来源：
 
-- `media_assets.asset_type = video_segment`
+- `media_assets.asset_type = caption`
 
-### audio_segment_vectors
-
-用途：
-
-- 音频语义检索。
-- 视频或音频转写后的语音内容检索。
-
-典型来源：
-
-- `media_assets.asset_type = audio_segment`
-
-> Phase 12 起：转写产出的 `text_chunk` assets 先只进 PostgreSQL FTS（`text_content` → `text_tsv` 生成列）。`audio_segment_vectors` 在 Phase 12 保持空 collection（启动时创建），等后续阶段接入 sentence-transformers 文本 embedding 后再填充，无需改 schema。
-
-### text_chunk_vectors
-
-用途：
-
-- 文档、transcript、OCR 文本的语义检索。
-
-典型来源：
-
-- `media_assets.asset_type = text_chunk`
-
-> Phase 12 同上：text_chunk 先走 FTS，`text_chunk_vectors` 保持空 collection，文本 embedding 延后。
->
-> Phase 13 起：OCR 画面文字同样复用 Phase 12 的 `media_assets.text_content` → `text_tsv` 生成列 + GIN，**写回被 OCR 的 image/video_frame asset 本身的 `text_content`**（不新建 ocr_chunk 行，零新迁移）。`ocr_chunk` asset_type 预留给未来更细 bbox/text-block 粒度。FTS 查询放宽到 `text_chunk`/`image`/`video_frame` 任何有 `text_content` 的 asset；OCR text embedding 同 Phase 12 延后。
+转录 `text_chunk` 继续使用 PostgreSQL 全文检索，不写入 Qdrant。视频场景本身也没有向量 Point；
+Qdrant 通过视频帧 Payload 中的 `scene_id` 分组，每个场景返回最高分帧。
 
 ## Collection 配置
 
 每个 collection 必须有明确配置。实现时应在 TypeScript server 中维护一个 collection registry。
 
-示例（Phase 10 起使用 SigLIP，向量维度以运行时校验的实际输出为准）：
+示例（Phase 4 使用 SigLIP2，向量维度已通过 CPU/MPS 真实加载校验）：
 
 ```ts
 VECTOR_COLLECTIONS = {
   image_vectors: {
     modality: "image",
     vectorKind: "image_embedding",
-    modelName: "google/siglip-base-patch16-224",
-    modelVersion: "siglip-base-patch16-224",
-    vectorDim: 768, // 运行时校验：SigLIP-base hidden_size
+    modelName: "google/siglip2-base-patch16-224",
+    modelVersion: "siglip2-base-patch16-224",
+    vectorDim: 768,
     distance: "Cosine",
   },
   video_frame_vectors: {
     modality: "video",
     vectorKind: "frame_embedding",
-    modelName: "google/siglip-base-patch16-224",
-    modelVersion: "siglip-base-patch16-224",
+    modelName: "google/siglip2-base-patch16-224",
+    modelVersion: "siglip2-base-patch16-224",
     vectorDim: 768,
     distance: "Cosine",
   },
-  video_segment_vectors: {
-    modality: "video",
-    vectorKind: "representative_frame_embedding",
-    modelName: "google/siglip-base-patch16-224",
-    modelVersion: "siglip-base-patch16-224",
-    vectorDim: 768,
-    distance: "Cosine",
-  },
-  audio_segment_vectors: {
-    modality: "audio",
-    vectorKind: "text_embedding",
-    modelName: "sentence-transformers",
-    modelVersion: "all-MiniLM-L6-v2",
-    vectorDim: 384,
-    distance: "Cosine",
-  },
-  text_chunk_vectors: {
+  caption_text_vectors: {
     modality: "text",
-    vectorKind: "text_embedding",
-    modelName: "sentence-transformers",
-    modelVersion: "all-MiniLM-L6-v2",
+    vectorKind: "vlm_caption_text_embedding",
+    modelName: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    modelVersion: "paraphrase-multilingual-MiniLM-L12-v2",
     vectorDim: 384,
     distance: "Cosine",
   },
 } as const;
 ```
 
-`vector_dim` 必须来自实际 embedding 模型输出，不应硬编码成无法追踪的魔法数字。SigLIP 公开配置主线显示 hidden_size 768，但实现必须在模型加载或首次推理时读取并校验实际输出维度。模型变更时，应创建新版本记录，并重建对应 collection 或对应 points。Qdrant 不支持修改已有 collection 的向量维度，因此模型升级需要删除并重建 collection。
+`vector_dim` 必须与实际模型输出一致。模型名称或版本变化时，即使维度仍为 768，也必须删除并重建对应 Collection，因为不同 checkpoint 的数字属于不同语义空间。Server 会同时检查 Qdrant 维度与 PostgreSQL Vector Ref 的模型配置，发现漂移后重建 Collection，并把引用重置为 `pending` 等待 Worker 重写。
 
 ## Qdrant Point 结构
 
@@ -157,13 +113,15 @@ VECTOR_COLLECTIONS = {
     "file_id": "media_files.id",
     "library_id": "libraries.id",
     "media_type": "video",
-    "asset_type": "video_segment",
+    "asset_type": "video_frame",
+    "scene_id": "video_scenes.id",
     "start_time_seconds": 120.0,
     "end_time_seconds": 150.0,
-    "model_name": "siglip",
-    "model_version": "siglip-base-patch16-224",
-    "vector_kind": "representative_frame_embedding",
-    "content_hash": "hash-of-segment-input",
+    "frame_time_seconds": 135.0,
+    "model_name": "google/siglip2-base-patch16-224",
+    "model_version": "siglip2-base-patch16-224",
+    "vector_kind": "frame_embedding",
+    "content_hash": "hash-of-frame-input",
     "index_profile": "balanced"
   }
 }
@@ -392,7 +350,7 @@ vector_collections
 2. 读取对应缓存或源文件片段。
 3. `index_media` 创建 pending `vector_refs`，不直接写入 Qdrant。
 4. TypeScript server 的 `JobsCoordinatorService` 自动扫描 pending `vector_refs`，创建 embedding jobs；显式协调入口保留为补漏/恢复手段。
-5. Python worker 执行 embedding job，生成 SigLIP embedding 并校验 vector_dim。
+5. Python Worker 执行 Embedding 任务，生成 SigLIP2 向量并校验 `vector_dim`。
 6. Python worker upsert point 到 Qdrant。
 7. Python worker 将对应 `vector_refs.status` 更新为 `indexed`。
 8. Python worker 更新 job progress。

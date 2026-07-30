@@ -5,7 +5,12 @@ from pathlib import Path
 from media_agent_worker.__main__ import build_runner
 from media_agent_worker.embedding_worker import EmbedImageHandler, EmbedTextAssetHandler, EmbedVideoFrameHandler
 from media_agent_worker.embedding_worker import extract_video_frame
-from media_agent_worker.embeddings import SiglipEmbedder, normalize_vector, select_torch_device
+from media_agent_worker.embeddings import (
+    SiglipEmbedder,
+    mean_pool_hidden_state,
+    normalize_vector,
+    select_torch_device,
+)
 from media_agent_worker.model_service import EmbeddingModelRouter, handle_embed_text_request
 from media_agent_worker.worker import WorkerRunner
 
@@ -41,8 +46,8 @@ class FakeQdrantClient:
 
 class FakeEmbedder:
     vector_dim = 4
-    model_name = "google/siglip-base-patch16-224"
-    model_version = "siglip-base-patch16-224"
+    model_name = "google/siglip2-base-patch16-224"
+    model_version = "siglip2-base-patch16-224"
 
     def __init__(self):
         self.image_paths = []
@@ -55,6 +60,11 @@ class FakeEmbedder:
     def embed_text(self, text):
         self.texts.append(text)
         return [0.4, 0.3, 0.2, 0.1]
+
+
+class FakeCaptionTextEmbedder(FakeEmbedder):
+    model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    model_version = "paraphrase-multilingual-MiniLM-L12-v2"
 
 
 class FakeDeviceValue:
@@ -94,6 +104,17 @@ class EmbeddingWorkerTest(unittest.TestCase):
     def test_normalize_vector_returns_unit_length(self):
         self.assertEqual(normalize_vector([3.0, 4.0]), [0.6, 0.8])
 
+    def test_caption_mean_pooling_ignores_padding_tokens(self):
+        """索引 Caption 与查询文本必须使用同一套只计算有效 token 的平均池化。"""
+        import torch
+
+        hidden = torch.tensor([[[1.0, 2.0], [3.0, 4.0], [100.0, 100.0]]])
+        attention_mask = torch.tensor([[1, 1, 0]])
+
+        pooled = mean_pool_hidden_state(hidden, attention_mask)
+
+        self.assertEqual(pooled.tolist(), [[2.0, 3.0]])
+
     def test_select_torch_device_prefers_requested_cpu_without_importing_torch(self):
         self.assertEqual(select_torch_device("cpu", torch_module=None), "cpu")
 
@@ -122,8 +143,8 @@ class EmbeddingWorkerTest(unittest.TestCase):
         response = handle_embed_text_request(embedder, {"text": "red car"})
 
         self.assertEqual(response, {
-            "model_name": "google/siglip-base-patch16-224",
-            "model_version": "siglip-base-patch16-224",
+            "model_name": "google/siglip2-base-patch16-224",
+            "model_version": "siglip2-base-patch16-224",
             "vector": [0.4, 0.3, 0.2, 0.1],
             "vector_dim": 4,
         })
@@ -131,9 +152,7 @@ class EmbeddingWorkerTest(unittest.TestCase):
 
     def test_model_service_routes_caption_text_model_requests(self):
         siglip_embedder = FakeEmbedder()
-        caption_embedder = FakeEmbedder()
-        caption_embedder.model_name = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-        caption_embedder.model_version = "paraphrase-multilingual-MiniLM-L12-v2"
+        caption_embedder = FakeCaptionTextEmbedder()
         router = EmbeddingModelRouter(
             siglip_embedder=siglip_embedder,
             caption_text_embedder_factory=lambda: caption_embedder,
@@ -157,8 +176,8 @@ class EmbeddingWorkerTest(unittest.TestCase):
             "library_id": "library-1",
             "collection_name": "image_vectors",
             "point_id": "11111111-1111-4111-8111-111111111111",
-            "model_name": "google/siglip-base-patch16-224",
-            "model_version": "siglip-base-patch16-224",
+            "model_name": "google/siglip2-base-patch16-224",
+            "model_version": "siglip2-base-patch16-224",
             "vector_kind": "image_embedding",
             "vector_dim": 4,
             "distance": "Cosine",
@@ -176,8 +195,8 @@ class EmbeddingWorkerTest(unittest.TestCase):
             "asset_id": "asset-1",
             "path": "/media/cat.jpg",
             "collection": "image_vectors",
-            "model_name": "google/siglip-base-patch16-224",
-            "model_version": "siglip-base-patch16-224",
+            "model_name": "google/siglip2-base-patch16-224",
+            "model_version": "siglip2-base-patch16-224",
         })
 
         self.assertEqual(result["point_id"], "11111111-1111-4111-8111-111111111111")
@@ -186,7 +205,7 @@ class EmbeddingWorkerTest(unittest.TestCase):
         collection_name, point = qdrant.points[0]
         self.assertEqual(collection_name, "image_vectors")
         self.assertEqual(point["vector"], [0.1, 0.2, 0.3, 0.4])
-        self.assertEqual(point["payload"]["model_name"], "google/siglip-base-patch16-224")
+        self.assertEqual(point["payload"]["model_name"], "google/siglip2-base-patch16-224")
 
     def test_embed_text_asset_job_writes_caption_vector_and_marks_ref_indexed(self):
         repository = FakeEmbeddingRepository()
@@ -211,7 +230,7 @@ class EmbeddingWorkerTest(unittest.TestCase):
             "metadata_json": {"source": "vlm_caption", "prompt_version": "caption-v1"},
         })
         qdrant = FakeQdrantClient()
-        embedder = FakeEmbedder()
+        embedder = FakeCaptionTextEmbedder()
         handler = EmbedTextAssetHandler(repository, qdrant, embedder)
 
         result = handler.handle({
@@ -230,6 +249,106 @@ class EmbeddingWorkerTest(unittest.TestCase):
         self.assertEqual(point["payload"]["asset_type"], "caption")
         self.assertEqual(point["payload"]["source"], "vlm_caption")
 
+    def test_embed_text_asset_rejects_a_model_that_does_not_match_the_vector_ref(self):
+        """错误文本模型不能把不可比较的向量写进 Caption Collection。"""
+        repository = FakeEmbeddingRepository()
+        repository.add_vector_ref({
+            "asset_id": "caption-1",
+            "file_id": "file-1",
+            "library_id": "library-1",
+            "collection_name": "caption_text_vectors",
+            "point_id": "44444444-4444-4444-8444-444444444444",
+            "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+            "vector_kind": "vlm_caption_text_embedding",
+            "vector_dim": 4,
+            "distance": "Cosine",
+            "content_hash": "caption-hash",
+            "index_profile": "balanced",
+            "asset_type": "caption",
+            "media_type": "image",
+            "text_content": "一只猫坐在窗边",
+        })
+        qdrant = FakeQdrantClient()
+        wrong_embedder = FakeEmbedder()
+        handler = EmbedTextAssetHandler(repository, qdrant, wrong_embedder)
+
+        with self.assertRaisesRegex(ValueError, "Embedding model mismatch"):
+            handler.handle({
+                "asset_id": "caption-1",
+                "collection": "caption_text_vectors",
+                "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+            })
+
+        self.assertEqual(qdrant.points, [])
+        self.assertEqual(repository.indexed, [])
+        self.assertEqual(wrong_embedder.texts, [])
+
+    def test_caption_model_mismatch_is_visible_as_a_failed_job(self):
+        """模型配置漂移必须落到 Job 错误，而不是生成部分向量或静默跳过。"""
+        media_repository = FakeEmbeddingRepository()
+        media_repository.add_vector_ref({
+            "asset_id": "caption-1",
+            "file_id": "file-1",
+            "library_id": "library-1",
+            "collection_name": "caption_text_vectors",
+            "point_id": "44444444-4444-4444-8444-444444444444",
+            "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+            "vector_kind": "vlm_caption_text_embedding",
+            "vector_dim": 4,
+            "distance": "Cosine",
+            "content_hash": "caption-hash",
+            "index_profile": "balanced",
+            "asset_type": "caption",
+            "media_type": "image",
+            "text_content": "一只猫坐在窗边",
+        })
+        qdrant = FakeQdrantClient()
+        handler = EmbedTextAssetHandler(media_repository, qdrant, FakeEmbedder())
+
+        class SingleCaptionJobRepository:
+            def __init__(self):
+                self.job = {
+                    "id": "embed-caption-1",
+                    "job_type": "embed_text_asset",
+                    "input_json": {
+                        "asset_id": "caption-1",
+                        "collection": "caption_text_vectors",
+                        "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                        "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+                    },
+                }
+                self.failure = None
+
+            def claim_next_job(self, _worker_id):
+                job = self.job
+                self.job = None
+                return job
+
+            def heartbeat(self, _job_id):
+                pass
+
+            def mark_succeeded(self, _job_id, _result):
+                raise AssertionError("mismatched model must not succeed")
+
+            def mark_failed(self, job_id, message):
+                self.failure = (job_id, message)
+
+        job_repository = SingleCaptionJobRepository()
+        runner = WorkerRunner(
+            worker_id="worker-1",
+            job_repository=job_repository,
+            embed_text_asset_handler=handler,
+        )
+
+        self.assertFalse(runner.run_once())
+        self.assertEqual(job_repository.failure[0], "embed-caption-1")
+        self.assertIn("Embedding model mismatch", job_repository.failure[1])
+        self.assertEqual(qdrant.points, [])
+        self.assertEqual(media_repository.indexed, [])
+
     def test_embed_video_frame_job_extracts_frame_and_writes_scene_id_payload(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             extracted = str(Path(tmp_dir) / "frame.jpg")
@@ -241,8 +360,8 @@ class EmbeddingWorkerTest(unittest.TestCase):
                 "library_id": "library-1",
                 "collection_name": "video_frame_vectors",
                 "point_id": "22222222-2222-4222-8222-222222222222",
-                "model_name": "google/siglip-base-patch16-224",
-                "model_version": "siglip-base-patch16-224",
+                "model_name": "google/siglip2-base-patch16-224",
+                "model_version": "siglip2-base-patch16-224",
                 "vector_kind": "frame_embedding",
                 "vector_dim": 4,
                 "distance": "Cosine",
@@ -271,8 +390,8 @@ class EmbeddingWorkerTest(unittest.TestCase):
                 "frame_path": "/media/clip.mp4",
                 "frame_time_seconds": 45,
                 "collection": "video_frame_vectors",
-                "model_name": "google/siglip-base-patch16-224",
-                "model_version": "siglip-base-patch16-224",
+                "model_name": "google/siglip2-base-patch16-224",
+                "model_version": "siglip2-base-patch16-224",
             })
 
             self.assertEqual(result["collection"], "video_frame_vectors")
@@ -315,19 +434,21 @@ class EmbeddingWorkerTest(unittest.TestCase):
 
         self.assertEqual(repository.completed, ("embed-1", {"asset_id": "asset-1"}))
 
-    def test_build_runner_shares_one_embedder_between_embedding_handlers(self):
+    def test_build_runner_shares_visual_embedder_but_keeps_caption_model_separate(self):
         embedder = FakeEmbedder()
+        text_embedder = FakeCaptionTextEmbedder()
         runner = build_runner(
             worker_id="worker-1",
             job_repository=object(),
             media_repository=object(),
             qdrant_client=object(),
             embedder=embedder,
+            text_embedder=text_embedder,
         )
 
         self.assertIs(runner.embed_image_handler.embedder, embedder)
         self.assertIs(runner.embed_video_frame_handler.embedder, embedder)
-        self.assertIs(runner.embed_text_asset_handler.embedder, embedder)
+        self.assertIs(runner.embed_text_asset_handler.embedder, text_embedder)
 
     def test_extract_video_frame_removes_temp_file_when_ffmpeg_fails(self):
         outputs = []

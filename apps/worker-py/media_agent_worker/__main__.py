@@ -27,7 +27,10 @@ def build_runner(
     text_embedder=None,
 ):
     shared_embedder = embedder or SiglipEmbedder()
-    shared_text_embedder = text_embedder or embedder
+    # Caption 使用独立的多语言文本模型，不能为了复用内存而回退到视觉 SigLIP2。
+    # text_embedder=None 会让 EmbedTextAssetHandler 延迟加载 TransformerTextEmbedder；
+    # 测试或专用进程可以显式注入同模型的 fake。
+    shared_text_embedder = text_embedder
     # OCR 处理器（PaddleOCR）已在阶段 2 删除，不再装配；run_ocr 任务不再被创建或路由。
     return WorkerRunner(
         worker_id=worker_id,

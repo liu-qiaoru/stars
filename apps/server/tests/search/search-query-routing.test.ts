@@ -11,7 +11,7 @@ const variants = [
 ]
 
 describe('collection-specific query routing', () => {
-  test('uses only the faithful English translation in SigLIP visual collections', () => {
+  test('uses only the faithful English translation in SigLIP2 visual collections', () => {
     expect(routeQueryVariantsForCollection(variants, 'video_frame_vectors', 'translate')).toEqual([
       { ...variants[1], weight: 1 },
     ])

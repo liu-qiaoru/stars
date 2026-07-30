@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, asc, count, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres'
 import type { PgliteDatabase } from 'drizzle-orm/pglite'
 import {
@@ -256,38 +256,78 @@ export async function resetVectorRefsForCollection(
   >,
 ) {
   // Collection 维度或模型版本变化时，旧 Qdrant points 不再可信。
-  // 这里只重置 PostgreSQL refs 为 pending；实际重新写入仍交给 embedding job。
-  const rows = await db
-    .select()
-    .from(vectorRefs)
-    .where(eq(vectorRefs.collectionName, input.collectionName))
+  // 整个 Collection 的引用必须在一个事务内一起变成 pending；若任一行更新失败，
+  // PostgreSQL 会全部回滚，QdrantCollectionsService 也不会开始删除真实 Collection。
+  // 实际向量重新写入仍交给后续 embedding job。
+  return db.transaction(async (transaction) => {
+    const tx = transaction as Database
+    const rows = await tx
+      .select()
+      .from(vectorRefs)
+      .where(eq(vectorRefs.collectionName, input.collectionName))
 
-  let updated = 0
-  for (const row of rows) {
-    await db
-      .update(vectorRefs)
-      .set({
-        pointId: deterministicPointId({
-          assetId: row.assetId,
-          collectionName: input.collectionName,
+    for (const row of rows) {
+      await tx
+        .update(vectorRefs)
+        .set({
+          pointId: deterministicPointId({
+            assetId: row.assetId,
+            collectionName: input.collectionName,
+            modelName: input.modelName,
+            modelVersion: input.modelVersion,
+            vectorKind: input.vectorKind,
+            contentHash: row.contentHash,
+          }),
           modelName: input.modelName,
           modelVersion: input.modelVersion,
           vectorKind: input.vectorKind,
-          contentHash: row.contentHash,
-        }),
-        modelName: input.modelName,
-        modelVersion: input.modelVersion,
-        vectorKind: input.vectorKind,
-        vectorDim: input.vectorDim,
-        distance: input.distance,
-        status: 'pending',
-        updatedAt: new Date(),
-      })
-      .where(eq(vectorRefs.id, row.id))
-    updated += 1
-  }
+          vectorDim: input.vectorDim,
+          distance: input.distance,
+          status: 'pending',
+          updatedAt: new Date(),
+        })
+        .where(eq(vectorRefs.id, row.id))
+    }
 
-  return updated
+    return rows.length
+  })
+}
+
+/**
+ * 判断 PostgreSQL 中是否仍有不符合目标 Collection 配置的 Vector Ref。
+ *
+ * 输入是目标 Collection 的模型、版本、向量类型、维度和距离算法；返回 true 表示至少一条
+ * 引用来自旧模型或旧配置。函数只读 PostgreSQL，不修改 Qdrant；数据库查询失败时异常向上
+ * 传播，使启动流程停止重建 Collection，避免先删真实向量再发现状态无法更新。
+ */
+export async function hasVectorRefConfigMismatch(
+  db: Database,
+  input: Pick<
+    InsertVectorRef,
+    'collectionName' | 'modelName' | 'modelVersion' | 'vectorKind' | 'vectorDim' | 'distance'
+  >,
+) {
+  // Qdrant Collection 只声明向量维度和距离算法，不记录生成向量的模型 checkpoint。
+  // 因此 SigLIP → SigLIP2 这种“维度相同、语义空间变化”的升级必须回 PostgreSQL
+  // 检查 Vector Ref。只要存在一条旧配置，Server 就会重建整个 Collection，并在同一
+  // 启动流程中把所有引用升级为 pending，随后由 Worker 重新写入。
+  const [row] = await db
+    .select({ count: count() })
+    .from(vectorRefs)
+    .where(
+      and(
+        eq(vectorRefs.collectionName, input.collectionName),
+        or(
+          ne(vectorRefs.modelName, input.modelName),
+          ne(vectorRefs.modelVersion, input.modelVersion),
+          ne(vectorRefs.vectorKind, input.vectorKind),
+          ne(vectorRefs.vectorDim, input.vectorDim),
+          ne(vectorRefs.distance, input.distance),
+        ),
+      ),
+    )
+
+  return Number(row?.count ?? 0) > 0
 }
 
 function deterministicPointId(input: {

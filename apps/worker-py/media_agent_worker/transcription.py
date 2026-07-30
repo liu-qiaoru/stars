@@ -100,7 +100,7 @@ class FasterWhisperTranscriber:
             from faster_whisper import WhisperModel
         except ImportError as error:
             raise RuntimeError("faster-whisper is not installed. Install faster-whisper to run transcribe_audio jobs.") from error
-        # CPU/INT8 keeps Whisper separate from SigLIP's optional MPS/CUDA path and is the Phase 12 default.
+        # CPU/INT8 keeps Whisper separate from SigLIP2's optional MPS/CUDA path and is the Phase 12 default.
         self._model = WhisperModel(self.model_name, device=self.device, compute_type="int8")
         return self._model
 

@@ -50,10 +50,27 @@ class BaseEmbeddingHandler:
 
     def _embed_and_write(self, *, job_input, image_path):
         vector_ref = self._load_vector_ref(job_input)
+        self._validate_embedder(vector_ref)
         vector = self.embedder.embed_image_path(image_path)
         return self._write_vector(vector_ref, vector)
 
+    def _validate_embedder(self, vector_ref):
+        # 向量维度相同不代表模型空间相同。尤其 Phase 4 的 SigLIP → SigLIP2
+        # 切换仍是 768 维；推理前先核对模型身份，避免浪费计算，更不能写入混合 Collection。
+        if (
+            self.embedder.model_name != vector_ref["model_name"]
+            or self.embedder.model_version != vector_ref["model_version"]
+        ):
+            raise ValueError(
+                "Embedding model mismatch for "
+                f"{vector_ref['point_id']}: expected "
+                f"{vector_ref['model_name']}/{vector_ref['model_version']}, got "
+                f"{self.embedder.model_name}/{self.embedder.model_version}"
+            )
+
     def _write_vector(self, vector_ref, vector):
+        # 保留写入边界的二次校验，防止未来新增 handler 绕过 _embed_and_write。
+        self._validate_embedder(vector_ref)
         if len(vector) != vector_ref["vector_dim"]:
             raise ValueError(
                 f"Embedding dimension mismatch for {vector_ref['point_id']}: "
@@ -145,5 +162,7 @@ class EmbedTextAssetHandler(BaseEmbeddingHandler):
         text = vector_ref.get("text_content")
         if not isinstance(text, str) or not text.strip():
             raise ValueError(f"Caption asset has no text_content: {vector_ref['asset_id']}")
-        vector = self._text_embedder().embed_text(text)
+        embedder = self._text_embedder()
+        self._validate_embedder(vector_ref)
+        vector = embedder.embed_text(text)
         return self._write_vector(vector_ref, vector)

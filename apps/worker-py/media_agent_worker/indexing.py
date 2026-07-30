@@ -4,6 +4,14 @@ import math
 import os
 import uuid
 
+from .embeddings import (
+    DEFAULT_CAPTION_TEXT_MODEL_NAME,
+    DEFAULT_CAPTION_TEXT_MODEL_VERSION,
+    DEFAULT_CAPTION_TEXT_VECTOR_DIM,
+    DEFAULT_SIGLIP_MODEL_NAME,
+    DEFAULT_SIGLIP_MODEL_VERSION,
+    DEFAULT_SIGLIP_VECTOR_DIM,
+)
 from .errors import JobError
 
 
@@ -17,23 +25,23 @@ POINT_NAMESPACE = uuid.UUID("f3f4e35a-688d-4f79-99e0-91f9480a5827")
 # 阶段 2 后只保留三个向量集合：图片、视频帧、Caption 文本；video_segment_vectors 已删除。
 VECTOR_CONFIGS = {
     "image_vectors": {
-        "vector_dim": 768,
-        "model_name": "google/siglip-base-patch16-224",
-        "model_version": "siglip-base-patch16-224",
+        "vector_dim": DEFAULT_SIGLIP_VECTOR_DIM,
+        "model_name": DEFAULT_SIGLIP_MODEL_NAME,
+        "model_version": DEFAULT_SIGLIP_MODEL_VERSION,
         "vector_kind": "image_embedding",
         "distance": "Cosine",
     },
     "video_frame_vectors": {
-        "vector_dim": 768,
-        "model_name": "google/siglip-base-patch16-224",
-        "model_version": "siglip-base-patch16-224",
+        "vector_dim": DEFAULT_SIGLIP_VECTOR_DIM,
+        "model_name": DEFAULT_SIGLIP_MODEL_NAME,
+        "model_version": DEFAULT_SIGLIP_MODEL_VERSION,
         "vector_kind": "frame_embedding",
         "distance": "Cosine",
     },
     "caption_text_vectors": {
-        "vector_dim": 384,
-        "model_name": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-        "model_version": "paraphrase-multilingual-MiniLM-L12-v2",
+        "vector_dim": DEFAULT_CAPTION_TEXT_VECTOR_DIM,
+        "model_name": DEFAULT_CAPTION_TEXT_MODEL_NAME,
+        "model_version": DEFAULT_CAPTION_TEXT_MODEL_VERSION,
         "vector_kind": "vlm_caption_text_embedding",
         "distance": "Cosine",
     },

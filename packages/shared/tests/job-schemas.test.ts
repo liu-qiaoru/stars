@@ -70,8 +70,8 @@ describe('job schemas', () => {
       frame_path: '/cache/frame.jpg',
       frame_time_seconds: 5.0,
       collection: 'video_frame_vectors',
-      model_name: 'google/siglip-base-patch16-224',
-      model_version: 'siglip-base-patch16-224',
+      model_name: 'google/siglip2-base-patch16-224',
+      model_version: 'siglip2-base-patch16-224',
     })
 
     expect(input.collection).toBe('video_frame_vectors')

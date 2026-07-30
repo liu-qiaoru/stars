@@ -2,9 +2,9 @@
 
 这是一个**本地优先**的多模态媒体检索与剪辑 Agent，用于管理个人图片、视频、音频和文本素材库。目标规模约 1 TB（以视频为主）。系统默认保留原始文件在用户自己的磁盘上，不上传、不复制源素材；应用只在本地工作目录保存 metadata、索引、缩略图、抽帧、转写、OCR 结果和导出剪辑。
 
-项目实现遵循 `docs/architecture.md` 的架构设计，并按 `docs/tasks/todo.md` 中的 Phase 分阶段推进。当前阶段：**Phase 1–15A 已完成**（后端 API、Next.js 前端、真实 SigLIP 视觉 embedding、视频 scene 切分、faster-whisper 转写、PaddleOCR 画面文字识别、FTS 文本检索、Agent MVP、Clip 导出、Qwen2.5-VL caption retrieval）。
+项目实现遵循 `docs/architecture.md` 的架构设计，并按最新视频检索重建计划分阶段推进。当前阶段：**重建 Phase 4 已完成**，视觉模型统一为 SigLIP2，Caption 使用独立多语言文本向量模型；下一步是 Phase 5 的搜索范围和 RRF 排序。
 
-默认配置下，**外部 LLM 是关闭的**；所有检索依赖本地模型（SigLIP、faster-whisper、PaddleOCR，开启 caption indexing 时使用 Qwen2.5-VL），不调用 OpenAI、Anthropic 等外部服务。
+默认配置下，**外部 LLM 是关闭的**；所有检索依赖本地模型（SigLIP2、faster-whisper，开启 Caption 索引时使用 Qwen2.5-VL），不调用 OpenAI、Anthropic 等外部服务。
 
 ## 目录
 
@@ -44,7 +44,7 @@
 ┌──────────┐   ┌──────────┐    ┌──────────────┐   外部 LLM (AI SDK)
 │PostgreSQL│   │ Qdrant   │    │ Model Gateway │   ALLOW_EXTERNAL_LLM
 │  :5432   │   │ :6333    │    │  → :4020      │   =false 时不调用
-│ 事实数据  │   │ 向量+payload│  │ SigLIP text  │
+│ 事实数据  │   │ 向量+payload│  │SigLIP2 text  │
 │ + job 队列│   │           │   │ + caption text│
 └────┬─────┘   └─────▲────┘    └──────────────┘
      │               │ upsert points        ▲
@@ -76,7 +76,7 @@
 | 后端 API | NestJS（Express adapter）/ Zod / Vercel AI SDK（可选 Anthropic） |
 | 数据库 | PostgreSQL 16（Drizzle ORM + node-postgres） |
 | 向量库 | Qdrant（JS client + Python HTTP client） |
-| Python worker | FFmpeg、ffprobe、PySceneDetect、SigLIP（torch/transformers）、faster-whisper、PaddleOCR、Qwen2.5-VL（可选 caption） |
+| Python worker | FFmpeg、ffprobe、PySceneDetect、SigLIP2（torch/transformers）、faster-whisper、Qwen2.5-VL（可选 Caption） |
 | 任务队列 | PostgreSQL-backed jobs（`SELECT ... FOR UPDATE SKIP LOCKED`，无 Celery/BullMQ） |
 | 测试 | Vitest（TS）/ unittest（Python）/ PGlite（无依赖 PostgreSQL 的单测） |
 
@@ -113,7 +113,7 @@ docs              架构、API 契约、job 协议、向量索引设计和实施
 - **Docker** 兼容的本地容器运行时：OrbStack、Docker Desktop 或其他兼容 Docker Compose 的运行时
 - **FFmpeg / ffprobe**：probe、抽帧、剪辑导出和音频抽取依赖；首次使用前确保 `ffmpeg` 在 `PATH` 中（macOS 推荐 `brew install ffmpeg`）
 
-> Python 依赖按阶段引入：Phase 10 起 `torch`/`transformers`/`pillow`（SigLIP）；Phase 11 起 `scenedetect`（视频 scene detection）；Phase 12 起 `faster-whisper`（转写）；Phase 13 起 `paddleocr`/`paddlepaddle`（OCR）；Phase 15A 起可选 Qwen2.5-VL caption service 和 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` caption text embedding。首次运行时模型权重会从网络下载并缓存到本机，后续运行复用本地缓存。
+> Python 模型依赖包括 `torch`/`transformers`/`pillow`（SigLIP2 与 Caption 文本向量）、`scenedetect`（视频场景检测）、`faster-whisper`（转写），以及可选的 Qwen2.5-VL Caption 服务。首次运行时模型权重会从网络下载并缓存到本机，后续运行复用本地缓存。
 
 ## 初始化
 
@@ -194,7 +194,7 @@ curl http://127.0.0.1:4000/health
 pnpm dev:model
 ```
 
-本地模型服务默认监听 `http://127.0.0.1:4020`，供后端在搜索时把 query 文本转成 SigLIP text vector。**它是本机 localhost 服务，不是外部模型 API。**
+本地模型服务默认监听 `http://127.0.0.1:4020`，供后端在搜索时把查询文本转成 SigLIP2 文本向量。**它是本机 localhost 服务，不是外部模型 API。**
 
 如果没有启动它：
 
@@ -213,7 +213,7 @@ Python worker 从 PostgreSQL 的 `jobs` 表领取后台任务并执行，包括�
 - `scan_library`：扫描素材库文件。
 - `probe_media`：读取图片/音视频 metadata。
 - `index_media`：生成 image、video segment、video frame assets，并创建待索引 vector refs。
-- `embed_image` / `embed_video_frame`：调用本地 SigLIP，把图片或视频帧写入 Qdrant。
+- `embed_image` / `embed_video_frame`：调用本地 SigLIP2，把图片或视频帧写入 Qdrant。
 - `generate_caption`：调用本地 Qwen2.5-VL，为图片或视频片段生成 caption 文本。
 - `embed_text_asset`：把 caption 文本写入 `caption_text_vectors`。
 - `transcribe_audio`：用本地 faster-whisper 转写音频/视频讲话内容。
@@ -378,7 +378,7 @@ http://127.0.0.1:6333/dashboard
 
 默认配置下不对接外部 LLM 或外部多模态模型。本地检索依赖：
 
-- **SigLIP**：本地视觉/text embedding，用于向量检索。
+- **SigLIP2**：本地视觉/文本 Embedding，用于图片和视频帧向量检索。
 - **faster-whisper**：本地语音转写，用于 transcript FTS。
 - **PaddleOCR**：本地 OCR，用于画面文字 FTS。
 - **Qwen2.5-VL（可选）**：本地生成 caption，用于 `caption_text_vectors` 语义检索。
@@ -448,5 +448,5 @@ pnpm py:test
 - **创建 library 后无任务推进**：确认 Python worker 已启动；worker 通过 `FOR UPDATE SKIP LOCKED` 从 `jobs` 表领取任务。
 - **Caption 没有生成**：确认 `.env` 中 `CAPTION_INDEXING_ENABLED=true`、`LOCAL_VLM_ENABLED=true`，并且 `media_agent_worker.vlm_service` 正在 `:4030` 运行。
 - **搜索没有 caption_match**：确认 `.env` 中 `CAPTION_SEARCH_ENABLED=true`，并检查 `vector_refs` 里 `caption_text_vectors` 是否已变成 `indexed`。
-- **首次运行很慢**：SigLIP / faster-whisper / PaddleOCR / Qwen2.5-VL 首次需要从网络下载模型权重并缓存到本机，后续运行复用缓存。
+- **首次运行很慢**：SigLIP2 / faster-whisper / Qwen2.5-VL 首次需要从网络下载模型权重并缓存到本机，后续运行复用缓存。
 - **macOS 内存紧张**：把 `.env` 中 `SIGLIP_DEVICE` 设为 `cpu`（默认 `auto` 在 Apple Silicon 上会选 `mps`）。

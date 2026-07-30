@@ -10,9 +10,32 @@
 
 ## 当前进度
 
-- 当前阶段：Phase 14 已完成（Hybrid Retrieval、reranking、top-level `results`、`groups` 兼容路径、agent/web 消费迁移）。
-- 最近更新：2026-06-27，完成“关键路径注释补强”，帮助不熟悉项目的人理解 server、worker、shared schema 和 web 工作台的职责边界与关键逻辑。
-- 下一步：等待确认后进入 Phase 15 外部多模态模型验证。
+- 当前阶段：视频检索重建 Phase 4 已完成（Caption 文本向量一致性、SigLIP2 图片/视频帧/查询向量统一）。
+- 最近更新：2026-07-30，完成 SigLIP2 CPU/MPS 真实模型验证，并补齐同维度模型升级和 Qdrant 丢失后的重建保护。
+- 下一步：等待确认后进入视频检索重建 Phase 5，增加 `search_scope`、`ranking_mode` 和正式 RRF 排序。
+
+## 视频检索重建 Phase 4：Caption 文本向量与 SigLIP2 模型一致性
+
+- [x] Caption Asset、`caption_text_vectors` pending Vector Ref 和 `embed_text_asset` 继续使用阶段 2 的协议，不改写场景身份。
+- [x] Caption 索引和同步查询统一使用 `paraphrase-multilingual-MiniLM-L12-v2`、384 维和有效 Token 平均池化。
+- [x] Worker 在推理和写入前校验 Embedder 的模型名称、版本和向量维度；不匹配时任务失败且不写 Qdrant、不标记 `indexed`。
+- [x] 图片、视频帧和同步查询统一切换到 `google/siglip2-base-patch16-224` / `siglip2-base-patch16-224`。
+- [x] TypeScript Collection registry、Python 索引配置、Worker、模型服务和测试统一为 768 维 SigLIP2。
+- [x] Qdrant 启动检查同时核对向量维度与 PostgreSQL Vector Ref 模型配置；模型变化即使维度相同也重建 Collection。
+- [x] Qdrant Collection 缺失时，重建后把 PostgreSQL 引用重置为 `pending`，避免空 Collection 配合错误的 `indexed` 状态。
+- [x] 忠实翻译模式继续让视觉通道只使用经过校验的英文译文，Caption 通道只使用中文原查询。
+- [x] 在 CPU 与 Apple MPS 上运行真实 SigLIP2 冒烟测试，记录加载、首次/热推理、内存和中英文单样本消融。
+- [x] 运行真实 Caption 文本模型测试，验证模型身份、384 维、MPS 和单位向量。
+- [x] 更新 `.env.example`、README、任务协议、工具清单、向量索引设计和验证报告。
+
+Review：
+
+- Result：Phase 4 已完成。视觉 checkpoint 统一为 SigLIP2；Caption 保持独立多语言文本模型。新增模型身份守卫，解决“SigLIP 与 SigLIP2 都是 768 维，旧向量可能被误认为兼容”的根因；新增 Collection 丢失恢复，保证 PostgreSQL 状态与 Qdrant 真实 Point 一致。
+- Real model：SigLIP2 CPU/MPS 均输出 768 维；CPU 峰值进程内存约 1.50 GiB，MPS 峰值约 0.86 GiB。Caption 文本模型输出 384 维，归一化向量 L2 范数为 1。详细数字、统计口径和限制见 `docs/superpowers/reports/2026-07-30-phase4-siglip2-caption-validation.md`。
+- Tests：`corepack pnpm check` 通过，其中 Shared Schema 6 项测试、Web 39 项测试和生产构建、
+  Server 109 项测试全部成功；`PYTHONPATH=apps/worker-py .venv/bin/python -m unittest discover
+  apps/worker-py/tests` 通过 73 项 Python 测试；`git diff --check` 通过。测试使用 fake
+  PostgreSQL/Qdrant/VLM 覆盖失败恢复，真实模型数字单独记录在 Phase 4 验证报告中。
 
 ## 代码可读性：关键路径注释补强
 

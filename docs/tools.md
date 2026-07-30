@@ -54,10 +54,10 @@
 | psycopg | Python 访问 PostgreSQL | worker repository 使用 psycopg 连接数据库，claim job、读写 media metadata 和 job result。 |
 | FFmpeg | 媒体处理命令行工具 | 用于导出视频 clip、抽取音频 WAV、抽取视频帧。 |
 | ffprobe | 媒体 metadata 探测 | `ProbeHandler` 调用 ffprobe 获取 duration、codec、streams、width、height。 |
-| Pillow | 图片读取 | SigLIP embedder 用 Pillow 打开图片并转为 RGB。 |
+| Pillow | 图片读取 | SigLIP2 embedder 用 Pillow 打开图片并转为 RGB。 |
 | PySceneDetect / scenedetect | 视频 scene detection | `IndexMediaHandler` 在 `scene_detection` 策略下检测 scene；异常、空结果或 scene 过多时回退固定 30 秒切片。 |
-| torch | 本地模型运行底层 | SigLIP embedding 通过 torch 执行，并支持 `SIGLIP_DEVICE=cpu/mps/cuda/auto`。 |
-| transformers | SigLIP 模型加载 | `SiglipEmbedder` 使用 `AutoProcessor` 和 `AutoModel` 加载 `google/siglip-base-patch16-224`。 |
+| torch | 本地模型运行底层 | SigLIP2 embedding 通过 torch 执行，并支持 `SIGLIP_DEVICE=cpu/mps/cuda/auto`。 |
+| transformers | SigLIP2 模型加载 | `SiglipEmbedder` 使用 `AutoProcessor` 和 `AutoModel` 加载 `google/siglip2-base-patch16-224`。 |
 | faster-whisper | 音频/视频转写 | `TranscribeHandler` 先用 FFmpeg 抽音频，再用 faster-whisper 生成 transcript chunk。 |
 | PaddleOCR | 画面文字识别 | `OcrHandler` 对 image 或 video_frame asset 做 OCR，并把文本写回 asset 的 `text_content`。 |
 | paddlepaddle | PaddleOCR 运行时 | 作为 PaddleOCR 的底层依赖安装。 |
@@ -66,7 +66,7 @@
 
 | 工具 | 作用 | 当前项目怎么使用 |
 | --- | --- | --- |
-| SigLIP `google/siglip-base-patch16-224` | 图片、视频帧和文本 query embedding | Python worker 生成图片/视频向量并写入 Qdrant；本地 model service 为搜索 query 生成 text vector。 |
+| SigLIP2 `google/siglip2-base-patch16-224` | 图片、视频帧和文本 query embedding | Python Worker 生成图片/视频向量并写入 Qdrant；本地模型服务为搜索查询生成文本向量。 |
 | 本地 Python model service | localhost embedding RPC | `python -m media_agent_worker.model_service` 默认监听 `127.0.0.1:4020`，提供 `/embed/text` 和 `/embed/image`。 |
 | Model Gateway | TypeScript 到本地模型服务的边界 | server `ModelGatewayService` 调用 `/embed/text`，校验 vector 维度后供 Search service 使用。 |
 | sentence-transformers `all-MiniLM-L6-v2` | 文本/audio 向量模型预留 | 当前在 vector registry 中为 `audio_segment_vectors` 和 `text_chunk_vectors` 定义维度和模型名；当前核心检索路径主要使用 PostgreSQL FTS 处理 transcript/OCR 文本。 |

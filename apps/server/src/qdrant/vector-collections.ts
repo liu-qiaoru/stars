@@ -1,5 +1,5 @@
-export const SIGLIP_MODEL_NAME = 'google/siglip-base-patch16-224'
-export const SIGLIP_MODEL_VERSION = 'siglip-base-patch16-224'
+export const SIGLIP_MODEL_NAME = 'google/siglip2-base-patch16-224'
+export const SIGLIP_MODEL_VERSION = 'siglip2-base-patch16-224'
 export const SIGLIP_VECTOR_DIM = 768
 export const TEXT_EMBEDDING_MODEL_NAME = 'sentence-transformers'
 export const TEXT_EMBEDDING_MODEL_VERSION = 'all-MiniLM-L6-v2'

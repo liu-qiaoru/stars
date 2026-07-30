@@ -12,6 +12,7 @@ import {
   createMediaFile,
   createVectorRef,
   getFileWithAssetsAndVectors,
+  hasVectorRefConfigMismatch,
   resetVectorRefsForCollection,
 } from "../../src/database/repositories.js";
 
@@ -137,8 +138,8 @@ describe("database repositories", () => {
 
     const updated = await resetVectorRefsForCollection(db, {
       collectionName: "video_segment_vectors",
-      modelName: "google/siglip-base-patch16-224",
-      modelVersion: "siglip-base-patch16-224",
+      modelName: "google/siglip2-base-patch16-224",
+      modelVersion: "siglip2-base-patch16-224",
       vectorKind: "representative_frame_embedding",
       vectorDim: 768,
       distance: "Cosine",
@@ -147,11 +148,57 @@ describe("database repositories", () => {
 
     expect(updated).toBe(1);
     expect(graph?.vectorRefs[0]).toMatchObject({
-      modelName: "google/siglip-base-patch16-224",
-      modelVersion: "siglip-base-patch16-224",
+      modelName: "google/siglip2-base-patch16-224",
+      modelVersion: "siglip2-base-patch16-224",
       vectorDim: 768,
       status: "pending",
     });
     expect(graph?.vectorRefs[0].pointId).not.toBe(oldPointId);
+  });
+
+  test("向量维度相同但模型版本过期时报告 collection 配置漂移", async () => {
+    const library = await createLibrary(db, {
+      name: "Main Library",
+      rootPath: "/Volumes/Media",
+    });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/Volumes/Media/image.jpg",
+      relativePath: "image.jpg",
+      mediaType: "image",
+      sizeBytes: 1234,
+      mtimeMs: 1710000000000,
+    });
+    const asset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "image",
+      path: file.path,
+      contentHash: "image-hash",
+    });
+    await createVectorRef(db, {
+      assetId: asset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: "image_vectors",
+      pointId: randomUUID(),
+      modelName: "google/siglip-base-patch16-224",
+      modelVersion: "siglip-base-patch16-224",
+      vectorKind: "image_embedding",
+      vectorDim: 768,
+      distance: "Cosine",
+      contentHash: "image-hash",
+      indexProfile: "balanced",
+    });
+
+    await expect(
+      hasVectorRefConfigMismatch(db, {
+        collectionName: "image_vectors",
+        modelName: "google/siglip2-base-patch16-224",
+        modelVersion: "siglip2-base-patch16-224",
+        vectorKind: "image_embedding",
+        vectorDim: 768,
+        distance: "Cosine",
+      }),
+    ).resolves.toBe(true);
   });
 });
