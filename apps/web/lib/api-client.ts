@@ -53,7 +53,13 @@ export interface SearchRequest {
   offset: number
   query_expansion_mode?: QueryExpansionMode
   include_diagnostics?: boolean
+  search_scope?: SearchScope
+  ranking_mode?: RankingMode
 }
+
+export type SearchScope = 'visual' | 'spoken' | 'all'
+export type RankingMode = 'current' | 'rrf'
+export type RankingSignal = 'visual' | 'caption' | 'lexical'
 
 export interface SearchResultItem {
   asset_id: string
@@ -64,6 +70,7 @@ export interface SearchResultItem {
   start_time_seconds: number | null
   end_time_seconds: number | null
   scene_id?: string | null
+  best_frame_time_seconds?: number | null
   score: number
   score_kind?: string
   primary_reason?: string
@@ -85,6 +92,11 @@ export interface SearchResultItem {
       weighted_score: number
       winning: boolean
     }>
+  }
+  ranking_diagnostics?: {
+    source_ranks: Partial<Record<RankingSignal, number>>
+    rrf_contributions: Partial<Record<RankingSignal, number>>
+    primary_signal: RankingSignal
   }
 }
 

@@ -28,6 +28,10 @@ import {
 } from './search-hybrid.js'
 import { SearchQueryVectorService } from './search-query-vector.service.js'
 import { routeQueryVariantsForCollection } from './search-query-routing.js'
+import {
+  buildRrfSearchResults,
+  type RrfSourceCandidate,
+} from './search-rrf.js'
 
 const baseSearchCollections = [
   { collection: 'image_vectors', mediaTypes: ['image'] },
@@ -52,6 +56,11 @@ const videoSceneIdentityCollections = new Set<VectorCollectionName>([
   'caption_text_vectors',
 ])
 
+export const searchScopes = ['visual', 'spoken', 'all'] as const
+export type SearchScope = (typeof searchScopes)[number]
+export const rankingModes = ['current', 'rrf'] as const
+export type RankingMode = (typeof rankingModes)[number]
+
 // SearchService 负责把多个召回来源统一成一个响应：
 // Qdrant 做视觉向量召回，PostgreSQL FTS 做 transcript/OCR 文本召回，最终在内存里合并 rerank。
 const searchRequestSchema = z.object({
@@ -62,6 +71,8 @@ const searchRequestSchema = z.object({
   offset: z.number().int().min(0).optional().default(0),
   query_expansion_mode: z.enum(queryExpansionModes).optional().default('expand'),
   include_diagnostics: z.boolean().optional().default(false),
+  search_scope: z.enum(searchScopes).optional().default('visual'),
+  ranking_mode: z.enum(rankingModes).optional().default('rrf'),
 })
 
 export type SearchRequest = z.input<typeof searchRequestSchema>
@@ -109,11 +120,16 @@ export class SearchService {
     const searchStartedAt = performance.now()
     const request = this.parseRequest(input)
     const sourceLimit = options.sourceLimit ?? this.sourceLimit(request)
-    const availableCollections = [
-      baseSearchCollections[0],
-      baseSearchCollections[1],
-      ...(this.settings.captionSearchEnabled ? [captionSearchCollection] : []),
-    ]
+    // 搜索范围在任何模型调用之前生效。spoken 只查 PostgreSQL 全文检索，因此不会触发
+    // 查询扩展、同步 embedding 或 Qdrant；visual 则完全跳过 transcript SQL。
+    const availableCollections =
+      request.search_scope === 'spoken'
+        ? []
+        : [
+            baseSearchCollections[0],
+            baseSearchCollections[1],
+            ...(this.settings.captionSearchEnabled ? [captionSearchCollection] : []),
+          ]
     const vectorMediaTypes = request.media_types.length
       ? request.media_types
       : [...new Set(availableCollections.flatMap((entry) => entry.mediaTypes))]
@@ -178,21 +194,33 @@ export class SearchService {
     )
     const vectorDurationMs = performance.now() - vectorStartedAt
     const textStartedAt = performance.now()
-    const textGroup = await this.textSearchGroup(request, { limit: sourceLimit, offset: 0 })
+    const textGroup =
+      request.search_scope === 'visual'
+        ? undefined
+        : await this.textSearchGroup(request, { limit: sourceLimit, offset: 0 })
     const textDurationMs = performance.now() - textStartedAt
     const groups = [...vectorGroups, ...(textGroup ? [textGroup] : [])]
 
-    // groups 保留原始来源，便于调试召回；results 是前端/Agent 默认消费的统一排序列表。
-    const hybridStartedAt = performance.now()
-    const results = buildHybridResults(await this.toHybridCandidates(groups), {
-      limit: request.limit,
-      offset: request.offset,
-    })
-    const hybridDurationMs = performance.now() - hybridStartedAt
+    // groups 保留原始来源，便于调试召回；results 根据请求选择旧混合排序或正式 RRF。
+    // 两条路径都只消费 PostgreSQL 回表后的合法候选，最后才执行分页。
+    const rankingStartedAt = performance.now()
+    const results =
+      request.ranking_mode === 'rrf'
+        ? buildRrfSearchResults(this.toRrfCandidates(groups), {
+            limit: request.limit,
+            offset: request.offset,
+            includeDiagnostics: request.include_diagnostics,
+          })
+        : buildHybridResults(await this.toHybridCandidates(groups), {
+            limit: request.limit,
+            offset: request.offset,
+          })
+    const rankingDurationMs = performance.now() - rankingStartedAt
     this.logger.log(
-      `search_timing variants=${queryVariants.length} collections=${selectedCollections.length} ` +
+      `search_timing scope=${request.search_scope} ranking=${request.ranking_mode} ` +
+        `variants=${queryVariants.length} collections=${selectedCollections.length} ` +
         `expansion_ms=${Math.round(expansionDurationMs)} vector_ms=${Math.round(vectorDurationMs)} ` +
-        `fts_ms=${Math.round(textDurationMs)} hybrid_ms=${Math.round(hybridDurationMs)} ` +
+        `fts_ms=${Math.round(textDurationMs)} ranking_ms=${Math.round(rankingDurationMs)} ` +
         `total_ms=${Math.round(performance.now() - searchStartedAt)}`,
     )
     return {
@@ -549,6 +577,56 @@ export class SearchService {
         ]
       }),
     )
+  }
+
+  /**
+   * 将来源分组转换为 RRF 输入，但不在这里计算名次。
+   *
+   * Qdrant/FTS 原始分数只带入各自通道；`buildRrfSearchResults` 会在 PostgreSQL 过滤完成后
+   * 重新排序并生成连续名次。这样已软删除、stale 或模型版本不匹配的候选不会占用排名。
+   */
+  private toRrfCandidates(groups: SearchResultGroup[]): RrfSourceCandidate[] {
+    return groups.flatMap((group) => {
+      const sourceSignal = this.rrfSignalForGroup(group.collection)
+      return group.results.map((result) => ({
+        asset_id: result.asset_id,
+        file_id: result.file_id,
+        media_type: result.media_type,
+        path: result.path,
+        start_time_seconds: result.start_time_seconds,
+        end_time_seconds: result.end_time_seconds,
+        scene_id: result.scene_id,
+        best_frame_time_seconds: result.best_frame_time_seconds ?? null,
+        reason: this.hybridReason(result.reason) ?? this.reasonForRrfSignal(sourceSignal),
+        source_signal: sourceSignal,
+        source_key: group.collection,
+        source_score: result.score,
+      }))
+    })
+  }
+
+  private rrfSignalForGroup(collection: string) {
+    if (collection === 'image_vectors' || collection === 'video_frame_vectors') {
+      return 'visual' as const
+    }
+    if (collection === 'caption_text_vectors') {
+      return 'caption' as const
+    }
+    if (collection === 'text_search') {
+      return 'lexical' as const
+    }
+    // 新召回通道必须先明确它是独立信号还是现有信号的一部分；静默归类会改变 RRF 权重。
+    throw new Error(`unsupported RRF source group: ${collection}`)
+  }
+
+  private reasonForRrfSignal(signal: 'visual' | 'caption' | 'lexical'): HybridReason {
+    if (signal === 'visual') {
+      return 'vector_match'
+    }
+    if (signal === 'caption') {
+      return 'caption_match'
+    }
+    return 'transcript_match'
   }
 
   private hybridReason(reason: string): HybridReason | undefined {

@@ -2,7 +2,7 @@
 
 这是一个**本地优先**的多模态媒体检索与剪辑 Agent，用于管理个人图片、视频、音频和文本素材库。目标规模约 1 TB（以视频为主）。系统默认保留原始文件在用户自己的磁盘上，不上传、不复制源素材；应用只在本地工作目录保存 metadata、索引、缩略图、抽帧、转写、OCR 结果和导出剪辑。
 
-项目实现遵循 `docs/architecture.md` 的架构设计，并按最新视频检索重建计划分阶段推进。当前阶段：**重建 Phase 4 已完成**，视觉模型统一为 SigLIP2，Caption 使用独立多语言文本向量模型；下一步是 Phase 5 的搜索范围和 RRF 排序。
+项目实现遵循 `docs/architecture.md` 的架构设计，并按最新视频检索重建计划分阶段推进。当前已完成**重建 Phase 5**：搜索支持视觉、语音和全部范围，并默认使用 RRF 根据各召回通道名次生成稳定排序；下一步是 Phase 6 的核心 Web 搜索与评测运行层重建。
 
 默认配置下，**外部 LLM 是关闭的**；所有检索依赖本地模型（SigLIP2、faster-whisper，开启 Caption 索引时使用 Qwen2.5-VL），不调用 OpenAI、Anthropic 等外部服务。
 
@@ -372,7 +372,7 @@ Qdrant 自带 Web Dashboard，可直接在浏览器打开：
 http://127.0.0.1:6333/dashboard
 ```
 
-可在 Dashboard 查看 collection（`image_vectors`、`video_segment_vectors`、`video_frame_vectors`、`caption_text_vectors` 等）、points 数量和 payload。事实数据仍需回 PostgreSQL 查看。
+可在 Dashboard 查看 collection（`image_vectors`、`video_frame_vectors`、`caption_text_vectors`）、points 数量和 payload。事实数据仍需回 PostgreSQL 查看。
 
 ## 本地检索链路
 

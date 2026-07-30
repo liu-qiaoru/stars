@@ -167,9 +167,11 @@ describe("agent API", () => {
       expect(output.results[0]).toMatchObject({
         file_id: file.id,
         asset_id: asset.id,
-        score_kind: "hybrid_score",
+        score_kind: "rrf_score",
         primary_reason: "vector_match",
       });
+      // Agent 默认沿用 Phase 5 的 visual + RRF；单通道第 1 名贡献为 1/(60+1)。
+      expect(output.results[0]?.score).toBeCloseTo(1 / 61, 8);
       expect(output.results[0]).not.toHaveProperty("path");
       return {
         summary: "找到候选视频片段",
@@ -200,7 +202,6 @@ describe("agent API", () => {
           asset_id: asset.id,
           start_time_seconds: 30,
           end_time_seconds: 60,
-          score: 0.82,
         }),
       ],
     });

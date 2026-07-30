@@ -10,9 +10,9 @@
 
 ## 当前进度
 
-- 当前阶段：视频检索重建 Phase 4 已完成（Caption 文本向量一致性、SigLIP2 图片/视频帧/查询向量统一）。
-- 最近更新：2026-07-30，完成 SigLIP2 CPU/MPS 真实模型验证，并补齐同维度模型升级和 Qdrant 丢失后的重建保护。
-- 下一步：等待确认后进入视频检索重建 Phase 5，增加 `search_scope`、`ranking_mode` 和正式 RRF 排序。
+- 当前阶段：视频检索重建 Phase 5 已完成（搜索范围、正式 RRF 排序和场景候选完整性保护）。
+- 最近更新：2026-07-30，完成 `visual|spoken|all` 路由、`current|rrf` 排序选择和生产 RRF 接线。
+- 下一步：等待确认后进入视频检索重建 Phase 6，完善核心 Web 搜索与任务反馈，并重建评测运行层。
 
 ## 视频检索重建 Phase 4：Caption 文本向量与 SigLIP2 模型一致性
 
@@ -36,6 +36,39 @@ Review：
   Server 109 项测试全部成功；`PYTHONPATH=apps/worker-py .venv/bin/python -m unittest discover
   apps/worker-py/tests` 通过 73 项 Python 测试；`git diff --check` 通过。测试使用 fake
   PostgreSQL/Qdrant/VLM 覆盖失败恢复，真实模型数字单独记录在 Phase 4 验证报告中。
+
+## 视频检索重建 Phase 5：搜索范围与 RRF
+
+- Start：2026-07-30。目标是在正式视频场景候选上增加 `search_scope` 请求路由和
+  `ranking_mode` 排序选择，并让生产搜索复用公共 RRF（Reciprocal Rank Fusion，
+  倒数排名融合）实现。
+- 验证计划：先增加失败测试，覆盖默认值、视觉/语音/全部范围、当前排序兼容、RRF
+  多通道融合、场景去重、过滤后连续名次、稳定并列、Top-K 和分页；实现后运行
+  Server/Web/Shared 全量检查、Python Worker 回归测试及 `git diff --check`。
+
+- [x] Search API 增加 `search_scope=visual|spoken|all`，默认 `visual`。
+- [x] Search API 增加 `ranking_mode=current|rrf`，默认 `rrf`。
+- [x] `visual` 只调用 SigLIP2 视觉与可用的 Caption 通道，`spoken` 只查询转录全文，
+  `all` 才同时执行三类召回。
+- [x] 生产搜索复用公共 `rankByRrf`，按过滤后的连续来源名次计算 `1/(60+rank)`。
+- [x] 图片使用 Asset ID、正式视频候选使用场景 UUID 作为稳定语义身份；同场景视觉与
+  Caption 合并，不能依赖数据库偶然顺序。
+- [x] RRF 结果保留来源原始分数，并在显式诊断模式返回各通道名次、贡献、最佳帧和时间。
+- [x] 同步 Web API 类型、API 契约、README 和任务记录，不提前实现 Phase 6 搜索控件。
+- [x] 运行完整验证与双轴代码审查，并记录 Review。
+
+Review：
+
+- Result：Phase 5 已完成。Search API 默认使用 `search_scope=visual` 和
+  `ranking_mode=rrf`；`spoken` 完全跳过查询扩展、模型服务和 Qdrant，`all` 在 Caption
+  开启时同时执行 visual、caption、lexical 三类召回。生产搜索复用公共 `rankByRrf`，
+  视频视觉与 Caption 按正式场景 UUID 合并，图片和无场景 transcript 使用 Asset ID。
+- Notes：RRF 在 PostgreSQL 过滤后重新生成连续通道名次，按 `1/(60+rank)` 计算贡献，
+  最后执行稳定并列和分页；显式诊断返回通道名次、贡献和最佳帧时间。回表额外校验
+  `Asset → File → Library`、场景文件归属和同场景边界一致性，拒绝跨文件/跨素材库脏引用。
+  `corepack pnpm check` 通过：Shared Schema 6 项、Web 39 项及生产构建、Server 122 项测试；
+  Python Worker 73 项测试通过；`git diff --cached --check` 通过。规格与工程规范双轴复核
+  最终均无阻断问题。本阶段无数据库迁移、无模型重装或媒体重索引要求。
 
 ## 代码可读性：关键路径注释补强
 

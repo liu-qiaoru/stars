@@ -296,7 +296,9 @@ Request：
   "limit": 20,
   "offset": 0,
   "query_expansion_mode": "translate",
-  "include_diagnostics": false
+  "include_diagnostics": false,
+  "search_scope": "all",
+  "ranking_mode": "rrf"
 }
 ```
 
@@ -319,21 +321,19 @@ Response：
       "start_time_seconds": 120.0,
       "end_time_seconds": 150.0,
       "scene_id": "scene-0007",
-      "score": 0.91,
-      "score_kind": "hybrid_score",
-      "primary_reason": "transcript_match",
-      "confidence": "high",
-      "reasons": ["vector_match", "transcript_match"],
+      "score": 0.0327868852,
+      "score_kind": "rrf_score",
+      "primary_reason": "vector_match",
+      "reasons": ["vector_match", "caption_match"],
       "source_scores": {
-        "video_segment_vectors": 0.82,
         "video_frame_vectors": 0.76,
-        "text_search": 0.16
+        "caption_text_vectors": 0.84
       }
     }
   ],
   "groups": [
     {
-      "collection": "video_segment_vectors",
+      "collection": "video_frame_vectors",
       "score_kind": "cosine_similarity",
       "results": [
         {
@@ -344,8 +344,25 @@ Response：
           "start_time_seconds": 120.0,
           "end_time_seconds": 150.0,
           "scene_id": "scene-0007",
-          "score": 0.82,
+          "score": 0.76,
           "reason": "vector_match"
+        }
+      ]
+    },
+    {
+      "collection": "caption_text_vectors",
+      "score_kind": "cosine_similarity",
+      "results": [
+        {
+          "asset_id": "asset-uuid",
+          "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
+          "media_type": "video",
+          "path": "/Volumes/Media/video.mp4",
+          "start_time_seconds": 120.0,
+          "end_time_seconds": 150.0,
+          "scene_id": "scene-0007",
+          "score": 0.84,
+          "reason": "caption_match"
         }
       ]
     },
@@ -363,17 +380,6 @@ Response：
           "scene_id": null,
           "score": 0.16,
           "reason": "transcript_match"
-        },
-        {
-          "asset_id": "ocr-asset-uuid",
-          "file_id": "image-file-uuid",
-          "media_type": "image",
-          "path": "/Volumes/Media/poster.png",
-          "start_time_seconds": null,
-          "end_time_seconds": null,
-          "scene_id": null,
-          "score": 0.21,
-          "reason": "ocr_match"
         }
       ]
     }
@@ -381,17 +387,19 @@ Response：
 }
 ```
 
-`POST /search` 返回 `{ limit, offset, results, groups }`。`results` 是统一 hybrid retrieval + reranking 后的主结果列表，使用 `score_kind='hybrid_score'`；`groups` 保留为原始来源分组，用于兼容旧响应形状和调试召回质量。
+`POST /search` 返回 `{ limit, offset, results, groups }`。`results` 是统一排序后的主结果列表；默认 `ranking_mode='rrf'` 时使用 `score_kind='rrf_score'`，显式选择 `current` 时保留旧 `score_kind='hybrid_score'`。`groups` 保留 PostgreSQL 过滤后的原始来源分组，用于兼容旧响应形状和调试召回质量。
 
-向量 group 来自 Qdrant。`video_frame_vectors` 在 top-level `results` 中按 `(file_id, scene_id)` 做 MaxSim，最大 cosine 的帧作为代表证据，时间边界来自 PostgreSQL `video_segment`；原始 `groups` 继续保留逐帧结果。`video_segment_vectors` 仅由 `VIDEO_SEGMENT_SEARCH_ENABLED=true` 的迁移兼容期开启，新索引不再创建该 ref。`text_search` group 来自 `media_assets.text_tsv`：`text_chunk` 为 transcript 命中，`image`/`video_frame` 为 OCR 命中。
+向量 group 来自 Qdrant。`video_frame_vectors` 直接使用 Qdrant grouped search，按正式 `scene_id` 执行 MaxSim（同一场景只保留相似度最高的代表帧），时间边界从 PostgreSQL `video_scenes` 回表获取。`text_search` group 来自 `media_assets.text_tsv`，当前只返回 `text_chunk` transcript 命中。
 
-- top-level result 使用 `primary_reason`、`confidence`、`reasons`、`source_scores` 和 `merged_asset_ids` 表达命中解释。`confidence='low'` 表示当前只找到弱视觉向量候选，前端应提示“相关性较弱”；带 transcript/OCR 的文本命中或较强视觉向量命中返回 `confidence='high'`。跨 asset 合并时，`asset_id` 是代表命中的 asset，`merged_asset_ids` 总是包含代表 asset，长度至少为 1。
-- `query_expansion_mode` 支持 `original | translate | expand`，默认 `expand`。`original` 只使用原查询并完全跳过外部扩展 Provider；`translate` 保留原查询并最多增加一个忠实英文翻译，生成后再独立调用 DeepSeek 校验人物、物体、动作、关系和约束是否等价；缺少译文、校验不通过或校验响应非法都会明确失败，不会静默降级；`expand` 使用完整查询扩展。`translate` 必须配置 `QUERY_EXPANSION_PROVIDER=deepseek`，Provider 为 `none` 时请求会明确失败，避免静默跳过整个 SigLIP 视觉通道；`expand` 在 Provider 为 `none` 时仍只使用原查询。`QUERY_EXPANSION_MAX_VARIANTS` 默认是 3，包含原始 query；Prompt 和 Server 标准化都强制该上限。同一 Point 多次命中时保留加权后的最高分。仅在 `translate` 模式下按模型分流查询语言：SigLIP 图片、视频帧和兼容期视频片段 collection 只执行经过语义等价校验的英文译文，并使用权重 `1.0`；`caption_text_vectors` 只执行中文原查询；其他文本 collection 保持基础版本。`original` 和 `expand` 模式不应用这条分流规则，便于进行可比的消融实验。系统不会把本地媒体路径或搜索结果发送给 DeepSeek。
-- `include_diagnostics` 默认 `false`。显式设为 `true` 时，响应增加顶层 `query_diagnostics`，并在每个向量 group result 增加 `diagnostics`：`source_rank` 是该来源过滤无效 PostgreSQL 记录后的名次；`query_variant_hits` 保留每个实际查询版本的 `raw_score`、`weight`、`weighted_score` 和唯一 `winning` 标记；Caption 结果还返回 `caption.text` 与 `caption.prompt_version`。Caption 原文属于本地媒体派生内容，只能出现在显式诊断响应中，不得写入普通搜索日志或默认响应。
-- 转写命中使用 `transcript_match`，OCR 使用 `ocr_match`，向量使用 `vector_match`。`document_match` 预留给 document pipeline，Phase 14 不主动产生。
-- `source_scores` key 使用固定 source key：当前为 `image_vectors`、`video_segment_vectors`、`video_frame_vectors`、`text_search`；后续新增向量来源时使用 Qdrant collection 名。同 source 多次命中时保留最大分数；启用 query expansion 时，向量来源分数会先乘以 query variant 权重。`source_scores` 不能跨 source 直接比较。
-- 视频向量与视频 Caption 在 Qdrant 命中后必须回 PostgreSQL 核对稳定 `scene_id`；缺少场景身份的旧数据不会进入 `groups` 或最终 `results`，Server 会按 collection 记录拒绝数量，但不会记录路径、Caption 或查询内容。有效视频候选按 `(file_id, scene_id)` 合并 Caption、视觉帧等同场景证据，不同 `scene_id` 即使时间首尾相接也保持独立。缺少 `scene_id` 的转录等非场景窗口只有在时间范围存在正数时长的真实重叠时才允许融合，首尾相接或零时长时间点不会被当成窗口重叠，避免链式合并成跨场景长片段。结束时间早于开始时间会在过滤或合并前明确失败。同一 `scene_id` 若携带两组不一致的正时长场景边界，搜索也会暴露数据完整性错误，不会用 `min/max` 静默扩大播放范围；合法的帧时间点仍可作为同场景证据合并，并由正时长场景窗口提供播放边界。Hybrid 分数使用加权融合值与最强单通道归一化分数的较大值，因此新增弱视觉或文本证据不会降低原本更强的单通道结果；多个强信号仍可获得多通道奖励。
-- 纯向量弱相关候选不会被静默丢弃；系统会保留候选并标记 `confidence='low'`，避免搜索结果变成空数组又不给用户任何线索。带 transcript/OCR 的文本命中不受该向量置信度阈值影响。
+- `search_scope` 支持 `visual | spoken | all`，默认 `visual`。`visual` 只调用 SigLIP2 视觉和已启用的 Caption 通道；`spoken` 只查询 PostgreSQL transcript，不调用查询扩展、模型服务或 Qdrant；`all` 才执行三类召回。
+- `ranking_mode` 支持 `current | rrf`，默认 `rrf`。`current` 保留历史加权混合排序用于对照；`rrf`（Reciprocal Rank Fusion，倒数排名融合）只利用各通道过滤后的连续名次，每个贡献为 `1/(60+source_rank)`。RRF 分数只表示顺序，不是相关概率。
+- top-level result 使用 `primary_reason`、`reasons`、`source_scores` 和 `merged_asset_ids` 表达命中解释。`current` 模式还会返回启发式 `confidence`；RRF 不从名次分数推导置信概率。跨 Asset 合并时，`asset_id` 是代表命中，`merged_asset_ids` 总是包含代表 Asset，长度至少为 1。
+- `query_expansion_mode` 支持 `original | translate | expand`，默认 `expand`。`original` 只使用原查询并完全跳过外部扩展 Provider；`translate` 保留原查询并最多增加一个忠实英文翻译，生成后再独立调用 DeepSeek 校验人物、物体、动作、关系和约束是否等价；缺少译文、校验不通过或校验响应非法都会明确失败，不会静默降级；`expand` 使用完整查询扩展。`translate` 必须配置 `QUERY_EXPANSION_PROVIDER=deepseek`，Provider 为 `none` 时请求会明确失败，避免静默跳过整个 SigLIP2 视觉通道；`expand` 在 Provider 为 `none` 时仍只使用原查询。`QUERY_EXPANSION_MAX_VARIANTS` 默认是 3，包含原始 query；Prompt 和 Server 标准化都强制该上限。同一 Point 多次命中时保留加权后的最高分。仅在 `translate` 模式下按模型分流查询语言：SigLIP2 图片和视频帧通道只执行经过语义等价校验的英文译文，并使用权重 `1.0`；`caption_text_vectors` 只执行中文原查询。`original` 和 `expand` 模式不应用这条分流规则，便于进行可比的消融实验。系统不会把本地媒体路径或搜索结果发送给 DeepSeek。
+- `include_diagnostics` 默认 `false`。显式设为 `true` 时，响应增加顶层 `query_diagnostics`，并在每个向量 group result 增加逐 Point `diagnostics`。RRF top-level result 另增 `ranking_diagnostics`，包含 `source_ranks`、`rrf_contributions` 和 `primary_signal`；最佳视觉帧时间继续由 `best_frame_time_seconds` 返回。Caption 原文属于本地媒体派生内容，只能出现在显式诊断响应中，不得写入普通搜索日志或默认响应。
+- 转写命中使用 `transcript_match`，Caption 使用 `caption_match`，视觉向量使用 `vector_match`。
+- `source_scores` key 使用固定 source key：当前为 `image_vectors`、`video_frame_vectors`、`caption_text_vectors`、`text_search`。同 source 多次命中时保留最大分数；启用查询扩展时，向量来源分数会先乘查询版本权重。原始分数只能在各自 source 内解释，不能跨 source 直接比较。
+- 视频向量与视频 Caption 在 Qdrant 命中后必须回 PostgreSQL 核对正式 `scene_id`；缺少场景身份的旧数据不会进入 `groups` 或最终 `results`。RRF 使用图片 Asset ID 或视频场景 UUID 作为语义身份，同场景 Caption 与视觉帧合并，不同场景保持独立；没有场景身份的 transcript 以自己的 Asset ID 作为候选。
+- `current` 模式继续保留弱视觉候选并可标记 `confidence='low'`。RRF 不使用原始向量阈值决定最终名次，也不会把 RRF score 当置信概率。
 - `offset` 和 `limit` 作用于合并/rerank 后的 top-level `results`，不是单个来源 group。实现会先从各来源 overfetch，再合并、去重、rerank，最后分页。深分页下如果 overfetch 上限被截断且合并折叠较多，返回数量可能少于 `limit`，甚至为空。
 - image 和 future document 结果的 `start_time_seconds` / `end_time_seconds` 为 `null`；video/audio 片段返回秒级时间范围。
 - `library_ids`、`media_types` 和软删除过滤属于 metadata filters，但普通语义搜索结果不把 `metadata_filter` 当作默认 reason；只有未来 metadata-only 搜索才使用 `metadata_filter`。

@@ -21,7 +21,7 @@ docs            架构、API 和实施文档
 
 ## 检索评测域
 
-评测域是独立于普通搜索的本地维护工具。它把冻结查询、同一次多来源召回快照、盲标判断、当前 hybrid 排名、实验 RRF 排名及指标持久化到 PostgreSQL。普通搜索仍使用现有排序；RRF 在通过质量门槛前不会成为生产默认值。
+评测域是独立于普通搜索的本地维护工具。它把冻结查询、同一次多来源召回快照、盲标判断、当前 hybrid 排名、正式 RRF 排名及指标持久化到 PostgreSQL。Phase 5 起普通搜索默认使用 RRF；`ranking_mode=current` 仍保留旧 hybrid 排序用于对照。
 
 评测候选以图片文件或视频场景为语义实体。visual、caption、lexical 是三个独立信号；视频帧在分配来源排名前按场景 MaxSim 折叠。运行所需来源失败时整次运行失败，禁止生成部分指标。
 
@@ -154,7 +154,7 @@ Indexer 从文件创建 media assets：
 
 Retrieval 组合 Qdrant 向量搜索、PostgreSQL full-text search 和 PostgreSQL metadata 过滤。Qdrant 只返回召回结果和轻量 payload，最终响应必须回 PostgreSQL 补齐事实数据。
 
-`POST /search` 先 overfetch 各来源候选。视频视觉帧按 `(file_id, scene_id)` 做 MaxSim，scene 分数取命中帧最大 cosine，边界从 PostgreSQL `video_segment` 补齐；再与 caption、OCR、字幕候选做 hybrid 合并排序，输出 top-level `results`（`score_kind='hybrid_score'`）。原始 `groups` 仍保留逐帧/逐来源结果用于调试。长镜头先按 `SCENE_MAX_SECONDS`（默认 30 秒）拆窗，避免一个固定机位长视频只生成少量场景证据。
+`POST /search` 先依据 `search_scope=visual|spoken|all` 选择召回来源，再 overfetch 合法候选。视频视觉帧由 Qdrant 按正式 `scene_id` 做 MaxSim，场景分数取命中帧最大 cosine，边界从 PostgreSQL `video_scenes` 补齐。默认 `ranking_mode=rrf` 按 visual、caption、lexical 三个通道过滤后的名次融合，输出 `score_kind='rrf_score'`；`current` 保留旧 hybrid 排序用于对照。原始 `groups` 仍保留逐来源结果用于调试。
 
 ### Agent Runtime
 
@@ -290,7 +290,7 @@ NestJS 用作本地 API server。此前 Phase 2 已用 Fastify 建立基础服�
 
 ### PostgreSQL 和 Qdrant
 
-PostgreSQL 用于 metadata、jobs、事实数据和关系查询。Qdrant 用于向量，因为当前素材库已接近 1 TB，最终向量规模不确定。Qdrant collection 按模态和用途拆分，例如 `image_vectors`、`video_frame_vectors`、`video_segment_vectors`、`audio_segment_vectors` 和 `text_chunk_vectors`。
+PostgreSQL 用于 metadata、jobs、事实数据和关系查询。Qdrant 用于向量，因为当前素材库已接近 1 TB，最终向量规模不确定。当前在线 Qdrant collection 按用途拆分为 `image_vectors`、`video_frame_vectors` 和 `caption_text_vectors`；转录文本仍由 PostgreSQL 全文检索承载。
 
 ### FFmpeg 和 PySceneDetect
 

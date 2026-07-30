@@ -57,6 +57,8 @@ describe('typed API client', () => {
       offset: 24,
       query_expansion_mode: 'translate',
       include_diagnostics: true,
+      search_scope: 'all',
+      ranking_mode: 'rrf',
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -71,6 +73,8 @@ describe('typed API client', () => {
           offset: 24,
           query_expansion_mode: 'translate',
           include_diagnostics: true,
+          search_scope: 'all',
+          ranking_mode: 'rrf',
         }),
       }),
     )

@@ -431,11 +431,24 @@ export async function listSearchResultMetadata(
     eq(vectorRefs.collectionName, collectionName),
     inArray(vectorRefs.pointId, pointIds),
     eq(vectorRefs.status, 'indexed'),
+    // vector_refs 为查询加速冗余保存 file_id/library_id，但事实所有权仍是
+    // media_asset.file_id → media_file.library_id。三个独立外键不足以保证它们互相匹配，
+    // 因此回表必须显式锁定整条链，避免脏 ref 拼出错误 asset、路径或素材库。
+    eq(mediaAssets.fileId, vectorRefs.fileId),
+    eq(mediaFiles.libraryId, vectorRefs.libraryId),
     isNull(mediaFiles.deletedAt),
     isNull(libraries.deletedAt),
     sql`COALESCE(${mediaAssets.metadataJson}->>'stale', 'false') <> 'true'`,
     // 视频候选必须引用真实场景行（scene_id 非空）。图片资产 scene_id 为空，不受影响。
     sql`NOT (${mediaFiles.mediaType} = 'video' AND ${mediaAssets.sceneId} IS NULL)`,
+    // scene_id 外键只能证明场景存在，不能单独证明该场景属于同一个 media_file。
+    // 历史脚本或人工 SQL 若写入跨文件引用，必须在回表时拒绝，避免把 A 文件路径与
+    // B 文件播放边界拼成一条看似合法的搜索结果。
+    sql`NOT (
+      ${mediaFiles.mediaType} = 'video'
+      AND ${mediaAssets.sceneId} IS NOT NULL
+      AND ${videoScenes.fileId} IS DISTINCT FROM ${mediaFiles.id}
+    )`,
     // 视频候选的场景必须属于文件当前 index_generation；LEFT JOIN 找不到场景行（已删除）
     // 或 generation 不一致都视为上一轮重索引残留，必须拒绝。
     sql`NOT (

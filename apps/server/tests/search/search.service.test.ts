@@ -211,7 +211,14 @@ describe('search service', () => {
     searchPointGroups.mockResolvedValue({ groups: [] })
 
     await expect(
-      service.search({ query: 'nothing', media_types: ['image'], limit: 10, offset: 0 }),
+      service.search({
+        query: 'nothing',
+        media_types: ['image'],
+        search_scope: 'all',
+        ranking_mode: 'current',
+        limit: 10,
+        offset: 0,
+      }),
     ).resolves.toEqual({
       limit: 10,
       offset: 0,
@@ -223,6 +230,88 @@ describe('search service', () => {
     })
   })
 
+  test('默认使用 visual 范围和 RRF，不执行 transcript 全文检索', async () => {
+    search.mockResolvedValue([])
+    searchPointGroups.mockResolvedValue({ groups: [] })
+
+    const result = await service.search({
+      query: 'mountain sunset',
+      media_types: ['image'],
+      limit: 10,
+      offset: 0,
+    })
+
+    expect(result).toEqual({
+      limit: 10,
+      offset: 0,
+      results: [],
+      groups: [
+        { collection: 'image_vectors', score_kind: 'cosine_similarity', results: [] },
+      ],
+    })
+    expect(embedText).toHaveBeenCalled()
+  })
+
+  test('spoken 范围只执行 transcript 全文检索，不调用模型服务或 Qdrant', async () => {
+    const result = await service.search({
+      query: 'project deadline',
+      media_types: ['audio', 'video'],
+      search_scope: 'spoken',
+      ranking_mode: 'rrf',
+      limit: 10,
+    })
+
+    expect(result.groups).toEqual([
+      { collection: 'text_search', score_kind: 'ts_rank_cd', results: [] },
+    ])
+    expect(search).not.toHaveBeenCalled()
+    expect(searchPointGroups).not.toHaveBeenCalled()
+    expect(embedText).not.toHaveBeenCalled()
+  })
+
+  test('all + current 同时保留视觉和转录召回并使用旧混合排序', async () => {
+    search.mockResolvedValue([])
+    searchPointGroups.mockResolvedValue({ groups: [] })
+
+    const result = await service.search({
+      query: 'project presentation',
+      media_types: ['image', 'audio'],
+      search_scope: 'all',
+      ranking_mode: 'current',
+      limit: 10,
+    })
+
+    expect(result.groups.map((group) => group.collection)).toEqual([
+      'image_vectors',
+      'text_search',
+    ])
+    expect(embedText).toHaveBeenCalled()
+  })
+
+  test('all + RRF 在 Caption 开启时同时执行 visual、Caption 和 transcript 三类召回', async () => {
+    currentSettings = { ...testSettings, captionSearchEnabled: true }
+    await closeModule()
+    await buildModule(currentSettings)
+    search.mockResolvedValue([])
+
+    const result = await service.search({
+      query: 'project presentation',
+      media_types: ['image', 'audio'],
+      search_scope: 'all',
+      ranking_mode: 'rrf',
+      limit: 10,
+    })
+
+    expect(result.groups.map((group) => group.collection)).toEqual([
+      'image_vectors',
+      'caption_text_vectors',
+      'text_search',
+    ])
+    expect(search).toHaveBeenCalledWith('image_vectors', expect.any(Object))
+    expect(search).toHaveBeenCalledWith('caption_text_vectors', expect.any(Object))
+    expect(embedText).toHaveBeenCalledTimes(2)
+  })
+
   test('校验失败时抛出 BadRequestException', async () => {
     await expect(service.search({ query: '', limit: 10 })).rejects.toThrow(BadRequestException)
     await expect(service.search({ query: 'test', limit: 0 })).rejects.toThrow(BadRequestException)
@@ -230,6 +319,12 @@ describe('search service', () => {
     await expect(service.search({ query: 'test', library_ids: ['not-a-uuid'] })).rejects.toThrow(
       BadRequestException,
     )
+    await expect(
+      service.search({ query: 'test', search_scope: 'unknown' as never }),
+    ).rejects.toThrow(BadRequestException)
+    await expect(
+      service.search({ query: 'test', ranking_mode: 'unknown' as never }),
+    ).rejects.toThrow(BadRequestException)
   })
 
   test('不支持向量或文本检索的 media_types 返回空 groups', async () => {
@@ -278,6 +373,113 @@ describe('search service', () => {
     const result = await service.search({ query: 'beach', media_types: ['video'], limit: 10 })
 
     expect(result.results).toEqual([])
+  })
+
+  test('拒绝 scene_id 指向另一个视频文件的脏向量引用', async () => {
+    const library = await createLibrary(db, { name: 'Scene ownership', rootPath: '/ownership' })
+    const fileA = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/ownership/a.mp4',
+      relativePath: 'a.mp4',
+      mediaType: 'video',
+      sizeBytes: 100,
+      mtimeMs: 1710000000000,
+    })
+    const fileB = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/ownership/b.mp4',
+      relativePath: 'b.mp4',
+      mediaType: 'video',
+      sizeBytes: 100,
+      mtimeMs: 1710000000001,
+    })
+    const sceneFromFileB = await seedVideoScene(db, { fileId: fileB.id, start: '0', end: '30' })
+    // 数据库外键只能证明 scene 存在，不能自动证明 asset.file_id 与 scene.file_id 相同。
+    // 该 Fixture 模拟历史脚本或人工 SQL 写入的跨文件脏引用。
+    const dirtyFrame = await createMediaAsset(db, {
+      fileId: fileA.id,
+      assetType: 'video_frame',
+      sceneId: sceneFromFileB.id,
+      frameTimeSeconds: '10',
+    })
+    const pointId = 'abababab-abab-4bab-8bab-abababababab'
+    await createVectorRef(db, {
+      assetId: dirtyFrame.id,
+      fileId: fileA.id,
+      libraryId: library.id,
+      collectionName: 'video_frame_vectors',
+      pointId,
+      modelName: 'google/siglip2-base-patch16-224',
+      modelVersion: 'siglip2-base-patch16-224',
+      vectorKind: 'frame_embedding',
+      vectorDim: 768,
+      distance: 'Cosine',
+      contentHash: 'dirty-frame',
+      indexProfile: 'balanced',
+      status: 'indexed',
+    })
+    searchPointGroups.mockResolvedValue({
+      groups: [{ id: sceneFromFileB.id, hits: [{ id: pointId, score: 0.9 }] }],
+    })
+
+    const result = await service.search({ query: 'stage', media_types: ['video'], limit: 10 })
+
+    expect(result.results).toEqual([])
+    expect(result.groups[0]?.results).toEqual([])
+  })
+
+  test('拒绝把一个 Asset 伪关联到另一个文件或素材库的脏 Vector Ref', async () => {
+    const libraryA = await createLibrary(db, { name: 'Library A', rootPath: '/library-a' })
+    const libraryB = await createLibrary(db, { name: 'Library B', rootPath: '/library-b' })
+    const fileA = await createMediaFile(db, {
+      libraryId: libraryA.id,
+      path: '/library-a/a.jpg',
+      relativePath: 'a.jpg',
+      mediaType: 'image',
+      sizeBytes: 10,
+      mtimeMs: 1710000000000,
+    })
+    const fileB = await createMediaFile(db, {
+      libraryId: libraryB.id,
+      path: '/library-b/b.jpg',
+      relativePath: 'b.jpg',
+      mediaType: 'image',
+      sizeBytes: 10,
+      mtimeMs: 1710000000001,
+    })
+    const assetFromA = await createMediaAsset(db, {
+      fileId: fileA.id,
+      assetType: 'image',
+    })
+    const dirtyPointId = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd'
+    // Vector Ref 的三个外键各自合法，但 asset 属于 A，ref 却谎称它属于 B。
+    // 若回表只按 ref.file_id/ref.library_id JOIN，会泄露错误素材库的路径和身份。
+    await createVectorRef(db, {
+      assetId: assetFromA.id,
+      fileId: fileB.id,
+      libraryId: libraryB.id,
+      collectionName: 'image_vectors',
+      pointId: dirtyPointId,
+      modelName: 'google/siglip2-base-patch16-224',
+      modelVersion: 'siglip2-base-patch16-224',
+      vectorKind: 'image_embedding',
+      vectorDim: 768,
+      distance: 'Cosine',
+      contentHash: 'dirty-ref',
+      indexProfile: 'balanced',
+      status: 'indexed',
+    })
+    search.mockResolvedValue([{ id: dirtyPointId, score: 0.95 }])
+
+    const result = await service.search({
+      query: 'private image',
+      media_types: ['image'],
+      library_ids: [libraryB.id],
+      limit: 10,
+    })
+
+    expect(result.results).toEqual([])
+    expect(result.groups[0]?.results).toEqual([])
   })
 
   test('grouped retrieval returns one candidate per scene using the best frame', async () => {
@@ -353,6 +555,25 @@ describe('search service', () => {
     expect(search).not.toHaveBeenCalledWith('caption_text_vectors', expect.any(Object))
   })
 
+  test('已启用的必需召回通道失败时整次搜索失败，不返回部分 RRF', async () => {
+    currentSettings = { ...testSettings, captionSearchEnabled: true }
+    await closeModule()
+    await buildModule(currentSettings)
+    search.mockImplementation(async (collectionName: string) => {
+      if (collectionName === 'caption_text_vectors') {
+        throw new Error('caption collection unavailable')
+      }
+      return []
+    })
+    searchPointGroups.mockResolvedValue({ groups: [] })
+
+    // Caption 开关开启后，它是 visual 范围中的正式独立通道。若该通道不可用，
+    // 返回只有视觉帧的部分 RRF 会让分数和完整运行不可比较，因此必须显式失败。
+    await expect(
+      service.search({ query: 'kitchen cooking', media_types: ['image'], limit: 10 }),
+    ).rejects.toThrow('caption collection unavailable')
+  })
+
   test('caption vector hits are returned as caption_match when enabled', async () => {
     currentSettings = { ...testSettings, captionSearchEnabled: true }
     await closeModule()
@@ -368,6 +589,29 @@ describe('search service', () => {
       mtimeMs: 1710000000000,
     })
     const scene = await seedVideoScene(db, { fileId: file.id, start: '10', end: '20' })
+    const frameAsset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: 'video_frame',
+      sceneId: scene.id,
+      frameTimeSeconds: '14',
+      contentHash: 'frame-hash',
+    })
+    const framePointId = '14141414-1414-4414-8414-141414141414'
+    await createVectorRef(db, {
+      assetId: frameAsset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: 'video_frame_vectors',
+      pointId: framePointId,
+      modelName: 'google/siglip2-base-patch16-224',
+      modelVersion: 'siglip2-base-patch16-224',
+      vectorKind: 'frame_embedding',
+      vectorDim: 768,
+      distance: 'Cosine',
+      contentHash: 'frame-hash',
+      indexProfile: 'balanced',
+      status: 'indexed',
+    })
     // 旧 caption-v1 视频 Caption 缺 scene_id（被拒绝）；新 scene-caption-v2 引用正式 scene_id。
     const legacyCaptionAsset = await createMediaAsset(db, {
       fileId: file.id,
@@ -420,7 +664,9 @@ describe('search service', () => {
       }
       return []
     })
-    searchPointGroups.mockResolvedValue({ groups: [] })
+    searchPointGroups.mockResolvedValue({
+      groups: [{ id: scene.id, hits: [{ id: framePointId, score: 0.72 }] }],
+    })
 
     const result = await service.search({
       query: 'kitchen cooking',
@@ -429,12 +675,20 @@ describe('search service', () => {
     })
 
     expect(search).toHaveBeenCalledWith('caption_text_vectors', expect.any(Object))
-    // 旧 caption-v1（无 scene_id）被回表拒绝；只保留引用正式 scene_id 的 scene-caption-v2。
-    expect(result.results.map((item) => item.asset_id)).toEqual([captionAsset.id])
+    // 旧 caption-v1（无 scene_id）被回表拒绝；有效 Caption 通过正式 scene_id 与
+    // SigLIP2 代表帧合并为同一 RRF 候选，避免一个场景重复占两条结果。
+    expect(result.results.map((item) => item.asset_id)).toEqual([frameAsset.id])
     expect(result.results[0]).toMatchObject({
-      asset_id: captionAsset.id,
-      primary_reason: 'caption_match',
+      asset_id: frameAsset.id,
+      merged_asset_ids: [frameAsset.id, captionAsset.id],
+      primary_reason: 'vector_match',
       scene_id: scene.id,
+      best_frame_time_seconds: 14,
+      score_kind: 'rrf_score',
+      source_scores: {
+        video_frame_vectors: 0.72,
+        caption_text_vectors: 0.86,
+      },
     })
   })
 
@@ -464,6 +718,7 @@ describe('search service', () => {
       query: 'bicycle',
       media_types: ['audio'],
       library_ids: [library.id],
+      search_scope: 'spoken',
       limit: 10,
     })
 

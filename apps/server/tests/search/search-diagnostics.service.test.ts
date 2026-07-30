@@ -124,6 +124,7 @@ describe('search diagnostics', () => {
     const regular = await service.search({ query: '一个人靠着石头', media_types: ['image'] })
     expect(regular).not.toHaveProperty('query_diagnostics')
     expect(regular.groups.flatMap((group) => group.results)[0]).not.toHaveProperty('diagnostics')
+    expect(regular.results[0]).not.toHaveProperty('ranking_diagnostics')
 
     const diagnostic = await service.search({
       query: '一个人靠着石头',
@@ -152,6 +153,14 @@ describe('search diagnostics', () => {
             winning: true,
           },
         ],
+      },
+    })
+    expect(diagnostic.results[0]).toMatchObject({
+      score_kind: 'rrf_score',
+      ranking_diagnostics: {
+        source_ranks: { caption: 1 },
+        rrf_contributions: { caption: 1 / 61 },
+        primary_signal: 'caption',
       },
     })
   })

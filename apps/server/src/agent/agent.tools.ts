@@ -3,7 +3,11 @@ import { mediaTypes } from '@local-media-agent/shared/constants'
 import { tool, zodSchema } from 'ai'
 import { z } from 'zod'
 import type { MediaService } from '../media/media.service.js'
-import type { SearchService } from '../search/search.service.js'
+import {
+  rankingModes,
+  searchScopes,
+  type SearchService,
+} from '../search/search.service.js'
 import type { AgentToolDefinition } from './agent.types.js'
 
 const searchMediaInputSchema = z.object({
@@ -12,6 +16,22 @@ const searchMediaInputSchema = z.object({
   library_ids: z.array(z.string().uuid()).optional().default([]),
   limit: z.number().int().min(1).max(20).optional().default(10),
   offset: z.number().int().min(0).optional().default(0),
+  // Agent 与直接 Search API 共用相同默认值；显式字段让模型能够区分“找画面”和“找说过的话”，
+  // 同时保留 current 模式用于与旧混合排序做可控对照。
+  search_scope: z
+    .enum(searchScopes)
+    .optional()
+    .default('visual')
+    .describe(
+      'Search range: visual finds visible content and captions; spoken finds transcript text only; all combines both.',
+    ),
+  ranking_mode: z
+    .enum(rankingModes)
+    .optional()
+    .default('rrf')
+    .describe(
+      'Ranking algorithm: rrf is the production default; current keeps the legacy weighted ranking for comparison.',
+    ),
 })
 
 const getMediaDetailInputSchema = z.object({
