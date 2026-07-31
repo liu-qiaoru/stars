@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Test } from "@nestjs/testing";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { SETTINGS } from "../../src/config/settings.js";
@@ -6,6 +7,7 @@ import { createLibrary, createMediaAsset, createMediaFile } from "../../src/data
 import { MediaController } from "../../src/media/media.controller.js";
 import { MediaModule } from "../../src/media/media.module.js";
 import { MediaService } from "../../src/media/media.service.js";
+import { videoScenes } from "../../src/database/schema.js";
 import { createTestDatabase } from "../database/test-db.js";
 
 let closeDb: () => Promise<void>;
@@ -47,7 +49,7 @@ afterEach(async () => {
 });
 
 describe("media API", () => {
-  test("detail endpoint 返回媒体 metadata 和片段 assets", async () => {
+  test("detail endpoint 返回媒体 metadata 和场景帧 assets", async () => {
     const library = await createLibrary(db, {
       name: "Main Media",
       rootPath: "/Volumes/Media",
@@ -64,12 +66,23 @@ describe("media API", () => {
       height: 1080,
       codec: "h264",
     });
-    const asset = await createMediaAsset(db, {
+    const sceneId = randomUUID();
+    await db.insert(videoScenes).values({
+      id: sceneId,
       fileId: file.id,
-      assetType: "video_segment",
+      sceneKey: "scene-000001",
       startTimeSeconds: "30",
       endTimeSeconds: "60",
-      contentHash: "segment-hash",
+      detectionStrategy: "content",
+      strategyFingerprint: "content-v1",
+      indexGeneration: 0,
+    });
+    const asset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: "video_frame",
+      sceneId,
+      frameTimeSeconds: "45",
+      contentHash: "frame-hash",
     });
 
     await expect(mediaController.getMedia(file.id)).resolves.toMatchObject({
@@ -89,9 +102,9 @@ describe("media API", () => {
       assets: [
         {
           id: asset.id,
-          asset_type: "video_segment",
-          start_time_seconds: 30,
-          end_time_seconds: 60,
+          asset_type: "video_frame",
+          start_time_seconds: null,
+          end_time_seconds: null,
           cache_path: null,
           text_content: null,
         },

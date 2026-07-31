@@ -79,6 +79,11 @@ FOR UPDATE SKIP LOCKED
 LIMIT 1;
 ```
 
+协调器创建的 `embed_image`、`embed_video_frame` 和 `embed_text_asset` 使用优先级 `10`；
+扫描、探测、转录和 Caption 默认优先级为 `0`。这样大素材库先把已生成的 Asset 写成可检索
+Qdrant Point，再继续处理较慢的 Caption 队列；高优先级只改变领取顺序，不跳过或取消低
+优先级任务。
+
 Claim 后立即写入：
 
 ```text
@@ -126,15 +131,15 @@ MVP 扫描幂等策略为 `path + size + mtime`：
 
 该策略可能漏掉保留 mtime 和 size 的原地改写。后续 content hash rescan 只在用户手动触发或重点目录上执行，避免默认全库 hash 带来高 I/O。
 
-## Phase 5/10 索引边界
+## 当前索引边界
 
-Phase 5 建立索引骨架，Phase 10 起切换为真实 SigLIP embedding。TypeScript server 与 Python worker 的写入边界保持不变：
+TypeScript server 与 Python worker 的写入边界如下：
 
 - TypeScript server 维护 Qdrant collection registry，并负责初始化缺失 collection。
 - TypeScript server 不生成或传递大向量数组。
 - Python worker 执行 `probe_media` 和 `index_media`。
-- Python worker 为图片、视频 scene（或固定 30s fallback）创建 `media_assets`。
-- Phase 10 起，`index_media` 只创建 pending `vector_refs`；真实向量由下游 embedding jobs 写入 Qdrant。
+- Python worker 为图片创建 `image` asset；为视频创建 `video_scenes` 行和引用场景 UUID 的 `video_frame` asset。
+- `index_media` 只创建 pending `vector_refs`；真实向量由下游 embedding jobs 写入 Qdrant。
 - `point_id` 使用 deterministic UUID，输入包含 `asset_id`、collection、model name/version、vector kind 和 content hash。
 
 ### 管线触发链
@@ -143,19 +148,15 @@ Python worker 负责管线内部的 job 链式触发，区别于 TypeScript serv
 
 ```text
 scan_library 完成 → 为每个 created/updated file 创建 probe_media job
-probe_media 完成 → 对视频创建 index_media job（segment_strategy='scene_detection'）+ transcribe_audio job；对音频只创建 transcribe_audio job；对图片创建 index_media job（image 路径）
+probe_media 完成 → 对视频并行创建 index_media + transcribe_audio job；对音频只创建 transcribe_audio job；对图片创建 index_media job
 index_media 完成 → 创建 assets 和 pending vector_refs
 transcribe_audio 完成 → 创建 text_chunk assets（text_content + start/end），FTS tsvector 由生成列自动维护
-JobsCoordinatorService 自动扫描 pending vector_refs → 创建 embed_image / embed_video_frame jobs
-POST /jobs/embedding/queue-pending → 手动补漏，同样为 pending vector_refs 创建 embed_image / embed_video_frame jobs
+JobsCoordinatorService 自动扫描 pending vector_refs → 创建 embed_image / embed_video_frame / embed_text_asset jobs
+POST /jobs/embedding/queue-pending → 手动补漏，为 pending vector_refs 创建 embed_image / embed_video_frame / embed_text_asset jobs
 embedding job 完成 → Qdrant point 已写入，vector_ref.status = indexed
-index_media 完成 → 为 image / video_frame asset 创建 run_ocr job（asset 已存在，asset 粒度）
-JobsCoordinatorService 自动扫描待 OCR asset → 批量创建 run_ocr jobs
-POST /jobs/ocr/queue-pending → 手动补漏，按 library_id / file_id 扫描待 OCR asset，批量创建 run_ocr jobs
-run_ocr 完成 → OCR 文本写回被 OCR asset 的 text_content + metadata_json.ocr，FTS tsvector 自动维护
+index_media 完成 → Caption 开启时为图片或每个视频场景创建 generate_caption job
+generate_caption 完成 → 创建 caption asset 和 pending caption_text_vectors ref
 ```
-
-OCR 补队列会把同一 asset 上已有的 `run_ocr` 尝试记录（queued/running/succeeded/failed）视为已覆盖，避免 OCR 失败或无文本结果时被 coordinator 无限创建新 job。重新 OCR 需要显式重置/force 入口。
 
 `media_files.index_status` 状态流转：
 
@@ -166,7 +167,7 @@ probed → indexed（任意一个 active vector ref 首次真实 embedding 成�
 
 `probed` 表示文件 metadata（duration、width、height、codec）已探测完毕，可以创建 index job。scene detection 在 `index_media` 内部完成，不引入新的 `index_status`。
 
-`mark_vector_ref_indexed(point_id)` 在同一数据库事务中更新 `vector_refs.status` 和对应 `media_files.index_status`。`0002_backfill_indexed_media_files.sql` 会为升级前已经存在 indexed vector ref 的 active 文件回填状态，避免素材库 `indexed_count` 永久为 0。其余 pending/failed refs 不阻止文件被计为“已索引”，因为至少一个成功向量已经使该文件可检索。
+`mark_vector_ref_indexed(point_id)` 在同一数据库事务中更新 `vector_refs.status` 和对应 `media_files.index_status`。Phase 7 使用空库重建，不导入旧 vector ref，因此不再需要历史回填迁移。其余 pending/failed refs 不阻止文件被计为“已索引”，因为至少一个成功向量已经使该文件可检索。
 
 ## Job Types
 
@@ -415,38 +416,6 @@ media_assets（asset_type='text_chunk'，写入 text_content / start_time_second
 jobs.*
 ```
 
-### run_ocr
-
-Input：
-
-```json
-{
-  "asset_ids": ["uuid"],
-  "engine": "paddleocr",
-  "language": "ch"
-}
-```
-
-`asset_ids` 为 image 或 video_frame asset（asset 粒度，一个 job 处理一批）。worker 对 image asset 直接读图；对 video_frame asset 用 FFmpeg 按 `frame_time_seconds` 抽帧后 OCR。OCR 文本写回**被 OCR 的原 asset 的 `text_content`**（不新建 ocr_chunk），并在 `metadata_json.ocr` 记录 engine / language / confidence / block_count。详见 `docs/implementation-plan.md` Phase 13。
-
-Result：
-
-```json
-{
-  "assets_processed": 1,
-  "text_written": 1,
-  "skipped_no_text": 0
-}
-```
-
-Python worker 可写字段：
-
-```text
-media_assets.text_content（写回被 OCR 的原 asset）
-media_assets.metadata_json（写 metadata_json.ocr）
-jobs.*
-```
-
 ## Python Worker 写入边界
 
 Python worker 可以：
@@ -455,7 +424,7 @@ Python worker 可以：
 - 写入媒体探测结果。
 - 创建 `media_assets`。
 - 创建或更新 `vector_refs`。
-- 写入 transcript / OCR 结果。
+- 写入 transcript 和 Caption 结果。
 - 写入 clip export 结果。
 - upsert Qdrant points，并写回 `vector_refs`。
 

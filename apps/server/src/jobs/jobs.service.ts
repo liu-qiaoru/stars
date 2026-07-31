@@ -17,6 +17,10 @@ import {
   type Database,
 } from '../database/repositories.js'
 
+// 视觉/文本 Embedding 已有明确输入，只需完成模型计算和 Qdrant 写入；优先级高于
+// 默认的 Caption/转录任务，让大型素材库先恢复可检索状态，之后再补齐更慢的语义通道。
+const EMBEDDING_JOB_PRIORITY = 10
+
 @Injectable()
 export class JobsService {
   constructor(@Inject(DATABASE) private readonly db: Database) {}
@@ -108,8 +112,13 @@ export class JobsService {
   }
 
   async queuePendingEmbeddingJobs(limit = 100) {
-    // 只为没有 embedding 尝试记录的 pending ref 创建任务，避免失败/无结果场景被 coordinator 无限重建。
-    const pendingRefs = await listPendingEmbeddingVectorRefs(this.db, limit)
+    // limit 表示“本轮最多新建多少任务”，不是只查看多少条 ref。若前一页 pending ref
+    // 已经有 queued/running/failed 尝试，必须继续翻页，否则它们会永久挡住后续大素材库。
+    const creationLimit = Math.max(0, Math.floor(limit))
+    if (creationLimit === 0) {
+      return { scanned: 0, created: 0, skipped: 0 }
+    }
+
     const attemptedJobs = await listAttemptedEmbeddingJobs(this.db)
     const lastAttemptedAtByKey = new Map<string, Date>()
     for (const job of attemptedJobs) {
@@ -127,27 +136,50 @@ export class JobsService {
     }
     let created = 0
     let skipped = 0
+    let scanned = 0
+    let cursor: { createdAtCursor: string; id: string } | undefined
 
-    for (const ref of pendingRefs) {
-      const input = this.toEmbeddingJobInput(ref)
-      const key = this.embeddingJobKey(input)
-      const lastAttemptedAt = lastAttemptedAtByKey.get(key)
-      if (lastAttemptedAt && lastAttemptedAt >= ref.vectorRefUpdatedAt) {
-        skipped += 1
-        continue
+    while (created < creationLimit) {
+      const pendingRefs = await listPendingEmbeddingVectorRefs(
+        this.db,
+        creationLimit,
+        cursor,
+      )
+      if (pendingRefs.length === 0) {
+        break
       }
-      await createJob(this.db, {
-        jobType: this.embeddingJobType(input.collection),
-        // embed 任务是单文件任务，填写 file_id 外键便于按文件查询活跃任务。
-        fileId: ref.fileId,
-        inputJson: input,
-      })
-      lastAttemptedAtByKey.set(key, new Date())
-      created += 1
+      const lastRef = pendingRefs.at(-1)!
+      cursor = {
+        createdAtCursor: lastRef.vectorRefCreatedAtCursor,
+        id: lastRef.vectorRefId,
+      }
+
+      for (const ref of pendingRefs) {
+        scanned += 1
+        const input = this.toEmbeddingJobInput(ref)
+        const key = this.embeddingJobKey(input)
+        const lastAttemptedAt = lastAttemptedAtByKey.get(key)
+        if (lastAttemptedAt && lastAttemptedAt >= ref.vectorRefUpdatedAt) {
+          skipped += 1
+          continue
+        }
+        await createJob(this.db, {
+          jobType: this.embeddingJobType(input.collection),
+          priority: EMBEDDING_JOB_PRIORITY,
+          // embed 任务是单文件任务，填写 file_id 外键便于按文件查询活跃任务。
+          fileId: ref.fileId,
+          inputJson: input,
+        })
+        lastAttemptedAtByKey.set(key, new Date())
+        created += 1
+        if (created >= creationLimit) {
+          break
+        }
+      }
     }
 
     return {
-      scanned: pendingRefs.length,
+      scanned,
       created,
       skipped,
     }

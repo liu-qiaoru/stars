@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-这是一个本地优先的多模态媒体检索与编辑智能体。主 API 使用 TypeScript/NestJS（`apps/server`）；Python Worker（`apps/worker-py`）及独立的 Python 模型/VLM 服务负责媒体和模型任务；前端使用 Next.js（`apps/web`）；共享 Schema 位于 `packages/shared`。目标是支持约 1 TB、以视频为主的个人媒体库。默认关闭外部 LLM；所有检索均使用本地模型，包括 SigLIP、faster-whisper、PaddleOCR，以及在启用 Caption 索引或重排时通过本地 Ollama 使用的 Qwen2.5-VL。
+这是一个本地优先的多模态媒体检索与编辑智能体。主 API 使用 TypeScript/NestJS（`apps/server`）；Python Worker（`apps/worker-py`）及独立的 Python 模型/VLM 服务负责媒体和模型任务；前端使用 Next.js（`apps/web`）；共享 Schema 位于 `packages/shared`。目标是支持约 1 TB、以视频为主的个人媒体库。默认关闭外部 LLM；所有检索均使用本地模型，包括 SigLIP2、faster-whisper、Caption 文本嵌入模型，以及在启用 Caption 索引或重排时通过本地 Ollama 使用的 Qwen2.5-VL。
 
 ## 常用命令
 
@@ -29,8 +29,8 @@ PYTHONPATH=apps/worker-py python3.12 -m unittest discover apps/worker-py/tests
 
 # 单项测试
 pnpm --filter @local-media-agent/server exec vitest run tests/search/search.service.test.ts   # 按文件
-pnpm --filter @local-media-agent/server exec vitest run -t "returns ocr_match"                 # 按测试名称
-PYTHONPATH=apps/worker-py python3.12 -m unittest discover -s apps/worker-py/tests -p test_ocr_worker.py
+pnpm --filter @local-media-agent/server exec vitest run -t "caption vector hits"               # 按测试名称
+PYTHONPATH=apps/worker-py python3.12 -m unittest discover -s apps/worker-py/tests -p test_captioning_worker.py
 
 # 数据库迁移（不会随 `dev` 自动执行；拉取新迁移后必须手动应用）
 corepack pnpm --filter @local-media-agent/server exec drizzle-kit generate   # 根据 Schema 变更生成迁移
@@ -55,7 +55,7 @@ pnpm dev:vlm                                                                 # V
 
 1. **PostgreSQL + Qdrant**：通过 `infra/docker-compose.yml` 启动。
 2. **NestJS Server**（`:4000`）：提供 HTTP API、创建任务、读取 Qdrant、执行全文检索和智能体运行时，并拥有数据库 Schema。
-3. **Python Worker**（`media_agent_worker`）：通过 `FOR UPDATE SKIP LOCKED` 从 PostgreSQL 领取任务，执行扫描、探测、索引、向量化、转录、OCR、Caption 和剪辑任务，并写入 Qdrant、`media_assets` 与 `vector_refs`。
+3. **Python Worker**（`media_agent_worker`）：通过 `FOR UPDATE SKIP LOCKED` 从 PostgreSQL 领取任务，执行扫描、探测、索引、向量化、转录、Caption 和剪辑任务，并写入 Qdrant、`media_assets` 与 `vector_refs`。
 4. **Python 模型服务**（`model_service`，`:4020`）：封装 SigLIP 和延迟加载的 Caption 文本嵌入模型。它与 Worker 是两个不同进程；Server 在搜索时同步调用该服务生成查询文本向量。缺少该服务时，`/search` 无法进行向量检索，但 Worker 的批量媒体向量化仍可运行。
 5. **Next.js Web**（`:3000`）。
 6. **Python VLM 服务**（`vlm_service`，`:4030`）：提供 `/caption`；默认使用 `OLLAMA_VLM_MODEL`（例如 `qwen2.5vl:7b`）调用 Ollama `:11434`。仅在 `CAPTION_INDEXING_ENABLED=true` 且 `LOCAL_VLM_ENABLED=true`，或后续启用 VLM 重排时需要。
@@ -77,23 +77,23 @@ pnpm dev:vlm                                                                 # V
 
 **使用 PostgreSQL 实现任务队列。** TypeScript Server 创建 `status='queued'` 的任务；Python Worker 使用 `SELECT ... FOR UPDATE SKIP LOCKED` 领取任务。不使用 Dramatiq、Celery 或 BullMQ。详见 `docs/job-protocol.md`。
 
-**文件索引状态由第一个可检索向量决定。** Worker 成功向 Qdrant 写入任一活跃 vector ref 后，`mark_vector_ref_indexed(point_id)` 必须在同一事务内同时更新 `vector_refs.status='indexed'` 和对应活跃文件的 `media_files.index_status='indexed'`。文件无需等待所有 pending/failed ref 完成即可计入素材库 `indexed_count`；迁移 `0002_backfill_indexed_media_files.sql` 用于修复历史数据。
+**文件索引状态由第一个可检索向量决定。** Worker 成功向 Qdrant 写入任一活跃 vector ref 后，`mark_vector_ref_indexed(point_id)` 必须在同一事务内同时更新 `vector_refs.status='indexed'` 和对应活跃文件的 `media_files.index_status='indexed'`。文件无需等待所有 pending/failed ref 完成即可计入素材库 `indexed_count`。Phase 7 从空库应用唯一基线，不再包含或依赖历史状态回填迁移。
 
 **存在两条不同的嵌入路径，禁止混淆。**
 
 - *批量媒体嵌入（索引阶段）*：`index_media` 创建 `pending` 状态的 `vector_refs`，随后由 Worker 的 `embed_image`、`embed_video_frame`、`embed_text_asset` 任务写入 Qdrant，并将 `vector_refs.status` 更新为 `indexed`。大向量不得通过 TypeScript 与 Python 的任务参数传递；Worker 必须直接读写 Qdrant。
 - *同步查询嵌入（搜索阶段）*：`/search` → `SearchQueryVectorService` → `ModelGatewayService.embedText` → `model_service:4020`。查询嵌入必须感知目标模型：SigLIP collection 使用 SigLIP 文本塔，`caption_text_vectors` 使用 Caption 文本嵌入模型。该路径必须同步执行；放入任务队列会导致搜索被索引任务阻塞。
-- *Caption 索引*：启用 `CAPTION_INDEXING_ENABLED=true` 和 `LOCAL_VLM_ENABLED=true` 后，图片使用单图 `caption-v1`；每个视频片段使用 `scene-caption-v2`，并将同一场景中按时间排序的 1 至 `SCENE_CAPTION_MAX_FRAMES` 帧发送给 Qwen2.5-VL。Worker 记录源 asset ID、时间、模型和 Prompt 来源，写入 `caption_text_vectors`，并在成功或失败时清理所有临时图片。
-- *Caption 版本隔离*：`caption-v1` 只允许用于图片；视频 Caption 必须使用包含稳定 `scene_id` 的 `scene-caption-v2`。即使 Qdrant 中仍残留 stale 点，搜索回表也必须拒绝 stale asset 以及旧版或格式错误的视频 Caption。迁移 `0004_stale_legacy_video_captions.sql` 将已被 v2 覆盖的旧视频 Caption asset 和 ref 标记为 stale，避免旧时间窗口 Caption 与场景候选重复。
-- *视频场景检索*：场景检测窗口（包括使用稳定 ID 的降级窗口）最长为 `SCENE_MAX_SECONDS`，默认 30 秒。每个活跃 `video_segment` 必须至少包含一个同场景 `video_frame`；只有帧会创建新的视觉向量。搜索保留原始帧分组，在顶层按 `(file_id, scene_id)` 使用 MaxSim 折叠视频候选，并从 PostgreSQL 获取场景边界。`VIDEO_SEGMENT_SEARCH_ENABLED` 仅用于迁移；只有在人工确认 `GET /jobs/video/reindex-readiness` 已就绪后才能关闭。
+- *Caption 索引*：启用 `CAPTION_INDEXING_ENABLED=true` 和 `LOCAL_VLM_ENABLED=true` 后，图片使用单图 `caption-v1`；每个视频场景使用 `scene-caption-v2`，并将同一场景中按时间排序的 1 至 `SCENE_CAPTION_MAX_FRAMES` 帧发送给 Qwen2.5-VL。Worker 记录场景、帧时间、模型和 Prompt 来源，写入 `caption_text_vectors`，并在成功或失败时清理所有临时图片。
+- *Caption 版本隔离*：`caption-v1` 只允许用于图片；视频 Caption 必须使用包含稳定 `scene_id` 的 `scene-caption-v2`。搜索回表必须拒绝旧版、格式错误或无法关联到当前场景 generation 的视频 Caption。Phase 7 唯一基线不导入旧 Caption asset 或 stale ref。
+- *视频场景检索*：场景检测窗口最长为 `SCENE_MAX_SECONDS`，默认 30 秒。每个当前 `video_scenes` 行必须至少包含一个引用其 UUID 的 `video_frame`；只有帧会创建视觉向量。搜索保留原始帧分组，在顶层按 `(file_id, scene_id)` 使用 MaxSim 折叠视频候选，并从 PostgreSQL 获取场景边界。
 
-**任务流水线会自动触发，并提供协调补偿接口。** Worker 内部任务完成后会创建下一阶段任务：`scan_library → probe_media → index_media`；`index_media` 随后扇出 `transcribe_audio`、`embed_*`（通过 pending `vector_refs`）、`run_ocr`（图片/视频帧），并在 Caption 开关启用时为图片/视频片段创建 `generate_caption`。Server 提供两个补偿接口，用于重新扫描并补齐自动触发遗漏的任务：`POST /jobs/embedding/queue-pending` 处理 pending `vector_refs`，`POST /jobs/ocr/queue-pending` 处理缺少 OCR 的图片/视频帧。
+**任务流水线会自动触发，并提供协调补偿接口。** Worker 内部任务完成后会创建下一阶段任务：`scan_library → probe_media → index_media`；`index_media` 随后扇出 `transcribe_audio`、`embed_*`（通过 pending `vector_refs`），并在 Caption 开关启用时为图片或视频场景创建 `generate_caption`。Server 的 `POST /jobs/embedding/queue-pending` 用于重新扫描并补齐 pending `vector_refs` 遗漏的嵌入任务。
 
-**全文检索数据与 `media_assets` 共置。** `media_assets.text_content`、生成列 `text_tsv`（`to_tsvector('simple', ...)`）及 GIN 索引共同承载全文检索。转录文本（`text_chunk`）和 OCR（`image`/`video_frame`）都写入同一列，不维护独立搜索表。`SearchService` 查询 `text_chunk`、`image` 和 `video_frame`，并按 asset 类型映射 `reason`：`text_chunk → text_match`，`image`/`video_frame → ocr_match`。Phase 15A 中 Caption 不进入 FTS；Caption 通过 `caption_text_vectors` 检索并返回 `caption_match`。
+**全文检索数据与 `media_assets` 共置。** `media_assets.text_content`、生成列 `text_tsv`（`to_tsvector('simple', ...)`）及 GIN 索引共同承载转录全文检索，不维护独立搜索表。`SearchService` 查询 `text_chunk` 并映射为 `text_match`。Caption 不进入全文检索；它通过 `caption_text_vectors` 检索并返回 `caption_match`。
 
 **查询扩展必须有上限且可按请求做消融。** `POST /search` 的 `query_expansion_mode` 支持 `original | translate | expand`：`original` 必须完全跳过外部 Provider；`translate` 只能在保留原查询的基础上增加一个忠实翻译，并通过独立语义校验确认没有改变人物、物体、动作、关系或约束，缺失译文或校验失败必须显式报错；`expand` 才允许完整扩展。当 `QUERY_EXPANSION_PROVIDER=deepseek` 时，`QUERY_EXPANSION_MAX_VARIANTS` 默认值为 `3`，且包含原始查询。DeepSeek Prompt 和 Server 端标准化逻辑都必须强制该限制，不能只信任模型返回值。`include_diagnostics=true` 时可返回逐 Point 查询版本分数、胜出版本、Caption 原文和 Prompt 版本；默认响应和普通日志不得包含 Caption 等本地媒体内容。搜索耗时日志应暴露扩展、向量检索、FTS、混合排序和总耗时，但不得记录向量、API Key 或本地媒体内容。
 
-**检索评测与生产排序隔离。** 内部 `/evaluation` 流程将冻结查询、盲标结果、来源证据、当前混合排序名次和实验性无权重 RRF 名次持久化到 PostgreSQL。基线评测关闭查询扩展和 `video_segment_vectors`，使用按场景折叠的视频帧召回，并以 `k=60`、单位权重将视觉、Caption 和全文信号视为独立通道。原始余弦分数只用于通道内部诊断；RRF 分数只表示顺序，不是概率。必需通道不可用或出现完整性错误时，评测运行必须失败，不得生成部分指标。
+**检索评测与生产排序隔离。** 内部 `/evaluation` 流程将冻结查询、盲标结果、来源证据、当前混合排序名次和实验性无权重 RRF 名次持久化到 PostgreSQL。基线评测关闭查询扩展，使用按场景折叠的 `video_frame_vectors` 召回，并以 `k=60`、单位权重将视觉、Caption 和全文信号视为独立通道。原始余弦分数只用于通道内部诊断；RRF 分数只表示顺序，不是概率。必需通道不可用或出现完整性错误时，评测运行必须失败，不得生成部分指标。
 
 **NestJS 模块结构。** 每个领域都是独立模块，包括 config、health、database、libraries、jobs、media、search、clips、agent、qdrant 和 model-gateway。通过 Symbol Token 注入依赖：`DATABASE`（Drizzle）、`SETTINGS`（解析后的环境变量）、`QDRANT_CLIENT`、`PG_POOL`。业务代码不得直接导入基础设施实现。
 
@@ -103,14 +103,14 @@ pnpm dev:vlm                                                                 # V
 
 **素材库文件浏览采用延迟加载和分页。** `GET /libraries/:id/media` 返回按 `(relative_path, id)` 排序的活跃文件，默认每页 25 条，最大 100 条。Web 素材库卡片折叠时不得请求文件；“加载更多”追加分页结果；折叠或请求失败时保留已加载内容；扫描任务创建成功后跳转 `/jobs`，由自动刷新展示进度。AppShell 根据 pathname 设置 `aria-current='page'`，标识当前导航和 Ask 页面。
 
-**测试约束。** Server 的 repository/search/jobs 测试通过 `tests/database/test-db.ts` 使用进程内 PostgreSQL（PGlite），单元测试不依赖真实 PostgreSQL。健康检查测试使用 mock。Python 测试使用内存 repository double；OCR 和转录测试注入 fake，CI 不得下载 PaddleOCR 或 Whisper 权重。
+**测试约束。** Server 的 repository/search/jobs 测试通过 `tests/database/test-db.ts` 使用进程内 PostgreSQL（PGlite），单元测试不依赖真实 PostgreSQL。健康检查测试使用 mock。Python 测试使用内存 repository double；转录测试注入 fake，CI 不得下载 Whisper 权重。
 
 ### 各阶段 Python 模型依赖
 
 - Phase 10：SigLIP（`torch`、`transformers`、`pillow`），用于图片和视频帧嵌入。
 - Phase 11：`scenedetect`，用于视频场景检测。
 - Phase 12：faster-whisper（CTranslate2），用于语音转录。
-- Phase 13：PaddleOCR，用于图片和关键帧 OCR。
+- Phase 13（历史实现）：曾使用 PaddleOCR；视频检索重建阶段 2 已删除 OCR Job、协调接口和检索通道，当前运行环境不再需要该依赖。
 - Phase 15A：Qwen2.5-VL Caption 默认通过 Ollama 生成（`LOCAL_VLM_BACKEND=ollama`、`OLLAMA_VLM_MODEL=qwen2.5vl:7b`）。仍可使用旧的 Transformers 后端；此时设置 `LOCAL_VLM_BACKEND=transformers`，并依赖 `torch`、`torchvision`、`accelerate`、`pillow`。Caption 文本嵌入使用 `transformers` 对 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` 做 mean pooling。
 
 ## Node/pnpm 注意事项
@@ -225,7 +225,7 @@ pnpm dev:vlm                                                                 # V
 必须覆盖但不限于以下类别：
 
 - **编程语言和运行机制**：例如 Python、TypeScript、ESM、事件循环、异常、进程、线程、同步、异步和虚拟环境。
-- **框架和第三方库**：例如 NestJS、Next.js、React、PyTorch、Transformers、PySceneDetect、faster-whisper 和 PaddleOCR。必须说明它是什么、解决什么问题、为什么本项目选择它，以及它运行在 Server、Worker 还是模型服务中。
+- **框架和第三方库**：例如 NestJS、Next.js、React、PyTorch、Transformers、PySceneDetect 和 faster-whisper。必须说明它是什么、解决什么问题、为什么本项目选择它，以及它运行在 Server、Worker 还是模型服务中。
 - **模型和机器学习概念**：例如 Qwen2.5-VL、SigLIP、Tokenizer、推理、训练、Embedding、向量维度、归一化和余弦相似度。
 - **检索和排序概念**：例如 RAG、召回、精排、Top-K、RRF、MaxSim、全文检索、倒排索引、混合检索和查询扩展。
 - **服务端和数据概念**：例如 API、HTTP、JSON、Schema、ORM、SQL、事务、索引、唯一键、外键、幂等、分页、缓存和任务队列。
@@ -245,7 +245,7 @@ pnpm dev:vlm                                                                 # V
 
 例如，不应只写“使用 PySceneDetect 切分视频”，而应写清楚：
 
-> PySceneDetect 是一个 Python 视频镜头检测库。它通过比较相邻画面的变化判断镜头是否切换。本项目在 Python Worker 中用它把长视频拆成较短的 `video_segment`，之后再为每个片段抽帧、生成 SigLIP 向量和 Caption。使用它是为了让检索结果定位到具体场景，而不是返回整段长视频；它也可能因为闪光、快速运动或渐变转场而切得过碎或漏切，因此项目还设置了最短合并和最长 30 秒切窗规则。
+> PySceneDetect 是一个 Python 视频镜头检测库。它通过比较相邻画面的变化判断镜头是否切换。本项目在 Python Worker 中用它把长视频拆成较短的场景，写入 `video_scenes` 行，再创建引用场景 UUID 的 `video_frame` asset、生成 SigLIP2 帧向量和 Caption。使用它是为了让检索结果定位到具体场景，而不是返回整段长视频；它也可能因为闪光、快速运动或渐变转场而切得过碎或漏切，因此项目还设置了最短合并和最长 30 秒切窗规则。
 
 下面是本项目中部分高频术语的解释示例：
 
@@ -253,7 +253,7 @@ pnpm dev:vlm                                                                 # V
 - **Agent（智能体）**：能够根据目标选择并调用搜索、剪辑等工具，再依据工具结果决定下一步的软件流程，不等同于单次聊天模型调用。
 - **Embedding（嵌入/向量化）**：把文本、图片或视频帧转换成一组数字，使语义或视觉相近的内容在向量空间中更接近。
 - **Top-K**：按照分数排序后取前 K 条，例如 Top-10 就是排名最靠前的 10 条。
-- **召回通道**：一种独立的检索来源，例如 SigLIP 视觉向量、Caption 文本向量、OCR 或转录全文检索。
+- **召回通道**：一种独立的检索来源，例如 SigLIP2 视觉向量、Caption 文本向量或转录全文检索。
 - **余弦相似度**：比较两个向量方向接近程度的分数，只能在相同模型和相同通道内合理比较，不能直接当成相关概率。
 - **RRF（Reciprocal Rank Fusion，倒数排名融合）**：根据候选在各通道中的名次进行融合，而不是直接混合不同模型的原始分数；RRF 分数只用于排序，不是概率。
 - **MaxSim（最大相似度）**：同一视频场景有多帧命中时，使用其中最高的帧相似度代表该场景，避免同一场景重复占据多个结果位置。
@@ -317,7 +317,7 @@ pnpm dev:vlm                                                                 # V
 file.indexStatus = 'indexed'
 
 // 正确示例：文件只要拥有一个可检索向量就应该出现在素材库检索中，
-// 因此无需等待该文件的所有 OCR、Caption 和帧向量任务完成。
+// 因此无需等待该文件的所有 Caption、转录和帧向量任务完成。
 file.indexStatus = 'indexed'
 ```
 

@@ -10,9 +10,10 @@
 
 ## 当前进度
 
-- 当前阶段：视频检索重建 Phase 6 已完成（核心 Web 搜索、任务失败反馈与评测运行层）。
-- 最近更新：2026-07-30，完成最终搜索契约 Web 接线、结构化失败重试和正式场景评测重建。
-- 下一步：等待确认后进入 Phase 7，压缩开发迁移并重建本地服务与素材索引。
+- 当前阶段：视频检索重建 Phase 7 已完成（唯一数据库基线与本地索引重建）。
+- 最近更新：2026-07-31，15 个真实视频已完成 SigLIP2、Caption 与语音索引重建；
+  PostgreSQL 和 Qdrant 的 4097 条向量记录逐条一致，唯一 `0000` 与全仓测试均通过。
+- 下一步：等待用户确认后进入 Phase 8，建立核心检索的正式评测集和干净基线。
 
 ## 视频检索重建 Phase 4：Caption 文本向量与 SigLIP2 模型一致性
 
@@ -101,6 +102,43 @@ Review：
   首轮发现的媒体快照外键、current 独有候选、运行原子性、报告后改标、随机目标稳定性、
   视频目标缺场景、盲标操作不完整、绝对路径和模型任务结构化错误均已修复；Phase 7 的
   迁移压缩和正式基线样本未提前实施。
+
+## 视频检索重建 Phase 7：唯一基线与本地服务/素材索引重建
+
+- Start：2026-07-30。目标是把阶段 2～6 的开发迁移压缩为唯一 `0000`，证明空库可直接
+  获得最终 Schema；然后只删除 PostgreSQL、Qdrant 和 `.media-agent/cache` 中可重建的
+  派生数据，保留源媒体，恢复 SigLIP2、Caption、语音检索所需服务并重新索引。
+- 安全边界：先做 dry-run 和服务端口检查；只操作 `.env` 指向的本地数据库、项目拥有的
+  Qdrant Collection 和经过路径防护的缓存目录。不得删除源素材、Ollama 模型或 Hugging
+  Face 模型缓存。
+- 验证计划：压缩前后运行同一组 Schema/Repository 测试；新增唯一迁移和禁用旧结构断言；
+  用全新 PGlite 与临时 PostgreSQL 执行基线；重建后分别核对 PostgreSQL 事实行、Qdrant
+  Point、任务状态和 generation；最后运行全仓检查、Python 测试和双轴代码审查。
+
+- [x] 记录压缩前 Schema/Repository 测试基线。
+- [x] 删除开发迁移并从最终 Drizzle Schema 生成唯一 `0000`。
+- [x] 验证基线无 OCR、video segment、旧 Collection、多帧任务或兼容列。
+- [x] 人工核对外键、级联、唯一约束、generation、任务 claim 和六张评测表。
+- [x] 在全新 PGlite 和临时 PostgreSQL 执行唯一基线。
+- [x] dry-run 核对本地 PostgreSQL、Qdrant、缓存与受保护源素材范围。
+- [x] 确认本地派生数据已为空，应用唯一基线并创建 SigLIP2/Caption Collections。
+- [x] 恢复 Server、模型服务、Worker、VLM、Ollama 和 Web，并重新添加/扫描素材库。
+- [x] 等待索引任务完成并执行 Phase 7 完整性检查。
+- [x] 更新文档、运行全量验证与双轴审查，使用中文信息提交当前分支。
+
+Review：
+
+- Result：通过。唯一 `0000` 在 PGlite 和临时 PostgreSQL 16 中均可直接创建最终 15
+  张表；基线不含 OCR、`video_segment`、旧 Collection、多帧任务或兼容列。真实重建得到
+  15/15 个 indexed 视频、1073 个当前场景、3024 个视频帧、3024 条 SigLIP2 引用和
+  1073 条 Caption 引用。PostgreSQL 的 4097 条 indexed 引用与 Qdrant 的 4097 个 Point
+  逐条匹配，缺场景、缺帧、缺当前模型向量、错误 generation、旧引用和 pending/failed
+  引用均为 0。
+- Notes：13 条 Caption 超时记录均已有成功重试；1 条无音轨视频的转录失败按事实保留，
+  不影响视觉与 Caption 索引。真实中文搜索同时返回 `vector_match` 和 `caption_match`，
+  Jobs Web 分页可展示失败记录。最终验证通过 Server 131、Web 41、Shared 6、Python 73
+  个测试及 Next.js 生产构建。双轴审查发现并修复 PostgreSQL 微秒游标精度和权威文档
+  漂移问题，复审通过；未创建 Phase 8 的评测样本、指标报告或候选快照。
 
 ## 代码可读性：关键路径注释补强
 

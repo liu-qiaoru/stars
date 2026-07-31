@@ -4,7 +4,7 @@
 
 本项目是一个本地优先的 Web 系统，用于搜索、检查和剪辑个人媒体资产。目标素材规模约 1 TB，以视频为主，同时包含图片、音频和文本。
 
-系统默认保留原始文件在用户自己的磁盘上，不上传、不复制源素材。应用只在本地工作目录中保存 metadata、索引、缩略图、抽帧、转写文本、OCR 结果和导出剪辑。
+系统默认保留原始文件在用户自己的磁盘上，不上传、不复制源素材。应用只在本地工作目录中保存 metadata、索引、临时抽帧、转写文本、Caption 和导出剪辑。
 
 ## 推荐形态
 
@@ -35,7 +35,7 @@ docs            架构、API 和实施文档
 - 数据访问：PostgreSQL、Drizzle、node-postgres。
 - 向量数据库：Qdrant，使用 Qdrant JS client。Collection、point、payload 和 PostgreSQL 引用结构见 `docs/vector-index-design.md`。
 - 后台任务：PostgreSQL-backed jobs。Redis 只作为可选实时事件/pub-sub 通道。
-- Python worker：FFmpeg、ffprobe、PySceneDetect、OpenCLIP 或 SigLIP、faster-whisper 或 whisper.cpp、PaddleOCR 或 EasyOCR。
+- Python worker：FFmpeg、ffprobe、PySceneDetect、SigLIP2、faster-whisper、Caption 文本嵌入模型，以及通过 Ollama 调用的 Qwen2.5-VL。
 - Agent 编排：Vercel AI SDK（`ai`）+ Anthropic provider（`@ai-sdk/anthropic`）。Python 不负责 agent 决策，只负责执行媒体/模型重任务。
 - 外部多模态模型层：通过 TypeScript Model Gateway 接入 OpenAI、Claude、Gemini 或其他提供商。
 - 存储：本地文件系统，用于源素材引用、缓存文件、缩略图、抽帧、转写文本和导出剪辑。
@@ -75,12 +75,12 @@ Python Worker / TypeScript Server
 - Library：添加本地目录、触发扫描、展示已索引数量和错误数量。
 - Search：跨图片、视频、音频和文本查询媒体。
 - Jobs：展示扫描、索引、剪辑导出和 agent 任务进度。
-- Media detail：展示 metadata、segments、transcripts 和剪辑操作。
+- Media detail：展示 metadata、视频场景帧、transcripts 和剪辑操作。
 - Agent panel：接收自然语言任务，展示工具调用、候选结果和最终结果。
 
 ### TypeScript API Server
 
-NestJS 负责 HTTP API、模块组织、依赖注入、请求校验、OpenAPI 输出、数据库访问、Qdrant 查询、任务创建、agent 编排和结果读取。HTTP controller 不执行抽帧、embedding、转写、OCR、剪辑等重任务，只调用 service 创建 PostgreSQL job 并返回状态。
+NestJS 负责 HTTP API、模块组织、依赖注入、请求校验、OpenAPI 输出、数据库访问、Qdrant 查询、任务创建、agent 编排和结果读取。HTTP controller 不执行抽帧、embedding、转写、Caption、剪辑等重任务，只调用 service 创建 PostgreSQL job 并返回状态。
 
 默认使用 NestJS 的 Express adapter。当前用户量级下，极致吞吐不是第一优先级；更重要的是把 Library、Jobs、Media、Search、Agent、Model Gateway 等能力放进清晰模块边界，降低后续功能膨胀时的维护成本。
 
@@ -127,9 +127,9 @@ Python worker 负责必须依赖 Python 生态或命令行媒体工具的重任�
 - ffprobe 媒体探测。
 - FFmpeg 抽帧、缩略图、转码和剪辑导出。
 - PySceneDetect scene boundary。
-- OpenCLIP / SigLIP embedding。
+- SigLIP2 图片与视频帧 embedding。
 - Whisper 转写。
-- OCR。
+- Qwen2.5-VL Caption 和 Caption 文本 embedding。
 
 Python worker 从 PostgreSQL `jobs` 表 claim 任务，执行后写回 job 状态和结果。它不拥有 schema，也不直接对外暴露产品 API。TypeScript 侧负责 Drizzle schema 和 job protocol，Python 侧使用 raw SQL 或极薄 query helper 访问明确字段。
 
@@ -144,11 +144,10 @@ Scanner 由 Python worker 执行。TypeScript API 只创建 `scan_library` job�
 Indexer 从文件创建 media assets：
 
 - 图片文件创建 image assets。
-- 视频文件创建 video frame 和 video segment assets。
-- 音频转写后创建 audio segment assets。
-- 文档和转写文本创建 text chunk assets。
+- 视频文件创建 `video_scenes` 行和引用场景 UUID 的 `video_frame` assets。
+- 音频或视频转写后创建 `text_chunk` assets。
 
-第一版可以使用 mock embeddings 来验证完整应用路径。扫描和搜索链路稳定后，再用真实的 OpenCLIP、SigLIP 或文本 embedding 替换。
+自动化测试使用 mock embeddings 隔离模型下载；本地运行使用真实 SigLIP2 和 Caption 文本 embedding。
 
 ### Retrieval
 
@@ -178,7 +177,7 @@ MVP 使用 Anthropic Claude Sonnet 作为默认 LLM provider，但外部 LLM 调
 
 外部 LLM 隐私边界：
 
-- 默认不发送源媒体文件、缩略图、关键帧、音频、视频或完整 transcript/OCR 文本。
+- 默认不发送源媒体文件、缩略图、关键帧、音频、视频、完整 transcript 或 Caption 原文。
 - 默认不发送绝对本地路径；对外部 LLM 只发送脱敏后的文件显示名、media type、时间范围、score、候选摘要和必要 metadata。
 - 如果用户后续开启外部 VLM 或发送候选样本，必须走 Model Gateway 的显式开关和审计记录，不由 Agent tool 直接上传。
 - 所有发往外部 LLM 的 request 摘要必须记录到 `agent_run_events`，便于用户审计。
@@ -233,7 +232,7 @@ Model Gateway 位于 TypeScript 主控层，用统一接口封装本地 Python w
 
 在线搜索需要低延迟 query embedding。真实 embedding 阶段默认增加本地 Python model service，只监听 localhost，负责加载模型并提供 `/embed/text`、`/embed/image` 等轻量 RPC。批量索引仍通过 PostgreSQL jobs 进入 Python worker。
 
-Python worker 和 Python model service 是两个进程模式，可以共享同一套推理代码。Phase 5-9 只启动 worker，不启动 model service。Phase 10 起启动 model service：`python -m media_agent_worker.model_service` 默认监听 `127.0.0.1:4020`，TypeScript `ModelGatewayService` 通过 `MODEL_SERVICE_URL` 调用 `/embed/text` 获取 query embedding。为避免 MPS/内存压力，默认策略是：在线 query embedding 由 model service 常驻模型处理；worker 进程内的 image/video embedding handlers 共享同一个 SigLIP embedder，避免同一 worker 重复加载模型。Apple Silicon 上可用 `SIGLIP_DEVICE=mps`，资源紧张时用 `SIGLIP_DEVICE=cpu`，CUDA 机器可用 `SIGLIP_DEVICE=cuda`。
+Python worker 和 Python model service 是两个独立进程，但共享同一套推理代码。`python -m media_agent_worker.model_service` 默认监听 `127.0.0.1:4020`，TypeScript `ModelGatewayService` 通过 `MODEL_SERVICE_URL` 同步调用 `/embed/text` 获取查询向量。为避免 MPS/内存压力，在线查询 embedding 由 model service 常驻模型处理；worker 进程内的 image/video embedding handlers 共享一个 SigLIP2 embedder，避免同一 worker 重复加载模型。Apple Silicon 上可用 `SIGLIP_DEVICE=mps`，资源紧张时用 `SIGLIP_DEVICE=cpu`，CUDA 机器可用 `SIGLIP_DEVICE=cuda`。
 
 ### Clip Export
 
@@ -249,7 +248,6 @@ Clip Export 由 TypeScript API 创建 job，Python worker 使用 FFmpeg 直接�
     thumbs/
     frames/
     transcripts/
-    ocr/
     scenes/
   exports/
     clips/

@@ -1,7 +1,6 @@
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { Test } from '@nestjs/testing'
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { SETTINGS } from '../../src/config/settings.js'
 import { DATABASE, PG_POOL } from '../../src/database/database.module.js'
@@ -10,6 +9,7 @@ import {
   createMediaFile,
   createVectorRef,
 } from '../../src/database/repositories.js'
+import { mediaFiles } from '../../src/database/schema.js'
 import { JobsController } from '../../src/jobs/jobs.controller.js'
 import { JobsModule } from '../../src/jobs/jobs.module.js'
 import { LibrariesController } from '../../src/libraries/libraries.controller.js'
@@ -21,7 +21,6 @@ let closeModule: () => Promise<void>
 let librariesController: LibrariesController
 let jobsController: JobsController
 let db: Awaited<ReturnType<typeof createTestDatabase>>['db']
-let client: Awaited<ReturnType<typeof createTestDatabase>>['client']
 const testSettings = {
   serverHost: '127.0.0.1',
   serverPort: 4000,
@@ -32,7 +31,6 @@ const testSettings = {
 beforeEach(async () => {
   const testDb = await createTestDatabase()
   db = testDb.db
-  client = testDb.client
   const { close } = testDb
   closeDb = close
 
@@ -153,7 +151,7 @@ describe('libraries API', () => {
     })
   })
 
-  test('历史 indexed vector ref 迁移后回填 media file 已索引状态', async () => {
+  test('只按 media_files 的事实状态统计已索引文件', async () => {
     const library = await librariesController.createLibrary({
       name: 'Historical',
       root_path: '/Volumes/Historical',
@@ -186,11 +184,9 @@ describe('libraries API', () => {
     await expect(librariesController.listLibraries()).resolves.toMatchObject({
       items: [expect.objectContaining({ indexed_count: 0 })],
     })
-    const migration = await readFile(
-      resolve('drizzle/0002_backfill_indexed_media_files.sql'),
-      'utf8',
-    )
-    await client.exec(migration)
+    // Python Worker 成功写入首个 Qdrant Point 后，会在同一事务中把 vector ref 和文件
+    // 都改为 indexed。列表只读取文件状态，避免多个向量引用让一个文件被重复计数。
+    await db.update(mediaFiles).set({ indexStatus: 'indexed' }).where(eq(mediaFiles.id, file.id))
 
     await expect(librariesController.listLibraries()).resolves.toMatchObject({
       items: [expect.objectContaining({ indexed_count: 1 })],

@@ -88,7 +88,7 @@ Response：
 }
 ```
 
-`indexed_count` 统计 `media_files.index_status='indexed'` 的 active 文件。任意一个 active vector ref 成功写入 Qdrant 后，worker 会在同一事务中把对应文件标记为 indexed；不要求该文件所有 vector refs 都完成。升级前已有 indexed refs 的文件由 `0002_backfill_indexed_media_files.sql` 回填。
+`indexed_count` 统计 `media_files.index_status='indexed'` 的 active 文件。任意一个 active vector ref 成功写入 Qdrant 后，worker 会在同一事务中把对应文件标记为 indexed；不要求该文件所有 vector refs 都完成。Phase 7 使用空库重建，不再保留历史状态回填迁移。
 
 ## GET /libraries/{id}
 
@@ -235,7 +235,7 @@ Response：
 
 ## POST /jobs/embedding/queue-pending
 
-手动补漏入口。默认运行时 `JobsCoordinatorService` 会自动扫描 pending `vector_refs` 并创建下游 worker jobs；该接口用于 worker 中断、Qdrant 重建或排查时主动补队列。接口不传递向量数据，只创建 `embed_image` 或 `embed_video_frame` jobs。
+手动补漏入口。默认运行时 `JobsCoordinatorService` 会自动扫描 pending `vector_refs` 并创建下游 worker jobs；该接口用于 worker 中断、Qdrant 重建或排查时主动补队列。接口不传递向量数据，只创建 `embed_image`、`embed_video_frame` 或 Caption 使用的 `embed_text_asset` jobs。
 
 Request：
 
@@ -251,33 +251,6 @@ Response：
 {
   "scanned": 2,
   "created": 2,
-  "skipped": 0
-}
-```
-
-## POST /jobs/ocr/queue-pending
-
-扫描待 OCR 的 `image` / `video_frame` asset（`text_content IS NULL` 或 `metadata_json` 无 `ocr` 标记），按 `library_id` / `file_id` 过滤后批量创建 `run_ocr` jobs。不强制全库执行。为避免失败循环，同一 asset 只要已有 `run_ocr` 尝试记录（queued/running/succeeded/failed），自动补队列会跳过；重新 OCR 需要后续显式重置/force 入口。
-
-Request：
-
-```json
-{
-  "library_id": "uuid",
-  "file_id": "uuid",
-  "batch_size": 20,
-  "limit": 100
-}
-```
-
-`library_id` / `file_id` 可选（不传则全库扫描）；`batch_size` 为单个 `run_ocr` job 的 asset 数量上限；`limit` 为本次最多扫描的待 OCR asset 数量。
-
-Response：
-
-```json
-{
-  "scanned": 50,
-  "created": 3,
   "skipped": 0
 }
 ```
@@ -436,15 +409,15 @@ Response：
   "assets": [
     {
       "id": "75c1157b-21b7-4a90-8c2f-2aa4ae7c9331",
-      "asset_type": "video_segment",
-      "start_time_seconds": 120.0,
-      "end_time_seconds": 150.0,
+      "asset_type": "video_frame",
+      "start_time_seconds": null,
+      "end_time_seconds": null,
       "cache_path": null,
       "text_content": null,
       "metadata_json": {
-        "scene_id": "scene-0007",
-        "keyframe_index": 0,
-        "segment_strategy": "scene_detection"
+        "scene_key": "scene-0007",
+        "detection_strategy": "content",
+        "frame_time_seconds": 135.0
       }
     }
   ]
@@ -622,23 +595,28 @@ Response（`ALLOW_EXTERNAL_LLM=false`）：
 }
 ```
 
-## 视频索引迁移接口
+## 单视频重索引接口
 
-`POST /jobs/video/reindex` 为现有 active 视频分批创建 `index_media` 任务。body 支持 `library_id`、`file_id`、`limit`（1～1000）、`dry_run` 和 `only_not_ready`；已有 queued/running `index_media` 的文件会计入 `skipped_active`，不会重复创建。
+`POST /jobs/video/reindex` 为一个 active 视频创建破坏性重索引任务。body 只接受
+`file_id`。Server 先检查该文件是否存在 queued/running 的媒体索引任务；存在时返回
+HTTP 409 和 `VIDEO_INDEX_JOBS_ACTIVE`，避免清理与写入并发。通过检查后，
+`media_files.index_status` 变为 `purge_queued`，并创建 `purge_video_index` Job。
 
-`GET /jobs/video/reindex-readiness` 返回视觉切换门槛：`segments_without_frames`、`segments_over_30_seconds`、`active_video_segment_vector_refs` 均为 0 时 `ready=true`。`segments_without_scene_caption_v2` 单独表示 caption 完整度；它会让默认 reindex 继续选中该文件，但不阻断 frame MaxSim 的视觉切换。
+Worker 领取该 Job 后删除此文件在 PostgreSQL 和 Qdrant 中的可重建派生数据，提升
+`index_generation`，再创建新的 `index_media`。接口不提供批量、dry-run 或 readiness
+参数；Phase 7 已从空库完成旧视频结构切换。
 
 ## 检索评测 API
 
 `/evaluation` 是仅供本地维护者使用的评测域，不改变普通 `/search` 的生产排序。
 
 - `GET /evaluation/sets`：列出评测集及最新版本。
-- `GET /evaluation/targets/random`：按可选 `library_id`、`limit`（最大 20）和 `seed` 返回已索引图片与稳定视频 scene 的随机目标。相同 seed 返回稳定顺序；响应只含媒体身份、路径与时间范围，不返回 Caption、OCR 或 Transcript。同一视频一批最多返回一个 scene。
+- `GET /evaluation/targets/random`：按可选 `library_id`、`limit`（最大 20）和 `seed` 返回已索引图片与稳定视频 scene 的随机目标。相同 seed 返回稳定顺序；响应只含媒体身份、路径与时间范围，不返回 Caption 或 Transcript。同一视频一批最多返回一个 scene。
 - `POST /evaluation/sets`：创建评测集和首个草稿版本。
 - `GET /evaluation/versions/{id}`：读取版本与查询。
 - `POST /evaluation/versions/{id}/queries`：向草稿版本添加查询。必须提供查询文本、类型、意图分类和非空的必须满足条件。
 - `POST /evaluation/versions/{id}/freeze`：冻结非空版本；冻结后不可修改。
-- `POST /evaluation/versions/{id}/runs`：使用 `library_ids` 启动基线运行。基线固定关闭查询扩展和 `video_segment_vectors`，每路深度为 20，RRF `k=60`，visual/caption/lexical 权重均为 1。
+- `POST /evaluation/versions/{id}/runs`：使用 `library_ids` 启动基线运行。基线固定关闭查询扩展，只使用当前 visual/caption/lexical 三路来源；每路深度为 20，RRF `k=60`，三路权重均为 1。
 - `GET /evaluation/runs/{id}`：读取运行与盲标候选。未标候选默认不返回来源证据、分数和排名；诊断读取可传 `reveal_evidence=true`。
 - `POST /evaluation/runs/{run_id}/candidates/{candidate_id}/judgment`：幂等保存 `relevance=0|1|2` 或 `unjudgeable=true`，可附加诊断与备注。
 - `POST /evaluation/runs/{id}/finalize`：全部主池候选完成判断后计算 current/RRF 报告。

@@ -1,7 +1,8 @@
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -12,6 +13,15 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
+
+// PostgreSQL 的 tsvector 是为全文检索准备的“词项集合”类型。Drizzle 没有内置的
+// tsvector 列构造器，因此在这里声明最小映射；业务代码仍只读写 text_content，
+// text_tsv 由数据库自动生成，不能由 Server 或 Python Worker 手工覆盖。
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return 'tsvector'
+  },
+})
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -112,6 +122,11 @@ export const mediaAssets = pgTable(
     frameTimeSeconds: numeric('frame_time_seconds'),
     contentHash: text('content_hash'),
     textContent: text('text_content'),
+    // simple 配置不会按英语规则删除或变形词，适合中英文混合的语音转录文本。
+    // 生成列与 text_content 永远在同一次数据库写入中保持一致，避免异步索引遗漏。
+    textTsv: tsvector('text_tsv').generatedAlwaysAs(
+      sql`to_tsvector('simple', coalesce("text_content", ''))`,
+    ),
     metadataJson: jsonb('metadata_json').notNull().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -120,6 +135,14 @@ export const mediaAssets = pgTable(
     index('media_assets_scene_id_idx').on(table.sceneId),
     // asset_type + file_id 是常用过滤（例如列某文件的所有 video_frame），建立复合索引。
     index('media_assets_file_type_idx').on(table.fileId, table.assetType),
+    // GIN（Generalized Inverted Index，广义倒排索引）记录“词项出现在哪些行”，
+    // 搜索时无需逐行扫描全部转录文本，因此媒体库增长后仍能保持可用响应速度。
+    index('media_assets_text_tsv_idx').using('gin', table.textTsv),
+    // 同一文件、同一时间窗只能有一个转录文本块。where 让约束只作用于 text_chunk，
+    // 不会误伤时间相同但用途不同的图片、视频帧或 Caption Asset。
+    uniqueIndex('media_assets_text_chunk_unique')
+      .on(table.fileId, table.startTimeSeconds, table.endTimeSeconds)
+      .where(sql`${table.assetType} = 'text_chunk'`),
   ],
 )
 
@@ -184,14 +207,15 @@ export const jobs = pgTable(
     errorCode: text('error_code'),
     errorDetailsJson: jsonb('error_details_json'),
     // file_id 是单文件媒体任务的正式外键（index_media/embed_*/transcribe_audio/
-    // generate_caption/export_clip 都填写）；scan_library 等多文件任务可空。阶段 9 的
-    // verify_multi_frame_search 涉及多文件，候选仍保存在 input_json 而非本列。
+    // generate_caption/export_clip 都填写）；scan_library 等多文件任务可空。
     fileId: uuid('file_id').references(() => mediaFiles.id),
     ...timestamps,
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   (table) => [
-    index('jobs_claim_idx').on(table.status, table.priority, table.createdAt),
+    // Worker 的领取顺序是 priority DESC、created_at ASC；索引方向必须完全一致，
+    // 否则 PostgreSQL 在大队列中仍需额外排序后才能取得第一条任务。
+    index('jobs_claim_idx').on(table.status, table.priority.desc(), table.createdAt.asc()),
     index('jobs_file_id_idx').on(table.fileId),
   ],
 )

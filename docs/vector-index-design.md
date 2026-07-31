@@ -8,7 +8,7 @@
 
 - PostgreSQL 是事实来源。
 - Qdrant 只保存向量和轻量 payload。
-- 原始文件路径、完整 metadata、transcript、OCR 全文、job 状态都回 PostgreSQL 查询。
+- 原始文件路径、完整 metadata、transcript、Caption 原文和 job 状态都回 PostgreSQL 查询。
 - point id 必须可重复生成，支持幂等 upsert。
 - 模型名称、模型版本、向量维度和距离算法必须被记录，方便后续重建索引。
 
@@ -127,7 +127,7 @@ VECTOR_COLLECTIONS = {
 }
 ```
 
-Payload 只放检索过滤和回表所需字段。不要放完整 transcript、OCR 全文、大块 metadata 或源文件内容。
+Payload 只放检索过滤和回表所需字段。不要放完整 transcript、Caption 原文、大块 metadata 或源文件内容。
 
 ## Point ID 策略
 
@@ -195,48 +195,18 @@ source
 ```text
 image
 keyframe
-scene_aggregate
 transcript_chunk
-ocr_chunk
-document_chunk
+vlm_scene_caption
 ```
 
-## Segment Vector 策略
-
-`video_segment_vectors` 是迁移前的代表帧策略。新索引保留 `video_segment` 资产作为边界与 caption 容器，但不再创建该 collection 的 vector ref；迁移完成后通过 `VIDEO_SEGMENT_SEARCH_ENABLED=false` 停止在线读取，旧 points 不删除、旧 refs 标记 stale。
+## 视频场景与帧策略
 
 当前视频视觉索引策略：
 
-1. PySceneDetect 得到原始 scene，超过 `SCENE_MAX_SECONDS` 的长镜头继续拆窗，fallback 也使用固定 30 秒窗口。
+1. PySceneDetect 得到原始 scene，超过 `SCENE_MAX_SECONDS` 的长镜头继续拆窗；检测失败时也生成带稳定 UUID 的降级窗口。
 2. 每个窗口至少创建一个带相同 `scene_id` 的 `video_frame`，并根据密度创建额外关键帧；每帧独立写入 `video_frame_vectors`。
-3. 在线检索按 `(file_id, scene_id)` 做 MaxSim，最佳帧提供分数和证据，`video_segment` 提供真实时间边界。
-
-旧策略记录如下：
-
-```text
-1. 每个 scene 选一个代表帧，取 scene 中点。
-2. 代表帧写入 video_segment asset（vector_kind='representative_frame_embedding'）→ video_segment_vectors。
-3. 代表帧只进 video_segment_vectors，不重复进 video_frame_vectors。
-4. scene 另按 `KEYFRAME_DENSITY` 生成关键帧（video_frame asset，vector_kind='frame_embedding'）→ video_frame_vectors；默认 `dense` 下短 scene 也会补帧，中长 scene 按时长增加，单 scene 最多 10 个额外关键帧，与代表帧不重复。
-5. scene 代表帧 asset 与其关键帧 asset 在 media_assets.metadata_json 中共享同一 scene_id（不新增 DB 列）；固定切片 scene_id 为 null。
-```
-
-不在 MVP 中使用简单平均池化作为默认策略。原因是一个 scene 内可能包含镜头移动、主体变化或字幕切换，平均后可能削弱关键视觉信号。
-
-后续允许新增聚合策略：
-
-```text
-mean_pooling
-max_pooling
-weighted_keyframe_pooling
-multimodal_segment_embedding
-```
-
-新增策略时必须：
-
-- 写入 `vector_kind`。
-- 在 payload 中记录 `aggregation_strategy`。
-- 保留可重建输入，例如代表帧或参与聚合的 frame asset IDs。
+3. 在线检索按 `(file_id, scene_id)` 做 MaxSim，最佳帧提供分数和证据，`video_scenes` 表提供权威时间边界与 generation。
+4. 视频场景本身不创建向量 Point，也不存在 `video_segment` asset 或 `video_segment_vectors` Collection。
 
 ## Payload Index
 
@@ -420,7 +390,8 @@ MVP 可以先标记为 deleted，后续后台清理 Qdrant points。
 MVP 可以先做：
 
 - `image_vectors`
-- `video_segment_vectors`
+- `video_frame_vectors`
+- `caption_text_vectors`
 - deterministic mock vectors
 - `vector_refs`
 - collection registry

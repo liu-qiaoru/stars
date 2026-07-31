@@ -68,7 +68,7 @@ export const pythonWorkerSchemaContract = {
     // 结构化错误码与技术诊断（场景检测失败等确定性错误使用）。
     'errorCode',
     'errorDetailsJson',
-    // 单文件媒体任务的外键；多文件任务（scan_library/verify_multi_frame_search）可空。
+    // 单文件媒体任务的外键；scan_library 等多文件任务可空。
     'fileId',
     'heartbeatAt',
     'lockedBy',

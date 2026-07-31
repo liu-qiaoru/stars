@@ -313,6 +313,7 @@ describe('jobs service', () => {
       expect.arrayContaining([
         expect.objectContaining({
           job_type: 'embed_image',
+          priority: 10,
           input: expect.objectContaining({
             asset_id: imageAsset.id,
             path: '/media/cat.jpg',
@@ -323,6 +324,7 @@ describe('jobs service', () => {
         }),
         expect.objectContaining({
           job_type: 'embed_video_frame',
+          priority: 10,
           input: expect.objectContaining({
             asset_id: frameAsset.id,
             frame_path: '/media/clip.mp4',
@@ -334,6 +336,57 @@ describe('jobs service', () => {
         }),
       ]),
     )
+  })
+
+  test('前一页 pending refs 已有任务时继续扫描下一页', async () => {
+    const library = await createLibrary(db, { name: 'Paged', rootPath: '/paged' })
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/paged/image.jpg',
+      relativePath: 'image.jpg',
+      mediaType: 'image',
+      sizeBytes: 20,
+      mtimeMs: 2,
+    })
+
+    for (const [index, pointId] of [
+      [1, '11111111-1111-4111-8111-111111111111'],
+      [2, '22222222-2222-4222-8222-222222222222'],
+    ] as const) {
+      const asset = await createMediaAsset(db, {
+        fileId: file.id,
+        assetType: 'image',
+        path: `/paged/image-${index}.jpg`,
+        contentHash: `image-${index}`,
+      })
+      await createVectorRef(db, {
+        assetId: asset.id,
+        fileId: file.id,
+        libraryId: library.id,
+        collectionName: 'image_vectors',
+        pointId,
+        modelName: 'google/siglip2-base-patch16-224',
+        modelVersion: 'siglip2-base-patch16-224',
+        vectorKind: 'image_embedding',
+        vectorDim: 768,
+        distance: 'Cosine',
+        contentHash: `image-${index}`,
+        indexProfile: 'balanced',
+      })
+    }
+
+    await expect(service.queuePendingEmbeddingJobs(1)).resolves.toEqual({
+      scanned: 1,
+      created: 1,
+      skipped: 0,
+    })
+    // 回归场景：第二轮第一页仍是已有任务的 pending ref。协调器必须继续翻页，
+    // 否则大型素材库永远只有最早的一批向量能够进入任务队列。
+    await expect(service.queuePendingEmbeddingJobs(1)).resolves.toEqual({
+      scanned: 2,
+      created: 1,
+      skipped: 1,
+    })
   })
 
   test('将 pending caption_text_vectors 转成 embed_text_asset job', async () => {

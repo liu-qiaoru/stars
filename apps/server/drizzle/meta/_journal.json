@@ -5,50 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1780211013597,
-      "tag": "0000_tense_starfox",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1781517600000,
-      "tag": "0001_phase_12_transcripts",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1783731600000,
-      "tag": "0002_backfill_indexed_media_files",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1783864412445,
-      "tag": "0003_dark_blizzard",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1783958400000,
-      "tag": "0004_stale_legacy_video_captions",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1783958400001,
-      "tag": "0005_rebuild_scene_schema",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1785411451084,
-      "tag": "0006_cloudy_shockwave",
+      "when": 1785424526406,
+      "tag": "0000_final_baseline",
       "breakpoints": true
     }
   ]

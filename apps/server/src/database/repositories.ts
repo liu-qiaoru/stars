@@ -142,12 +142,19 @@ export async function createJob(
   return row
 }
 
-export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 100) {
+export async function listPendingEmbeddingVectorRefs(
+  db: Database,
+  limitCount = 100,
+  after?: { createdAtCursor: string; id: string },
+) {
   // 这里扫描的是 PostgreSQL 中 pending 的 vector_refs，而不是 Qdrant。
   // Python worker 负责真正读取文件、生成 embedding、写 Qdrant，并把 ref 标成 indexed。
   return db
     .select({
       vectorRefId: vectorRefs.id,
+      // PostgreSQL timestamptz 可保留微秒，而 JavaScript Date 只有毫秒精度。游标必须使用
+      // 数据库生成的文本原样往返，否则 .000500 会被截成 .000000，下一页可能重复首行。
+      vectorRefCreatedAtCursor: sql<string>`${vectorRefs.createdAt}::text`,
       vectorRefUpdatedAt: vectorRefs.updatedAt,
       assetId: vectorRefs.assetId,
       fileId: vectorRefs.fileId,
@@ -182,9 +189,15 @@ export async function listPendingEmbeddingVectorRefs(db: Database, limitCount = 
         // 排除 purge_queued 文件：阶段 3 的破坏性重索引即将删除其派生数据，
         // 协调器不应再为它创建新的 embedding 任务，避免边删边写的竞争。
         sql`${mediaFiles.indexStatus} <> 'purge_queued'`,
+        // 使用 (created_at, id) 键集游标而不是 OFFSET。Worker 会并发把前页 ref 改成
+        // indexed，使 pending 结果集收缩；时间文本转回 timestamptz 后仍保留数据库微秒精度。
+        after
+          ? sql`(${vectorRefs.createdAt}, ${vectorRefs.id}) > (${after.createdAtCursor}::timestamptz, ${after.id}::uuid)`
+          : undefined,
       ),
     )
-    .orderBy(asc(vectorRefs.createdAt))
+    // UUID 次排序让同一事务或同一微秒创建的 ref 也拥有唯一、稳定的遍历顺序。
+    .orderBy(asc(vectorRefs.createdAt), asc(vectorRefs.id))
     .limit(limitCount)
 }
 
