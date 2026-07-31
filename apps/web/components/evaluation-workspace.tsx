@@ -30,6 +30,7 @@ export function EvaluationWorkspace({
   const [targets, setTargets] = useState<EvaluationTarget[]>([])
   const [targetKey, setTargetKey] = useState('')
   const [run, setRun] = useState<EvaluationRun | null>(null)
+  const [runId, setRunId] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   async function guard(action: () => Promise<void>) {
@@ -98,7 +99,20 @@ export function EvaluationWorkspace({
     })
   }
 
-  const next = run?.candidates.find((candidate) => !candidate.judgment)
+  /**
+   * 使用 PostgreSQL 中不可变的运行标识恢复盲标。
+   *
+   * 评测候选可能需要多次会话才能标完；恢复时服务端仍隐藏来源分数与两种排序名次，
+   * 页面只选择第一个尚无人工判断的候选，因此不会重复覆盖已经完成的标注。
+   */
+  async function restoreRun(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await guard(async () => setRun(await apiClient.getEvaluationRun(runId.trim())))
+  }
+
+  const requiredCandidates = run?.candidates.filter((candidate) => candidate.requires_judgment) ?? []
+  const next = requiredCandidates.find((candidate) => !candidate.judgment)
+  const judgedCount = requiredCandidates.filter((candidate) => candidate.judgment).length
   return (
     <section className="space-y-6">
       <header>
@@ -107,6 +121,17 @@ export function EvaluationWorkspace({
         <p className="muted">候选完成盲标前隐藏来源名次和 RRF 贡献；RRF 分数不是相关概率。</p>
       </header>
       {error ? <p role="alert">操作失败：{error}</p> : null}
+      <form className="panel flex flex-col gap-2 sm:flex-row" onSubmit={restoreRun}>
+        <input
+          aria-label="评测运行 ID"
+          className="min-w-0 flex-1 rounded border p-2"
+          placeholder="输入运行 ID，刷新页面后可继续盲标"
+          required
+          value={runId}
+          onChange={(event) => setRunId(event.target.value)}
+        />
+        <button className="secondary-action justify-center">恢复盲标</button>
+      </form>
       <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
         <aside className="panel space-y-3">
           <h2 className="section-title">评测集</h2>
@@ -224,6 +249,14 @@ export function EvaluationWorkspace({
           {run ? (
             <section aria-label="评测运行" className="space-y-3">
               <h2>运行状态：{run.status}</h2>
+              <p className="muted">
+                已标注 {judgedCount} / {requiredCandidates.length}
+              </p>
+              <p className="muted">
+                自然发现查询只需判断两种排序各自前 20 名的合并结果。指定目标已在搜索前
+                固定正确场景，系统会自动检查它是否进入前 5、10、20 名以及首次出现名次，
+                无需逐条判断其他候选。
+              </p>
               {run.error_message ? (
                 <p role="alert">
                   {run.error_code}：{run.error_message}

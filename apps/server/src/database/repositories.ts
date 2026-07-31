@@ -490,6 +490,21 @@ export async function listSearchResultMetadata(
       .select({
         pointId: vectorRefs.pointId,
         assetId: mediaAssets.id,
+        // 图片 Caption 是独立的 media_assets 行，但搜索业务身份必须是源图片 Asset。
+        // 一个 active 图片文件只会有一个 image Asset；相关子查询让 Caption-only 命中也能
+        // 返回该稳定身份，从而与视觉通道合并，并正确匹配冻结的图片评测目标。
+        imageAssetId: sql<string | null>`CASE
+          WHEN ${mediaFiles.mediaType} = 'image' THEN (
+            SELECT source_image.id
+            FROM media_assets AS source_image
+            WHERE source_image.file_id = ${mediaFiles.id}
+              AND source_image.asset_type = 'image'
+              AND COALESCE(source_image.metadata_json->>'stale', 'false') <> 'true'
+            ORDER BY source_image.created_at ASC, source_image.id ASC
+            LIMIT 1
+          )
+          ELSE NULL
+        END`,
         assetType: mediaAssets.assetType,
         fileId: mediaFiles.id,
         mediaType: mediaFiles.mediaType,

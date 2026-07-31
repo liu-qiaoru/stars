@@ -64,11 +64,16 @@ export function calculateRankingMetrics(
     const value = judgments.get(key)
     return value === undefined || value === null ? [] : [value]
   })
+  // current 与倒数排名融合（Reciprocal Rank Fusion，RRF）必须共享同一个理想分母。
+  // 否则某个排序漏掉高度相关候选时，只按自己召回的较弱结果重排，仍可能错误得到满分 1。
+  const sharedIdealRelevance = [...judgments.values()].flatMap((value) =>
+    value === null ? [] : [value],
+  )
   return {
     precisionAt5: precisionAt(judged, 5),
     precisionAt10: precisionAt(judged, 10),
-    ndcgAt10: ndcgAt(judged, 10),
-    ndcgAt20: ndcgAt(judged, 20),
+    ndcgAt10: ndcgAt(judged, sharedIdealRelevance, 10),
+    ndcgAt20: ndcgAt(judged, sharedIdealRelevance, 20),
     hitAt5: null,
     hitAt10: null,
     hitAt20: null,
@@ -87,16 +92,18 @@ function precisionAt(relevance: number[], k: number) {
   return visible.filter((value) => value > 0).length / visible.length
 }
 
-// nDCG@K：归一化折损累计增益，结果在 [0,1]。
-// DCG = Σ (2^rel - 1) / log2(rank+1)：相关等级越高、排得越靠前，收益越大；用 2^rel-1
-// 放大高相关结果的权重。IDC G 是同一组等级按理想（降序）排列的 DCG，作为归一化分母。
-function ndcgAt(relevance: number[], k: number) {
+// nDCG（Normalized Discounted Cumulative Gain，归一化折损累计增益）结果在 [0,1]。
+// 折损累计增益 = Σ (2^相关等级 - 1) / log2(名次+1)：相关等级越高、排得越靠前，收益越大。
+// 理想分母使用两种排序共同人工判断池中的等级降序排列；这样遗漏高度相关候选也会被扣分。
+function ndcgAt(relevance: number[], sharedIdealRelevance: number[], k: number) {
   const visible = relevance.slice(0, k)
   if (!visible.length) {
     return null
   }
   const dcg = discountedGain(visible)
-  const ideal = discountedGain([...visible].sort((left, right) => right - left))
+  const ideal = discountedGain(
+    [...sharedIdealRelevance].sort((left, right) => right - left).slice(0, k),
+  )
   return ideal === 0 ? 0 : dcg / ideal
 }
 

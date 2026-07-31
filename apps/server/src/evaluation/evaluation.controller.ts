@@ -1,9 +1,14 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common'
 import { EvaluationService } from './evaluation.service.js'
 
 @Controller('evaluation')
 export class EvaluationController {
-  constructor(private readonly service: EvaluationService) {}
+  constructor(
+    // tsx 开发运行时不会可靠保留 TypeScript 构造器类型元数据，因此与其他 Controller 一样
+    // 显式声明注入 Token，避免真实 /evaluation/* 路由拿到 undefined service。
+    @Inject(EvaluationService)
+    private readonly service: EvaluationService,
+  ) {}
 
   @Get('sets') listSets() {
     return this.service.listSets()

@@ -53,6 +53,26 @@ type SearchItem = {
   best_frame_time_seconds?: number | null
 }
 
+/** 候选进入当前排序或 RRF（Reciprocal Rank Fusion，倒数排名融合）任一前 20 名时返回 true。 */
+function isTop20Candidate(currentRank: number | null, rrfRank: number | null) {
+  return [currentRank, rrfRank].some((rank) => rank !== null && rank >= 1 && rank <= 20)
+}
+
+/**
+ * 判断候选是否需要人工相关性标注。
+ *
+ * 自然发现指标最深只读取前 20 名，因此进入当前排序或倒数排名融合任一前 20 名的候选
+ * 需要标注。指定目标只比较冻结目标的唯一标识和名次，无论名次如何都不读人工等级。
+ */
+export function requiresCandidateJudgment(
+  queryType: string | undefined,
+  currentRank: number | null,
+  rrfRank: number | null,
+) {
+  if (queryType !== 'discovery') return false
+  return isTop20Candidate(currentRank, rrfRank)
+}
+
 @Injectable()
 export class EvaluationService {
   constructor(
@@ -243,9 +263,15 @@ export class EvaluationService {
           await this.validateFrozenTarget(db, query)
           await this.snapshotQuery(db, runId, query, libraryIds)
         }
+        // 自然发现需要人工分级相关性；指定目标只比较冻结目标唯一标识与候选名次。
+        // 若整个版本只有指定目标，召回完成后可直接生成报告。
+        const requiresHumanLabeling = queries.some((query) => query.queryType === 'discovery')
         await db
           .update(evaluationRuns)
-          .set({ status: 'ready_for_labeling', updatedAt: new Date() })
+          .set({
+            status: requiresHumanLabeling ? 'ready_for_labeling' : 'labeled',
+            updatedAt: new Date(),
+          })
           .where(eq(evaluationRuns.id, runId))
       })
     } catch (error) {
@@ -364,7 +390,9 @@ export class EvaluationService {
         currentRank: currentRank.get(key) ?? null,
         rrfRank: rrfRank.get(key) ?? null,
         blindOrder: index + 1,
-        primaryPool: true,
+        // current 比较列表可能携带 Top-20 之外的诊断项；快照保留它们，
+        // 但只把进入任一排序 Top-20 的候选列为正式指标池。
+        primaryPool: isTop20Candidate(currentRank.get(key) ?? null, rrfRank.get(key) ?? null),
       }
     })
     if (values.length) await db.insert(evaluationCandidates).values(values)
@@ -391,13 +419,27 @@ export class EvaluationService {
       : []
     const queryRows = rows.length
       ? await db
-          .select({ id: evaluationQueries.id, queryText: evaluationQueries.queryText })
+          .select({
+            id: evaluationQueries.id,
+            queryText: evaluationQueries.queryText,
+            queryType: evaluationQueries.queryType,
+          })
           .from(evaluationQueries)
           .where(inArray(evaluationQueries.id, [...new Set(rows.map((row) => row.queryId))]))
       : []
     const queryTextById = new Map(queryRows.map((row) => [row.id, row.queryText]))
+    const queryTypeById = new Map(queryRows.map((row) => [row.id, row.queryType]))
     const byCandidate = new Map(judgments.map((row) => [row.candidateId, row]))
-    const allJudged = rows.every((row) => byCandidate.has(row.id))
+    // 只有自然发现查询的前 K 条准确率和分级排序指标依赖人工相关等级。指定目标直接使用
+    // 冻结目标唯一标识与名次，不应阻塞证据揭示或要求无意义的人工标注。
+    const allJudged = rows.every(
+      (row) =>
+        !requiresCandidateJudgment(
+          queryTypeById.get(row.queryId),
+          row.currentRank,
+          row.rrfRank,
+        ) || byCandidate.has(row.id),
+    )
     if (revealEvidence && !allJudged) {
       throw new ConflictException(
         'source evidence remains hidden until primary labeling is complete',
@@ -417,6 +459,11 @@ export class EvaluationService {
           id: row.id,
           query_id: row.queryId,
           query_text: queryTextById.get(row.queryId) ?? '',
+          requires_judgment: requiresCandidateJudgment(
+            queryTypeById.get(row.queryId),
+            row.currentRank,
+            row.rrfRank,
+          ),
           candidate_key: row.candidateKey,
           file_id: row.fileId,
           scene_id: row.sceneId,
@@ -492,10 +539,22 @@ export class EvaluationService {
         .set({ labelStatus: 'judged' })
         .where(eq(evaluationCandidates.id, candidateId))
       const runCandidates = await db
-        .select({ labelStatus: evaluationCandidates.labelStatus })
+        .select({
+          labelStatus: evaluationCandidates.labelStatus,
+          queryType: evaluationQueries.queryType,
+          currentRank: evaluationCandidates.currentRank,
+          rrfRank: evaluationCandidates.rrfRank,
+        })
         .from(evaluationCandidates)
+        .innerJoin(evaluationQueries, eq(evaluationCandidates.queryId, evaluationQueries.id))
         .where(eq(evaluationCandidates.runId, runId))
-      if (runCandidates.length > 0 && runCandidates.every((row) => row.labelStatus === 'judged')) {
+      const requiredCandidates = runCandidates.filter((row) =>
+        requiresCandidateJudgment(row.queryType, row.currentRank, row.rrfRank),
+      )
+      if (
+        requiredCandidates.length > 0 &&
+        requiredCandidates.every((row) => row.labelStatus === 'judged')
+      ) {
         await db
           .update(evaluationRuns)
           .set({ status: 'labeled', updatedAt: new Date() })
@@ -518,8 +577,12 @@ export class EvaluationService {
       if (blind.status !== 'ready_for_labeling' && blind.status !== 'labeled') {
         throw new ConflictException('run is not ready')
       }
-      if (blind.candidates.some((candidate) => !candidate.judgment)) {
-        throw new ConflictException('all primary candidates must be judged')
+      if (
+        blind.candidates.some(
+          (candidate) => candidate.requires_judgment && !candidate.judgment,
+        )
+      ) {
+        throw new ConflictException('all discovery candidates must be judged')
       }
       const revealed = await this.getRun(runId, true, db)
       const queries = await db
@@ -530,11 +593,25 @@ export class EvaluationService {
         const candidates = revealed.candidates.filter(
           (candidate) => candidate.query_id === query.id,
         )
-        const judgments = new Map(
-          candidates.map((candidate) => [
-            candidate.candidate_key,
-            candidate.judgment!.unjudgeable ? null : (candidate.judgment!.relevance as 0 | 1 | 2),
-          ]),
+        // 指定目标指标不读人工等级；即使旧运行已经误标了部分候选，也传空 Map，避免
+        // “无法判断”数量让人误以为它影响前 K 名命中率或平均倒数排名。
+        const judgments = new Map<string, 0 | 1 | 2 | null>(
+          query.queryType === 'discovery'
+            ? candidates.flatMap((candidate) =>
+                // 共同理想分母只能读取协议规定的两种排序前 20 名并集。更早阶段多标的
+                // 诊断候选继续留库审计，但不能让正式分数依赖用户偶然多标了多少条。
+                candidate.requires_judgment && candidate.judgment
+                  ? [
+                      [
+                        candidate.candidate_key,
+                        candidate.judgment.unjudgeable
+                          ? null
+                          : (candidate.judgment.relevance as 0 | 1 | 2),
+                      ] as [string, 0 | 1 | 2 | null],
+                    ]
+                  : [],
+              )
+            : [],
         )
         const target = query.targetSceneId ?? query.targetAssetId
         const options = { knownTargetKey: target }
@@ -664,7 +741,8 @@ export class EvaluationService {
   }
 
   private candidateKey(item: SearchItem) {
-    // 与生产 RRF 的语义身份一致：视频按正式场景 UUID 合并；图片和 transcript 按 Asset ID。
+    // 与生产倒数排名融合的语义身份一致：视频按正式场景唯一标识合并；图片和转录文本
+    // 按媒体资产唯一标识合并，避免同一业务对象重复占据结果位置。
     return item.scene_id ?? item.asset_id
   }
   private async validateFrozenTarget(db: Database, query: typeof evaluationQueries.$inferSelect) {

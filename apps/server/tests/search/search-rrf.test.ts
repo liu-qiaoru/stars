@@ -130,6 +130,43 @@ describe('RRF production search adapter', () => {
     expect(results.map((result) => result.ranking_diagnostics?.source_ranks.visual)).toEqual([1, 2])
   })
 
+  test('merges image visual and Caption evidence by the canonical image Asset ID', () => {
+    const results = buildRrfSearchResults(
+      [
+        candidate({
+          asset_id: 'image-asset',
+          file_id: 'image-file',
+          media_type: 'image',
+          path: '/media/image.jpg',
+          scene_id: null,
+          start_time_seconds: null,
+          end_time_seconds: null,
+          source_signal: 'visual',
+        }),
+        candidate({
+          // PostgreSQL 回表会把图片 Caption 的业务身份规范为源图片 Asset ID。
+          // 这里复现规范化后的输入，防止同一张图片在融合结果中占据两个位置。
+          asset_id: 'image-asset',
+          file_id: 'image-file',
+          media_type: 'image',
+          path: '/media/image.jpg',
+          scene_id: null,
+          start_time_seconds: null,
+          end_time_seconds: null,
+          source_signal: 'caption',
+        }),
+      ],
+      { limit: 10, offset: 0, includeDiagnostics: true },
+    )
+
+    expect(results).toHaveLength(1)
+    expect(results[0]).toMatchObject({
+      asset_id: 'image-asset',
+      reasons: ['vector_match', 'caption_match'],
+      score: 1 / 61 + 1 / 61,
+    })
+  })
+
   test('uses image Asset ID and transcript Asset ID when no video scene exists', () => {
     const results = buildRrfSearchResults(
       [

@@ -575,6 +575,66 @@ describe('search service', () => {
     ).rejects.toThrow('caption collection unavailable')
   })
 
+  test('图片 Caption-only 命中返回源图片 Asset ID', async () => {
+    currentSettings = { ...testSettings, captionSearchEnabled: true }
+    await closeModule()
+    await buildModule(currentSettings)
+
+    const library = await createLibrary(db, { name: 'Images', rootPath: '/images' })
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/images/drum.jpg',
+      relativePath: 'drum.jpg',
+      mediaType: 'image',
+      sizeBytes: 100,
+      mtimeMs: 1710000000000,
+    })
+    const imageAsset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: 'image',
+      contentHash: 'image-hash',
+    })
+    const captionAsset = await createMediaAsset(db, {
+      fileId: file.id,
+      assetType: 'caption',
+      textContent: 'A musician plays drums',
+      contentHash: 'caption-hash',
+      metadataJson: { prompt_version: 'caption-v1', source: 'vlm_caption' },
+    })
+    const captionPointId = '15151515-1515-4515-8515-151515151515'
+    await createVectorRef(db, {
+      assetId: captionAsset.id,
+      fileId: file.id,
+      libraryId: library.id,
+      collectionName: 'caption_text_vectors',
+      pointId: captionPointId,
+      modelName: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+      modelVersion: 'paraphrase-multilingual-MiniLM-L12-v2',
+      vectorKind: 'vlm_caption_text_embedding',
+      vectorDim: 384,
+      distance: 'Cosine',
+      contentHash: 'caption-hash',
+      indexProfile: 'balanced',
+      status: 'indexed',
+    })
+    search.mockImplementation(async (collectionName: string) =>
+      collectionName === 'caption_text_vectors'
+        ? [{ id: captionPointId, score: 0.9 }]
+        : [],
+    )
+    searchPointGroups.mockResolvedValue({ groups: [] })
+
+    const result = await service.search({ query: 'playing drums', media_types: ['image'] })
+
+    // Caption 的向量引用仍指向 Caption Asset，但搜索结果身份必须是源图片 Asset，
+    // 才能匹配用户冻结的图片目标并与同图视觉命中合并。
+    expect(result.results).toHaveLength(1)
+    expect(result.results[0]).toMatchObject({
+      asset_id: imageAsset.id,
+      primary_reason: 'caption_match',
+    })
+  })
+
   test('caption vector hits are returned as caption_match when enabled', async () => {
     currentSettings = { ...testSettings, captionSearchEnabled: true }
     await closeModule()

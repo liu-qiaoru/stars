@@ -176,8 +176,8 @@ function semanticCandidateKey(candidate: RrfSourceCandidate) {
   if (candidate.media_type === 'video' && candidate.scene_id) {
     return `video:${candidate.scene_id}`
   }
-  // 图片的视觉 Asset 和图片 Caption 当前是两个独立 Asset；这里严格使用各自 Asset ID，
-  // 不用 file_id 猜测二者关系。视频 Caption 则通过正式 scene_id 与视觉场景合并。
+  // 图片 Caption 在 PostgreSQL 回表时已规范为源图片 Asset ID，因此可与视觉通道稳定合并；
+  // 视频 Caption 则通过正式 scene_id 与视觉场景合并。这里不使用 file_id 猜测身份。
   return `${candidate.media_type}:${candidate.asset_id}`
 }
 

@@ -6,7 +6,10 @@ import {
   createMediaFile,
 } from '../../src/database/repositories.js'
 import { evaluationCandidates, videoScenes } from '../../src/database/schema.js'
-import { EvaluationService } from '../../src/evaluation/evaluation.service.js'
+import {
+  EvaluationService,
+  requiresCandidateJudgment,
+} from '../../src/evaluation/evaluation.service.js'
 import type { SearchService } from '../../src/search/search.service.js'
 import { createTestDatabase } from '../database/test-db.js'
 
@@ -21,6 +24,14 @@ afterEach(async () => {
 })
 
 describe('Phase 6 evaluation runtime', () => {
+  test('only discovery candidates in either current or RRF Top-20 require human labels', () => {
+    expect(requiresCandidateJudgment('known_target', 1, 1)).toBe(false)
+    expect(requiresCandidateJudgment('discovery', 20, null)).toBe(true)
+    expect(requiresCandidateJudgment('discovery', null, 20)).toBe(true)
+    expect(requiresCandidateJudgment('discovery', 21, null)).toBe(false)
+    expect(requiresCandidateJudgment('discovery', null, 21)).toBe(false)
+  })
+
   test('PGlite migration creates all six evaluation tables', async () => {
     const rows = await context.client.query<{ tablename: string }>(
       "select tablename from pg_tables where schemaname='public' and tablename like 'evaluation_%'",
@@ -111,21 +122,71 @@ describe('Phase 6 evaluation runtime', () => {
       target_file_id: file.id,
       target_scene_id: sceneId,
     })
+    await service.addQuery(set.version_id, {
+      query_text: '自然发现海边的人',
+      query_type: 'discovery',
+      intent_category: '人物',
+      must_have: ['人'],
+    })
     await service.freezeVersion(set.version_id)
     const run = await service.startRun(set.version_id, { library_ids: [library.id] })
 
     expect(run.status).toBe('ready_for_labeling')
-    expect(run.candidates[0]).toMatchObject({ scene_id: sceneId, judgment: null })
-    expect(run.candidates[0]).not.toHaveProperty('source_evidence')
+    const knownTarget = run.candidates.find((candidate) => candidate.query_text === '海边的人')!
+    const discovery = run.candidates.find(
+      (candidate) => candidate.query_text === '自然发现海边的人',
+    )!
+    expect(knownTarget).toMatchObject({
+      scene_id: sceneId,
+      judgment: null,
+      requires_judgment: false,
+    })
+    expect(discovery).toMatchObject({ judgment: null, requires_judgment: true })
+    expect(knownTarget).not.toHaveProperty('source_evidence')
     await expect(service.getRun(run.id, true)).rejects.toThrow(/evidence remains hidden/)
-    expect(searchForEvaluation).toHaveBeenCalledTimes(1)
+    expect(searchForEvaluation).toHaveBeenCalledTimes(2)
 
-    const labeled = await service.saveJudgment(run.id, run.candidates[0]!.id, { relevance: 2 })
+    // 复现用户在工作量收紧前多标了一个两种排序前 20 名之外的候选。该判断需要保留审计，
+    // 但不能进入正式 nDCG 理想分母，否则分数会取决于用户偶然多标了多少条。
+    const outsidePoolId = randomUUID()
+    await context.db.insert(evaluationCandidates).values({
+      id: outsidePoolId,
+      runId: run.id,
+      queryId: discovery.query_id,
+      candidateKey: 'outside-top-20',
+      assetId: asset.id,
+      fileId: file.id,
+      sceneId,
+      fileGeneration: 0,
+      mediaType: 'video',
+      startTimeSeconds: '3',
+      endTimeSeconds: '9',
+      sourceEvidenceJson: [],
+      currentRank: 21,
+      rrfRank: 21,
+      blindOrder: 99,
+      primaryPool: false,
+    })
+    await service.saveJudgment(run.id, outsidePoolId, { relevance: 2 })
+
+    // 指定目标只读冻结目标唯一标识与名次；只完成自然发现正式池即可结束标注。
+    const labeled = await service.saveJudgment(run.id, discovery.id, { relevance: 1 })
     expect(labeled.status).toBe('labeled')
+    expect(labeled.candidates.find((candidate) => candidate.id === knownTarget.id)?.judgment).toBeNull()
     const reported = await service.finalizeRun(run.id)
     expect(reported.status).toBe('reported')
+    const report = reported.report as {
+      queries: Array<{
+        query_id: string
+        current: { ndcgAt10: number | null }
+        rrf: { ndcgAt10: number | null }
+      }>
+    }
+    const discoveryReport = report.queries.find((entry) => entry.query_id === discovery.query_id)
+    expect(discoveryReport?.current.ndcgAt10).toBe(1)
+    expect(discoveryReport?.rrf.ndcgAt10).toBe(1)
     await expect(
-      service.saveJudgment(run.id, run.candidates[0]!.id, { relevance: 0 }),
+      service.saveJudgment(run.id, discovery.id, { relevance: 0 }),
     ).rejects.toThrow(/immutable/)
   })
 

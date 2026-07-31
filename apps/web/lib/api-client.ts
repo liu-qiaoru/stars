@@ -179,6 +179,8 @@ export interface EvaluationRun {
     media_type: MediaType
     start_time_seconds: number | null
     end_time_seconds: number | null
+    // 自然发现需要分级相关标注；指定目标只读取冻结目标的名次。
+    requires_judgment: boolean
     judgment: { relevance: number | null; unjudgeable: boolean } | null
   }>
 }
@@ -362,6 +364,10 @@ export function createApiClient(options: ApiClientOptions = {}) {
         method: 'POST',
         body: JSON.stringify({ library_ids: libraryIds }),
       }),
+    // 评测可能包含上千条盲标候选，不能假设用户会在一次页面会话中完成。
+    // 通过不可变运行标识重新读取 PostgreSQL 快照，刷新页面后仍从首个未标候选继续。
+    getEvaluationRun: (id: string) =>
+      request<EvaluationRun>(`/evaluation/runs/${id}`, { method: 'GET' }),
     saveEvaluationJudgment: (
       runId: string,
       candidateId: string,

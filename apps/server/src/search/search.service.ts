@@ -467,7 +467,9 @@ export class SearchService {
           : Number(row.endTimeSeconds)
       return [
         {
-          asset_id: row.assetId,
+          // 图片的 Caption 向量来自独立 Caption Asset，但用户看到和评测匹配的对象是源图片。
+          // PostgreSQL 已解析规范图片 Asset ID；视频仍使用各自证据 Asset 并按 scene_id 合并。
+          asset_id: row.imageAssetId ?? row.assetId,
           file_id: row.fileId,
           media_type: row.mediaType,
           path: row.path,
