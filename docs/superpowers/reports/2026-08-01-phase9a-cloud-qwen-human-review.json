@@ -1,0 +1,42 @@
+{
+  "schema_version": "phase9a-cloud-human-review-v1",
+  "report_fingerprint": "sha256:5d667d8075f8314dc334cf82a89f14cf6d8c44159e2c840ec32268aa83354639",
+  "decision": "failed",
+  "reviewed_provider_ids": [
+    "qwen3-vl-plus",
+    "qwen3-vl-flash"
+  ],
+  "reviewed_case_ids": [
+    "caption-birthday-en-short-high",
+    "caption-gray-subtitle-short-zero",
+    "caption-indoor-speaking-short-high",
+    "visual-birthday-short-high",
+    "visual-chopsticks-short-partial",
+    "visual-computer-desk-high",
+    "visual-door-pose-partial",
+    "visual-drum-playing-30s-zero",
+    "visual-hanging-clothes-high",
+    "visual-indoor-speaking-30s-high",
+    "visual-outdoor-camera-30s-zero",
+    "visual-red-singer-short-zero"
+  ],
+  "reason_issue_case_ids_by_provider": {
+    "qwen3-vl-plus": [
+      "caption-gray-subtitle-short-zero",
+      "visual-chopsticks-short-partial",
+      "visual-drum-playing-30s-zero"
+    ],
+    "qwen3-vl-flash": [
+      "caption-gray-subtitle-short-zero",
+      "visual-chopsticks-short-partial",
+      "visual-computer-desk-high",
+      "visual-drum-playing-30s-zero",
+      "visual-outdoor-camera-30s-zero"
+    ]
+  },
+  "ambiguous_frozen_label_case_ids": [
+    "visual-computer-desk-high",
+    "visual-drum-playing-30s-zero"
+  ],
+  "notes": "逐例复用与原 Phase 9A 相同 sampling fingerprint 的可见证据，并核对两个 Qwen 模型的全部 72 条理由。Plus 仍在灰色背景、筷子夹取和打鼓动作上越界断言；Flash 还把打字机称为电脑，并在户外设备案例中理由明确应判 0、JSON 等级却输出 2。排除两条歧义标签后，两模型均只有 6/10 稳定匹配，不能证明云模型替换带来质量提升。"
+}

@@ -1,6 +1,7 @@
 """Test the isolated domestic-cloud multi-frame comparison without network calls."""
 
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -8,11 +9,15 @@ from unittest import mock
 
 from media_agent_worker.cloud_multi_frame_comparison import (
     BudgetLedger,
+    build_cloud_verification_prompt,
     CloudMultiFrameRunner,
     CloudVlmClient,
     FROZEN_MANIFEST_SHA256,
     PROVIDERS,
+    resolve_provider_endpoint,
+    report_exit_code,
     validate_cloud_manifest_bytes,
+    validate_execution_providers,
     validate_selected_providers,
     summarize_provider_results,
 )
@@ -43,6 +48,7 @@ class FakeSampler:
 class FakeClient:
     def __init__(self, provider_id, relevance=2):
         self.provider_id = provider_id
+        self.endpoint = PROVIDERS[provider_id].endpoint
         self.relevance = relevance
 
     def verify(self, image_paths, prompt):
@@ -62,6 +68,7 @@ class FakeClient:
 class FailingClient:
     def __init__(self, provider_id):
         self.provider_id = provider_id
+        self.endpoint = PROVIDERS[provider_id].endpoint
         self.call_count = 0
 
     def verify(self, image_paths, prompt):
@@ -143,6 +150,77 @@ class FrozenInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exactly all three"):
             validate_selected_providers(["glm-4.6v-flash"])
 
+    def test_partial_execution_must_be_a_nonempty_subset_of_the_declared_models(self):
+        declared = list(PROVIDERS)
+
+        self.assertEqual(
+            validate_execution_providers(
+                declared,
+                ["qwen3-vl-plus", "qwen3-vl-flash"],
+            ),
+            ["qwen3-vl-plus", "qwen3-vl-flash"],
+        )
+        with self.assertRaisesRegex(ValueError, "non-empty subset"):
+            validate_execution_providers(declared, [])
+
+    def test_human_review_is_bound_to_the_exact_qwen_report(self):
+        report_bytes = Path(
+            "docs/superpowers/reports/2026-08-01-phase9a-cloud-comparison-qwen-partial-report.json"
+        ).read_bytes()
+        review = json.loads(
+            Path(
+                "docs/superpowers/reports/2026-08-01-phase9a-cloud-qwen-human-review.json"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(
+            review["report_fingerprint"],
+            f"sha256:{hashlib.sha256(report_bytes).hexdigest()}",
+        )
+        self.assertEqual(review["decision"], "failed")
+
+
+class ProviderEndpointTests(unittest.TestCase):
+    def test_uses_the_alibaba_workspace_openai_compatible_base_url(self):
+        endpoint = resolve_provider_endpoint(
+            PROVIDERS["qwen3-vl-plus"],
+            environ={
+                "DASHSCOPE_BASE_URL": (
+                    "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+                )
+            },
+        )
+
+        self.assertEqual(
+            endpoint,
+            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+        )
+
+    def test_rejects_an_insecure_or_non_alibaba_override_before_sending_the_key(self):
+        for base_url in (
+            "http://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "https://attacker.example/compatible-mode/v1",
+        ):
+            with self.subTest(base_url=base_url):
+                with self.assertRaisesRegex(ValueError, "DASHSCOPE_BASE_URL"):
+                    resolve_provider_endpoint(
+                        PROVIDERS["qwen3-vl-plus"],
+                        environ={"DASHSCOPE_BASE_URL": base_url},
+                    )
+
+
+class CloudPromptTests(unittest.TestCase):
+    def test_spells_out_array_item_types_without_changing_the_visual_task(self):
+        prompt = build_cloud_verification_prompt(
+            "一个人在拿筷子",
+            [{"frame_index": 1, "time_seconds": 3.0}],
+        )
+
+        self.assertIn("frame-verify-cloud-v1", prompt)
+        self.assertIn("matched_constraints", prompt)
+        self.assertIn("非空字符串数组", prompt)
+        self.assertIn("没有项目时必须使用 []", prompt)
+
 
 class CloudVlmClientTests(unittest.TestCase):
     def test_sends_base64_frames_and_strict_json_request(self):
@@ -189,6 +267,80 @@ class CloudVlmClientTests(unittest.TestCase):
         self.assertEqual(result["usage"]["input_tokens"], 25)
         self.assertEqual(result["relevance"], 2)
 
+    def test_reports_the_contract_rule_without_echoing_private_model_content(self):
+        private_marker = "private-frame-description"
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "relevance": 2,
+                                "matched_constraints": ["人物"],
+                                "missing_constraints": [],
+                                "reason": private_marker,
+                                "unexpected": "extra",
+                            }
+                        )
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 25, "completion_tokens": 15},
+        }
+        opened = mock.MagicMock()
+        opened.return_value.__enter__.return_value.read.return_value = json.dumps(response).encode()
+        client = CloudVlmClient(
+            provider=PROVIDERS["glm-4.6v-flash"],
+            api_key="secret-key",
+            urlopen=opened,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "frame.jpg"
+            image_path.write_bytes(b"jpeg")
+            with self.assertRaisesRegex(RuntimeError, "must contain exactly") as raised:
+                client.verify([str(image_path)], "prompt")
+
+        self.assertNotIn(private_marker, str(raised.exception))
+
+    def test_spaces_glm_request_starts_without_retrying(self):
+        response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "relevance": 0,
+                                "matched_constraints": [],
+                                "missing_constraints": ["网页界面"],
+                                "reason": "未看到网页界面",
+                            }
+                        )
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 25, "completion_tokens": 15},
+        }
+        opened = mock.MagicMock()
+        opened.return_value.__enter__.return_value.read.return_value = json.dumps(response).encode()
+        sleeper = mock.MagicMock()
+        client = CloudVlmClient(
+            provider=PROVIDERS["glm-4.6v-flash"],
+            api_key="secret-key",
+            urlopen=opened,
+            clock=lambda: 100.0,
+            sleeper=sleeper,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "frame.jpg"
+            image_path.write_bytes(b"jpeg")
+            client.verify([str(image_path)], "prompt")
+            client.verify([str(image_path)], "prompt")
+
+        sleeper.assert_called_once_with(30.0)
+        self.assertEqual(opened.call_count, 2)
+
 
 class CloudMultiFrameRunnerTests(unittest.TestCase):
     def test_reuses_frames_across_models_and_removes_them_afterward(self):
@@ -197,6 +349,10 @@ class CloudMultiFrameRunnerTests(unittest.TestCase):
             "glm-4.6v-flash": FakeClient("glm-4.6v-flash"),
             "qwen3-vl-plus": FakeClient("qwen3-vl-plus"),
         }
+        clients["qwen3-vl-plus"].endpoint = (
+            "https://private-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/"
+            "chat/completions"
+        )
         runner = CloudMultiFrameRunner(
             cases=[build_case()],
             clients=clients,
@@ -211,6 +367,11 @@ class CloudMultiFrameRunnerTests(unittest.TestCase):
         self.assertFalse(report["temporary_frames_retained"])
         self.assertTrue(all(not path.exists() for path in sampler.created_paths))
         self.assertEqual(report["providers"]["glm-4.6v-flash"]["exact_case_accuracy"], 1.0)
+        self.assertEqual(
+            report["provider_runtime"]["qwen3-vl-plus"]["endpoint_kind"],
+            "alibaba_workspace",
+        )
+        self.assertNotIn("private-workspace", json.dumps(report))
         self.assertEqual(report["decision"], "pending_human_reason_review")
 
     def test_stops_after_first_unknown_cloud_charge(self):
@@ -249,6 +410,37 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(summary["stable_case_count"], 0)
         self.assertEqual(summary["exact_case_match_count"], 0)
         self.assertEqual(summary["exact_case_accuracy"], 0.0)
+
+    def test_incomplete_provider_does_not_invent_a_zero_quality_score(self):
+        rows = [
+            {
+                "case_id": "a",
+                "expected_relevance": 2,
+                "relevance": 2,
+                "failure_type": None,
+                "inference_seconds": 1.0,
+                "estimated_cost_cny": 0.0,
+            }
+        ]
+
+        summary = summarize_provider_results(rows, expected_case_count=1, repeat_count=3)
+
+        self.assertIsNone(summary["stability_rate"])
+        self.assertIsNone(summary["exact_case_accuracy"])
+        self.assertEqual(summary["reason_review"], "not_applicable_incomplete")
+
+    def test_partial_provider_batch_uses_nonzero_formal_exit_code(self):
+        report = {
+            "aborted": None,
+            "declared_provider_ids": list(PROVIDERS),
+            "execution_provider_ids": ["qwen3-vl-plus", "qwen3-vl-flash"],
+            "providers": {
+                "qwen3-vl-plus": {"expected_call_count": 36, "successful_call_count": 36},
+                "qwen3-vl-flash": {"expected_call_count": 36, "successful_call_count": 36},
+            },
+        }
+
+        self.assertEqual(report_exit_code(report), 2)
 
 
 if __name__ == "__main__":

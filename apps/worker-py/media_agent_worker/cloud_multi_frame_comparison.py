@@ -25,11 +25,13 @@ import tempfile
 import time
 from urllib import error as urllib_error
 from urllib import request as urllib_request
+from urllib.parse import urlsplit
 
 from .env import load_project_env
 from .multi_frame_vlm_feasibility import (
     MultiFrameSampler,
     Phase8SnapshotResolver,
+    STRICT_OLLAMA_FORMAT,
     build_verification_prompt,
     sampling_fingerprint,
     validate_phase9a_manifest,
@@ -43,6 +45,7 @@ MAX_PRICED_INPUT_TOKENS = 32_000
 MAX_OUTPUT_TOKENS = 500
 DEFAULT_BUDGET_CNY = 2.0
 FROZEN_MANIFEST_SHA256 = "a074c5329c005c4efc478cbd189fcc15c8be0e100d535fff87ab224f0992c108"
+CLOUD_PROMPT_VERSION = "frame-verify-cloud-v1"
 
 
 @dataclass(frozen=True)
@@ -66,6 +69,8 @@ class ProviderSpec:
     max_output_tokens: int = MAX_OUTPUT_TOKENS
     output_limit_parameter: str = "max_tokens"
     thinking_control: str | None = None
+    endpoint_environment_variable: str | None = None
+    minimum_request_interval_seconds: float = 0.0
 
     @property
     def maximum_request_cost_cny(self):
@@ -89,6 +94,7 @@ PROVIDERS = {
         input_cny_per_million=0.0,
         output_cny_per_million=0.0,
         thinking_control="glm",
+        minimum_request_interval_seconds=30.0,
     ),
     "qwen3-vl-plus": ProviderSpec(
         provider_id="qwen3-vl-plus",
@@ -100,6 +106,7 @@ PROVIDERS = {
         output_cny_per_million=10.0,
         output_limit_parameter="max_completion_tokens",
         thinking_control="qwen",
+        endpoint_environment_variable="DASHSCOPE_BASE_URL",
     ),
     "qwen3-vl-flash": ProviderSpec(
         provider_id="qwen3-vl-flash",
@@ -111,6 +118,7 @@ PROVIDERS = {
         output_cny_per_million=1.5,
         output_limit_parameter="max_completion_tokens",
         thinking_control="qwen",
+        endpoint_environment_variable="DASHSCOPE_BASE_URL",
     ),
 }
 
@@ -177,16 +185,90 @@ class BudgetLedger:
         self.unpriced_failed_request_count += 1
 
 
+def resolve_provider_endpoint(provider, *, environ=None):
+    """Resolve a provider endpoint without allowing API-key exfiltration.
+
+    Alibaba workspace keys can require a workspace-specific OpenAI-compatible base
+    URL. The override is accepted only over HTTPS, only on Alibaba's documented public
+    or workspace domains, and only on the compatible-mode path. This check runs before
+    the Authorization header is built, so a typo cannot send the key to another host.
+    """
+    environment = os.environ if environ is None else environ
+    variable = provider.endpoint_environment_variable
+    configured = environment.get(variable) if variable else None
+    if not configured:
+        return provider.endpoint
+    parsed = urlsplit(configured.strip())
+    hostname = (parsed.hostname or "").lower()
+    allowed_host = hostname == "dashscope.aliyuncs.com" or hostname.endswith(
+        ".maas.aliyuncs.com"
+    )
+    allowed_path = parsed.path.rstrip("/") in (
+        "/compatible-mode/v1",
+        "/compatible-mode/v1/chat/completions",
+    )
+    if (
+        parsed.scheme != "https"
+        or not allowed_host
+        or parsed.port is not None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or not allowed_path
+    ):
+        raise ValueError(
+            "DASHSCOPE_BASE_URL must be an HTTPS Alibaba compatible-mode/v1 URL"
+        )
+    normalized = configured.strip().rstrip("/")
+    if not normalized.endswith("/chat/completions"):
+        normalized += "/chat/completions"
+    return normalized
+
+
+def build_cloud_verification_prompt(query, frame_evidence):
+    """Add explicit field types because cloud JSON mode only guarantees valid JSON.
+
+    Ollama accepted a machine-readable schema separately from the prompt. The cloud
+    chat endpoints accept JSON-object mode but do not enforce our nested array item
+    types, so all three cloud models receive the same textual schema. Local parsing
+    remains the final authority and still rejects extra fields or loose types.
+    """
+    base_prompt = build_verification_prompt(query, frame_evidence)
+    schema = json.dumps(STRICT_OLLAMA_FORMAT, ensure_ascii=False, separators=(",", ":"))
+    return f"""{base_prompt}
+
+云端格式契约版本：{CLOUD_PROMPT_VERSION}
+输出必须符合下面的 JSON Schema：
+{schema}
+
+特别注意：matched_constraints 和 missing_constraints 必须是非空字符串数组；没有项目时必须使用 []，不得使用 null、对象、数字或空字符串。"""
+
+
 class CloudVlmClient:
     """Synchronously call one OpenAI-compatible cloud multimodal chat endpoint."""
 
-    def __init__(self, *, provider, api_key, timeout_seconds=90, urlopen=None):
+    def __init__(
+        self,
+        *,
+        provider,
+        api_key,
+        endpoint=None,
+        timeout_seconds=90,
+        urlopen=None,
+        clock=None,
+        sleeper=None,
+    ):
         if not api_key:
             raise RuntimeError(f"Missing required environment variable: {provider.api_key_env}")
         self.provider = provider
         self._api_key = api_key
+        self.endpoint = endpoint or provider.endpoint
         self.timeout_seconds = float(timeout_seconds)
         self.urlopen = urlopen or urllib_request.urlopen
+        self.clock = clock or time.monotonic
+        self.sleeper = sleeper or time.sleep
+        self._last_request_started = None
 
     def verify(self, image_paths, prompt):
         """Upload temporary JPEGs plus the prompt and return strict parsed evidence."""
@@ -218,7 +300,7 @@ class CloudVlmClient:
         elif self.provider.thinking_control == "qwen":
             payload["enable_thinking"] = False
         request = urllib_request.Request(
-            self.provider.endpoint,
+            self.endpoint,
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "authorization": f"Bearer {self._api_key}",
@@ -226,6 +308,19 @@ class CloudVlmClient:
             },
             method="POST",
         )
+        now = self.clock()
+        if self._last_request_started is not None:
+            wait_seconds = max(
+                0.0,
+                self.provider.minimum_request_interval_seconds
+                - (now - self._last_request_started),
+            )
+            if wait_seconds > 0:
+                # This is proactive pacing, not a retry: each frozen repeat is still
+                # sent exactly once. A real HTTP 429 remains visible and aborts the run.
+                self.sleeper(wait_seconds)
+                now += wait_seconds
+        self._last_request_started = now
         started = time.perf_counter()
         try:
             with self.urlopen(request, timeout=self.timeout_seconds) as response:
@@ -248,10 +343,18 @@ class CloudVlmClient:
         try:
             response_payload = json.loads(body)
             raw_text = response_payload["choices"][0]["message"]["content"]
-            parsed = parse_verification_response(raw_text)
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValueError) as error:
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
             raise RuntimeError(
-                f"CLOUD_INVALID_RESPONSE: {self.provider.provider_id} did not return strict JSON"
+                f"CLOUD_INVALID_RESPONSE: {self.provider.provider_id} returned an invalid envelope"
+            ) from error
+        try:
+            parsed = parse_verification_response(raw_text)
+        except ValueError as error:
+            # parse_verification_response emits only fixed contract diagnostics and
+            # field names. It never includes raw model text, so the report can explain
+            # the violated rule without leaking a description of private frames.
+            raise RuntimeError(
+                f"CLOUD_INVALID_RESPONSE: {self.provider.provider_id}: {error}"
             ) from error
         usage = response_payload.get("usage") or {}
         input_tokens = usage.get("prompt_tokens", usage.get("input_tokens"))
@@ -314,7 +417,7 @@ class CloudMultiFrameRunner:
                     {key: value for key, value in row.items() if key != "path"}
                     for row in evidence
                 ]
-                prompt = build_verification_prompt(case["query"], public_evidence)
+                prompt = build_cloud_verification_prompt(case["query"], public_evidence)
                 image_paths = [row["path"] for row in evidence]
                 for provider_id, client in self.clients.items():
                     if aborted is not None:
@@ -385,6 +488,7 @@ class CloudMultiFrameRunner:
             "started_at_unix_seconds": round(started_wall, 3),
             "total_duration_seconds": round(time.perf_counter() - started, 3),
             "sampling_fingerprint": sampling_fingerprint(),
+            "prompt_version": CLOUD_PROMPT_VERSION,
             "external_data_boundary": {
                 "uploaded": ["resized_temporary_jpeg_frames", "query", "frame_timestamps"],
                 "not_uploaded": [
@@ -405,7 +509,9 @@ class CloudMultiFrameRunner:
                 "unpriced_failed_request_count": self.budget.unpriced_failed_request_count,
             },
             "provider_runtime": {
-                provider_id: _public_provider_spec(PROVIDERS[provider_id])
+                provider_id: _public_provider_spec(
+                    PROVIDERS[provider_id], endpoint=self.clients[provider_id].endpoint
+                )
                 for provider_id in self.clients
             },
             "results": results,
@@ -426,6 +532,7 @@ def summarize_provider_results(rows, *, expected_case_count, repeat_count):
     """Summarize success, repeat stability, exact labels, latency, and known cost."""
     expected_calls = expected_case_count * repeat_count
     successful = [row for row in rows if row.get("failure_type") is None]
+    provider_complete = len(successful) == expected_calls
     by_case = {}
     for row in successful:
         by_case.setdefault(row["case_id"], []).append(row)
@@ -442,15 +549,17 @@ def summarize_provider_results(rows, *, expected_case_count, repeat_count):
         "expected_call_count": expected_calls,
         "successful_call_count": len(successful),
         "success_rate": round(len(successful) / expected_calls, 6) if expected_calls else 0.0,
-        "stable_case_count": stable_case_count,
+        "stable_case_count": stable_case_count if provider_complete else None,
         "stability_rate": (
-            round(stable_case_count / expected_case_count, 6) if expected_case_count else 0.0
+            round(stable_case_count / expected_case_count, 6)
+            if provider_complete and expected_case_count
+            else None
         ),
-        "exact_case_match_count": exact_case_match_count,
+        "exact_case_match_count": exact_case_match_count if provider_complete else None,
         "exact_case_accuracy": (
             round(exact_case_match_count / expected_case_count, 6)
-            if expected_case_count
-            else 0.0
+            if provider_complete and expected_case_count
+            else None
         ),
         "mean_inference_seconds": (
             round(sum(latencies) / len(latencies), 3) if latencies else None
@@ -459,8 +568,22 @@ def summarize_provider_results(rows, *, expected_case_count, repeat_count):
         "estimated_cost_cny": round(
             sum(row.get("estimated_cost_cny") or 0.0 for row in successful), 8
         ),
-        "reason_review": "pending_human_review",
+        "reason_review": (
+            "pending_human_review" if provider_complete else "not_applicable_incomplete"
+        ),
     }
+
+
+def report_exit_code(report):
+    """Return zero only for a complete, failure-free three-provider formal report."""
+    declared = set(report.get("declared_provider_ids") or [])
+    executed = set(report.get("execution_provider_ids") or [])
+    providers = report.get("providers") or {}
+    all_calls_succeeded = bool(providers) and all(
+        summary.get("successful_call_count") == summary.get("expected_call_count")
+        for summary in providers.values()
+    )
+    return 0 if report.get("aborted") is None and declared == executed and all_calls_succeeded else 2
 
 
 def _percentile(values, quantile):
@@ -495,6 +618,14 @@ def validate_selected_providers(provider_ids):
     return selected
 
 
+def validate_execution_providers(declared_provider_ids, execution_provider_ids):
+    """Allow resumable provider batches without weakening the formal model set."""
+    execution = list(dict.fromkeys(execution_provider_ids))
+    if not execution or not set(execution).issubset(set(declared_provider_ids)):
+        raise ValueError("Execution providers must be a non-empty subset of declared providers")
+    return execution
+
+
 def _result_identity(case, provider, repeat_index):
     return {
         "provider_id": provider.provider_id,
@@ -512,10 +643,23 @@ def _result_identity(case, provider, repeat_index):
     }
 
 
-def _public_provider_spec(provider):
+def _public_provider_spec(provider, *, endpoint=None):
+    effective_endpoint = endpoint or provider.endpoint
+    hostname = (urlsplit(effective_endpoint).hostname or "").lower()
+    if hostname == "dashscope.aliyuncs.com":
+        endpoint_kind = "alibaba_public"
+    elif hostname.endswith(".maas.aliyuncs.com"):
+        endpoint_kind = "alibaba_workspace"
+    elif hostname == "open.bigmodel.cn":
+        endpoint_kind = "zhipu_public"
+    else:
+        # Provider endpoints are code constants or pass resolve_provider_endpoint()
+        # before reaching this report. Failing here prevents a future new endpoint
+        # from silently persisting a private hostname in a committed JSON artifact.
+        raise ValueError("Provider endpoint cannot be safely classified for reporting")
     return {
         "display_name": provider.display_name,
-        "endpoint_origin": provider.endpoint.split("/v1/")[0].split("/api/")[0],
+        "endpoint_kind": endpoint_kind,
         "model": provider.model,
         "model_snapshot_is_dated": any(character.isdigit() for character in provider.model[-10:])
         and provider.model[-10:].count("-") == 2,
@@ -524,6 +668,7 @@ def _public_provider_spec(provider):
         "output_cny_per_million_tokens": provider.output_cny_per_million,
         "priced_input_token_limit": provider.max_input_tokens,
         "output_token_limit": provider.max_output_tokens,
+        "minimum_request_interval_seconds": provider.minimum_request_interval_seconds,
     }
 
 
@@ -537,6 +682,15 @@ def _parse_args(argv=None):
         choices=sorted(PROVIDERS),
         required=True,
         help="Repeat this flag to compare more than one provider",
+    )
+    parser.add_argument(
+        "--execution-provider",
+        action="append",
+        choices=sorted(PROVIDERS),
+        help=(
+            "Execute only this declared provider in a resumable partial report; "
+            "repeat the flag for more providers"
+        ),
     )
     parser.add_argument("--max-budget-cny", type=float, default=DEFAULT_BUDGET_CNY)
     parser.add_argument("--timeout-seconds", type=float, default=90.0)
@@ -584,14 +738,19 @@ def main(argv=None):
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("FFmpeg is required for cloud comparison frame extraction")
     selected_ids = validate_selected_providers(args.provider)
+    execution_ids = validate_execution_providers(
+        selected_ids,
+        args.execution_provider or selected_ids,
+    )
     # Validate every requested credential before the first provider call. Otherwise a
     # typo in the second key could spend money on a partial, incomparable experiment.
     clients = {}
-    for provider_id in selected_ids:
+    for provider_id in execution_ids:
         provider = PROVIDERS[provider_id]
         clients[provider_id] = CloudVlmClient(
             provider=provider,
             api_key=os.environ.get(provider.api_key_env),
+            endpoint=resolve_provider_endpoint(provider),
             timeout_seconds=args.timeout_seconds,
         )
     connection = connect_from_env()
@@ -607,14 +766,16 @@ def main(argv=None):
         repeat_count=manifest["repeat_count"],
         budget=BudgetLedger(max_budget_cny=args.max_budget_cny),
     ).run()
+    report["declared_provider_ids"] = selected_ids
+    report["execution_provider_ids"] = execution_ids
+    if set(execution_ids) != set(selected_ids) and report["aborted"] is None:
+        # A successful provider batch is useful evidence but cannot masquerade as the
+        # complete three-model comparison required by the frozen protocol.
+        report["decision"] = "incomplete_provider_subset_pending_merge"
     _write_report(output_path, report)
     summary = {"providers": report["providers"], "budget": report["budget"]}
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    complete = all(
-        summary["successful_call_count"] == summary["expected_call_count"]
-        for summary in report["providers"].values()
-    )
-    return 0 if complete else 2
+    return report_exit_code(report)
 
 
 if __name__ == "__main__":

@@ -2,10 +2,9 @@
 
 ## 结论与当前状态
 
-本补充实验已经具备可复跑代码和离线测试，但**尚未产生真实模型结果**：当前本机环境没有
-配置 `DASHSCOPE_API_KEY`（阿里云百炼密钥）或 `ZHIPU_API_KEY`（智谱密钥）。程序会在
-抽帧和外部请求开始前同时检查全部所选密钥；缺少任意一个都会直接报错，因此当前没有图片
-离开机器，也没有产生云端费用。
+本补充实验已于 2026-08-01 执行。Qwen3-VL-Plus 与 Qwen3-VL-Flash 完成 72/72 次调用；
+GLM-4.6V-Flash 因连续正式请求返回 HTTP 429，未形成完整质量指标。最终结果与人工复核见
+[`2026-08-01-phase9a-cloud-comparison.md`](./2026-08-01-phase9a-cloud-comparison.md)。
 
 这不是 Phase 9B 的生产实现。即使三个模型中有模型在 12 条旧样本上全部答对，生产搜索仍
 保持 Phase 8 的 SigLIP2 + Caption + 语音全文 + RRF，不创建异步复核任务。
@@ -81,6 +80,18 @@ PYTHONPATH=apps/worker-py .venv/bin/python \
   --max-budget-cny 2 \
   --confirm-external-upload
 ```
+
+阿里云工作空间 Key 需要使用控制台显示的专属 OpenAI 兼容地址。将地址通过环境变量传入，
+不要硬编码到代码；程序只接受阿里 `https://*.maas.aliyuncs.com/compatible-mode/v1` 或公共
+DashScope 域名，避免把 Key 发给错误主机：
+
+```bash
+export DASHSCOPE_BASE_URL='https://你的工作空间.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'
+```
+
+当某个供应商暂时不可用时，可以保持三个 `--provider` 声明不变，再通过一个或多个
+`--execution-provider` 生成供应商子集报告。子集报告固定标记为“不完整、待合并”，不能
+用于开启 Phase 9B。
 
 真实调用前建议先只选免费模型做 1 个独立 smoke test（冒烟测试，即用极少输入确认地址、
 密钥和请求格式可用）。当前正式命令故意固定完整 12 × 3 口径，不提供任意缩小样本的参数，

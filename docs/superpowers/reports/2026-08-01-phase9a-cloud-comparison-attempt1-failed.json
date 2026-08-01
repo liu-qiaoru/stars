@@ -1,0 +1,157 @@
+{
+  "schema_version": "phase9a-cloud-comparison-v1",
+  "experiment_scope": "frozen_phase9a_regression_only",
+  "started_at_unix_seconds": 1785597097.48,
+  "total_duration_seconds": 4.085,
+  "sampling_fingerprint": "sha256:1fdc2a706b11a85d6641942bc735617983d989c09b2ccb9bfc018df1c8857c84",
+  "external_data_boundary": {
+    "uploaded": [
+      "resized_temporary_jpeg_frames",
+      "query",
+      "frame_timestamps"
+    ],
+    "not_uploaded": [
+      "complete_video",
+      "local_source_path",
+      "caption",
+      "transcript",
+      "postgresql_rows",
+      "qdrant_vectors"
+    ]
+  },
+  "temporary_frames_retained": false,
+  "repeat_count": 3,
+  "case_count": 12,
+  "budget": {
+    "maximum_cny": 2.0,
+    "estimated_spent_cny": 0.0,
+    "unpriced_failed_request_count": 1
+  },
+  "provider_runtime": {
+    "glm-4.6v-flash": {
+      "display_name": "智谱 GLM-4.6V-Flash",
+      "endpoint_kind": "zhipu_public",
+      "model": "glm-4.6v-flash",
+      "model_snapshot_is_dated": false,
+      "api_key_environment_variable": "ZHIPU_API_KEY",
+      "input_cny_per_million_tokens": 0.0,
+      "output_cny_per_million_tokens": 0.0,
+      "priced_input_token_limit": 32000,
+      "output_token_limit": 500
+    },
+    "qwen3-vl-plus": {
+      "display_name": "阿里云 Qwen3-VL-Plus",
+      "endpoint_kind": "alibaba_workspace",
+      "model": "qwen3-vl-plus-2025-12-19",
+      "model_snapshot_is_dated": true,
+      "api_key_environment_variable": "DASHSCOPE_API_KEY",
+      "input_cny_per_million_tokens": 1.0,
+      "output_cny_per_million_tokens": 10.0,
+      "priced_input_token_limit": 32000,
+      "output_token_limit": 500
+    },
+    "qwen3-vl-flash": {
+      "display_name": "阿里云 Qwen3-VL-Flash",
+      "endpoint_kind": "alibaba_workspace",
+      "model": "qwen3-vl-flash-2026-01-22",
+      "model_snapshot_is_dated": true,
+      "api_key_environment_variable": "DASHSCOPE_API_KEY",
+      "input_cny_per_million_tokens": 0.15,
+      "output_cny_per_million_tokens": 1.5,
+      "priced_input_token_limit": 32000,
+      "output_token_limit": 500
+    }
+  },
+  "results": [
+    {
+      "provider_id": "glm-4.6v-flash",
+      "model": "glm-4.6v-flash",
+      "case_id": "caption-birthday-en-short-high",
+      "query_id": "69198fb6-bbd9-4c2e-ba7b-37f9d54551ea",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "repeat_index": 1,
+      "query": "A scene with birthday decorations",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 34.0,
+      "scene_end_seconds": 34.5,
+      "expected_relevance": 2,
+      "frame_count": 2,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 34.0,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e0e6b7947ab0685a1d362da93051be28b3d43e66534ff8651dc807be47fc94ab",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 34.4995,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:29b23c1b81f63760786010f3d7f73dcd25c74462a09da117d1f7449f6fcd7c52",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": "RuntimeError",
+      "error_message": "CLOUD_INVALID_RESPONSE: glm-4.6v-flash did not return strict JSON",
+      "estimated_cost_cny": null
+    }
+  ],
+  "providers": {
+    "glm-4.6v-flash": {
+      "expected_call_count": 36,
+      "successful_call_count": 0,
+      "success_rate": 0.0,
+      "stable_case_count": null,
+      "stability_rate": null,
+      "exact_case_match_count": null,
+      "exact_case_accuracy": null,
+      "mean_inference_seconds": null,
+      "p95_inference_seconds": null,
+      "estimated_cost_cny": 0,
+      "reason_review": "not_applicable_incomplete"
+    },
+    "qwen3-vl-plus": {
+      "expected_call_count": 36,
+      "successful_call_count": 0,
+      "success_rate": 0.0,
+      "stable_case_count": null,
+      "stability_rate": null,
+      "exact_case_match_count": null,
+      "exact_case_accuracy": null,
+      "mean_inference_seconds": null,
+      "p95_inference_seconds": null,
+      "estimated_cost_cny": 0,
+      "reason_review": "not_applicable_incomplete"
+    },
+    "qwen3-vl-flash": {
+      "expected_call_count": 36,
+      "successful_call_count": 0,
+      "success_rate": 0.0,
+      "stable_case_count": null,
+      "stability_rate": null,
+      "exact_case_match_count": null,
+      "exact_case_accuracy": null,
+      "mean_inference_seconds": null,
+      "p95_inference_seconds": null,
+      "estimated_cost_cny": 0,
+      "reason_review": "not_applicable_incomplete"
+    }
+  },
+  "aborted": {
+    "stage": "provider_call",
+    "provider_id": "glm-4.6v-flash",
+    "case_id": "caption-birthday-en-short-high",
+    "repeat_index": 1,
+    "failure_type": "RuntimeError",
+    "error_message": "CLOUD_INVALID_RESPONSE: glm-4.6v-flash did not return strict JSON"
+  },
+  "decision": "incomplete_due_to_failure"
+}
