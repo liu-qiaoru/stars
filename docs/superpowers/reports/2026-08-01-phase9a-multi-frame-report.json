@@ -1,0 +1,3373 @@
+{
+  "schema_version": "phase9a-multi-frame-v1",
+  "phase8_run_id": "6298b745-d9d3-44bf-86a0-2d0a0b46360c",
+  "prompt_version": "frame-verify-v1",
+  "sampling_fingerprint": "sha256:1fdc2a706b11a85d6641942bc735617983d989c09b2ccb9bfc018df1c8857c84",
+  "runtime": {
+    "ollama_version": "0.32.1",
+    "model": "qwen2.5vl:7b",
+    "digest": "5ced39dfa4bac325dc183dd1e4febaa1c46b3ea28bce48896c8e69c1e79611cc",
+    "size_bytes": 5969245856,
+    "details": {
+      "parent_model": "",
+      "format": "gguf",
+      "family": "qwen25vl",
+      "families": [
+        "qwen25vl"
+      ],
+      "parameter_size": "8.3B",
+      "quantization_level": "Q4_K_M",
+      "context_length": 128000,
+      "embedding_length": 3584
+    },
+    "modified_at": "2026-07-08T21:27:57.607001631+08:00"
+  },
+  "started_at_unix_seconds": 1785590390.954,
+  "total_duration_seconds": 314.873,
+  "temporary_frames_retained": false,
+  "results": [
+    {
+      "case_id": "caption-birthday-en-short-high",
+      "query_id": "69198fb6-bbd9-4c2e-ba7b-37f9d54551ea",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "repeat_index": 1,
+      "query": "A scene with birthday decorations",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 34.0,
+      "scene_end_seconds": 34.5,
+      "duration_seconds": 0.5,
+      "expected_relevance": 2,
+      "frame_count": 2,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 34.0,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e0e6b7947ab0685a1d362da93051be28b3d43e66534ff8651dc807be47fc94ab",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 34.4995,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:29b23c1b81f63760786010f3d7f73dcd25c74462a09da117d1f7449f6fcd7c52",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物穿着白色带有花卉刺绣的衬衫",
+        "人物手中拿着一个装饰有花朵图案的盒子"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示了一个人物穿着带有花卉刺绣的白色衬衫，并且手里拿着一个装饰有花朵图案的盒子，这些细节与用户查询中提到的生日装饰部分匹配。因此，这两张图片在人物、物体和动作方面都明确匹配，符合核心意图的部分。",
+      "raw_response": "{\n  \"relevance\": 2,\n  \"matched_constraints\": [\n    \"人物穿着白色带有花卉刺绣的衬衫\",\n    \"人物手中拿着一个装饰有花朵图案的盒子\"\n  ],\n  \"missing_constraints\": [],\n  \"reason\": \"图片中的场景显示了一个人物穿着带有花卉刺绣的白色衬衫，并且手里拿着一个装饰有花朵图案的盒子，这些细节与用户查询中提到的生日装饰部分匹配。因此，这两张图片在人物、物体和动作方面都明确匹配，符合核心意图的部分。\"\n}",
+      "inference_seconds": 11.955,
+      "ollama_total_duration_seconds": 11.945,
+      "ollama_load_duration_seconds": 3.965,
+      "prompt_eval_count": 1244,
+      "eval_count": 117
+    },
+    {
+      "case_id": "caption-birthday-en-short-high",
+      "query_id": "69198fb6-bbd9-4c2e-ba7b-37f9d54551ea",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "repeat_index": 2,
+      "query": "A scene with birthday decorations",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 34.0,
+      "scene_end_seconds": 34.5,
+      "duration_seconds": 0.5,
+      "expected_relevance": 2,
+      "frame_count": 2,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 34.0,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e0e6b7947ab0685a1d362da93051be28b3d43e66534ff8651dc807be47fc94ab",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 34.4995,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:29b23c1b81f63760786010f3d7f73dcd25c74462a09da117d1f7449f6fcd7c52",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物穿着白色带有花卉刺绣的衬衫",
+        "人物手中拿着一个装饰有花朵图案的盒子"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示了一个人物穿着带有花卉刺绣的白色衬衫，并且手里拿着一个装饰有花朵图案的盒子，这些细节与用户查询中提到的生日装饰部分匹配。因此，这两张图片在人物、物体和动作方面都明确匹配，符合核心意图的部分。",
+      "raw_response": "{\n  \"relevance\": 2,\n  \"matched_constraints\": [\n    \"人物穿着白色带有花卉刺绣的衬衫\",\n    \"人物手中拿着一个装饰有花朵图案的盒子\"\n  ],\n  \"missing_constraints\": [],\n  \"reason\": \"图片中的场景显示了一个人物穿着带有花卉刺绣的白色衬衫，并且手里拿着一个装饰有花朵图案的盒子，这些细节与用户查询中提到的生日装饰部分匹配。因此，这两张图片在人物、物体和动作方面都明确匹配，符合核心意图的部分。\"\n}",
+      "inference_seconds": 4.458,
+      "ollama_total_duration_seconds": 4.454,
+      "ollama_load_duration_seconds": 0.1,
+      "prompt_eval_count": 1244,
+      "eval_count": 117
+    },
+    {
+      "case_id": "caption-birthday-en-short-high",
+      "query_id": "69198fb6-bbd9-4c2e-ba7b-37f9d54551ea",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "repeat_index": 3,
+      "query": "A scene with birthday decorations",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 34.0,
+      "scene_end_seconds": 34.5,
+      "duration_seconds": 0.5,
+      "expected_relevance": 2,
+      "frame_count": 2,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 34.0,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e0e6b7947ab0685a1d362da93051be28b3d43e66534ff8651dc807be47fc94ab",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 34.4995,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:29b23c1b81f63760786010f3d7f73dcd25c74462a09da117d1f7449f6fcd7c52",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物穿着白色带有花卉刺绣的衬衫",
+        "人物手中拿着一个装饰有花朵图案的盒子"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示了一个人物穿着带有花卉刺绣的白色衬衫，并且手里拿着一个装饰有花朵图案的盒子，这些细节与用户查询中提到的生日装饰部分匹配。因此，这两张图片在人物、物体和动作方面都明确匹配，符合核心意图的部分。",
+      "raw_response": "{\n  \"relevance\": 2,\n  \"matched_constraints\": [\n    \"人物穿着白色带有花卉刺绣的衬衫\",\n    \"人物手中拿着一个装饰有花朵图案的盒子\"\n  ],\n  \"missing_constraints\": [],\n  \"reason\": \"图片中的场景显示了一个人物穿着带有花卉刺绣的白色衬衫，并且手里拿着一个装饰有花朵图案的盒子，这些细节与用户查询中提到的生日装饰部分匹配。因此，这两张图片在人物、物体和动作方面都明确匹配，符合核心意图的部分。\"\n}",
+      "inference_seconds": 4.5,
+      "ollama_total_duration_seconds": 4.497,
+      "ollama_load_duration_seconds": 0.1,
+      "prompt_eval_count": 1244,
+      "eval_count": 117
+    },
+    {
+      "case_id": "caption-gray-subtitle-short-zero",
+      "query_id": "bf4e2dc4-038b-477a-ab32-02c4aa95d414",
+      "candidate_key": "571eedf4-973a-4591-a2d4-ec261216be6a",
+      "repeat_index": 1,
+      "query": "有人站在灰色背景前讲话并配有字幕",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 466.6,
+      "scene_end_seconds": 468.36,
+      "duration_seconds": 1.76,
+      "expected_relevance": 0,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 466.6,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:48b4bdc08bcf8ffd31aa3009ac453fdd4bc5f6fb3dbb42f280916d53e6bf4e5e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 467.6,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:6677df54dd9e62ff7a284755e40acac60b5900ac0b0c040a0c65577469ac641a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 468.359,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:4e760710629903c072d72c79a69361fd626c6c1d0aa089ac027d4c1be7a8230f",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "有人站在灰色背景前讲话",
+        "配有字幕"
+      ],
+      "missing_constraints": [],
+      "reason": "图片1和图片3显示了一个人站在灰色背景前，且有字幕出现。这与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"有人站在灰色背景前讲话\",\n        \"配有字幕\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片1和图片3显示了一个人站在灰色背景前，且有字幕出现。这与用户查询完全匹配。\"\n}",
+      "inference_seconds": 9.713,
+      "ollama_total_duration_seconds": 9.71,
+      "ollama_load_duration_seconds": 0.126,
+      "prompt_eval_count": 2307,
+      "eval_count": 72
+    },
+    {
+      "case_id": "caption-gray-subtitle-short-zero",
+      "query_id": "bf4e2dc4-038b-477a-ab32-02c4aa95d414",
+      "candidate_key": "571eedf4-973a-4591-a2d4-ec261216be6a",
+      "repeat_index": 2,
+      "query": "有人站在灰色背景前讲话并配有字幕",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 466.6,
+      "scene_end_seconds": 468.36,
+      "duration_seconds": 1.76,
+      "expected_relevance": 0,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 466.6,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:48b4bdc08bcf8ffd31aa3009ac453fdd4bc5f6fb3dbb42f280916d53e6bf4e5e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 467.6,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:6677df54dd9e62ff7a284755e40acac60b5900ac0b0c040a0c65577469ac641a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 468.359,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:4e760710629903c072d72c79a69361fd626c6c1d0aa089ac027d4c1be7a8230f",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "有人站在灰色背景前讲话",
+        "配有字幕"
+      ],
+      "missing_constraints": [],
+      "reason": "图片1和图片3中，人物站在灰色背景前，并且有字幕出现。这与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"有人站在灰色背景前讲话\",\n        \"配有字幕\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片1和图片3中，人物站在灰色背景前，并且有字幕出现。这与用户查询完全匹配。\"\n}",
+      "inference_seconds": 2.839,
+      "ollama_total_duration_seconds": 2.837,
+      "ollama_load_duration_seconds": 0.099,
+      "prompt_eval_count": 2307,
+      "eval_count": 72
+    },
+    {
+      "case_id": "caption-gray-subtitle-short-zero",
+      "query_id": "bf4e2dc4-038b-477a-ab32-02c4aa95d414",
+      "candidate_key": "571eedf4-973a-4591-a2d4-ec261216be6a",
+      "repeat_index": 3,
+      "query": "有人站在灰色背景前讲话并配有字幕",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 466.6,
+      "scene_end_seconds": 468.36,
+      "duration_seconds": 1.76,
+      "expected_relevance": 0,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 466.6,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:48b4bdc08bcf8ffd31aa3009ac453fdd4bc5f6fb3dbb42f280916d53e6bf4e5e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 467.6,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:6677df54dd9e62ff7a284755e40acac60b5900ac0b0c040a0c65577469ac641a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 468.359,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:4e760710629903c072d72c79a69361fd626c6c1d0aa089ac027d4c1be7a8230f",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "有人站在灰色背景前讲话",
+        "配有字幕"
+      ],
+      "missing_constraints": [],
+      "reason": "图片1和图片3中，人物站在灰色背景前，并且有字幕出现。这与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"有人站在灰色背景前讲话\",\n        \"配有字幕\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片1和图片3中，人物站在灰色背景前，并且有字幕出现。这与用户查询完全匹配。\"\n}",
+      "inference_seconds": 2.844,
+      "ollama_total_duration_seconds": 2.842,
+      "ollama_load_duration_seconds": 0.1,
+      "prompt_eval_count": 2307,
+      "eval_count": 72
+    },
+    {
+      "case_id": "caption-indoor-speaking-short-high",
+      "query_id": "19ad4f0e-d024-446a-afff-7d2fcc473546",
+      "candidate_key": "cdc581c4-8d86-4fa5-b946-a5347ce814ba",
+      "repeat_index": 1,
+      "query": "室内有人面对镜头讲话",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 163.04,
+      "scene_end_seconds": 165.6,
+      "duration_seconds": 2.56,
+      "expected_relevance": 2,
+      "frame_count": 4,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 163.04,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e7aeba5fc023334797d35197dc68c61b605fcfbc2a0149fcdfa0994cd8514e26",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 164.04,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:26eb516211220163d65e336ca7e7526ac520ad406e07ae34ca22bfd8b8730104",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 165.04,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:0ac690e5f2586cb962efcedcd4e980db5eff169a2f3ead55b65cd0ae8cc68cc4",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 165.599,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:3c4f5328dcb88e3e2bb445fdb5684c08955e5747cb639de501cd20aeddb97d4c",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "室内",
+        "有人面对镜头讲话"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人在室内，面向镜头讲话，并且视频帧的时间顺序表明这是连续的对话片段。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"室内\",\n        \"有人面对镜头讲话\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人在室内，面向镜头讲话，并且视频帧的时间顺序表明这是连续的对话片段。\"\n}",
+      "inference_seconds": 9.465,
+      "ollama_total_duration_seconds": 9.463,
+      "ollama_load_duration_seconds": 0.129,
+      "prompt_eval_count": 2324,
+      "eval_count": 66
+    },
+    {
+      "case_id": "caption-indoor-speaking-short-high",
+      "query_id": "19ad4f0e-d024-446a-afff-7d2fcc473546",
+      "candidate_key": "cdc581c4-8d86-4fa5-b946-a5347ce814ba",
+      "repeat_index": 2,
+      "query": "室内有人面对镜头讲话",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 163.04,
+      "scene_end_seconds": 165.6,
+      "duration_seconds": 2.56,
+      "expected_relevance": 2,
+      "frame_count": 4,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 163.04,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e7aeba5fc023334797d35197dc68c61b605fcfbc2a0149fcdfa0994cd8514e26",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 164.04,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:26eb516211220163d65e336ca7e7526ac520ad406e07ae34ca22bfd8b8730104",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 165.04,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:0ac690e5f2586cb962efcedcd4e980db5eff169a2f3ead55b65cd0ae8cc68cc4",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 165.599,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:3c4f5328dcb88e3e2bb445fdb5684c08955e5747cb639de501cd20aeddb97d4c",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "室内",
+        "有人面对镜头讲话"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人在室内，面向镜头讲话，并且视频帧的时间顺序表明这是连续的对话片段。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"室内\",\n        \"有人面对镜头讲话\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人在室内，面向镜头讲话，并且视频帧的时间顺序表明这是连续的对话片段。\"\n}",
+      "inference_seconds": 2.627,
+      "ollama_total_duration_seconds": 2.624,
+      "ollama_load_duration_seconds": 0.098,
+      "prompt_eval_count": 2324,
+      "eval_count": 66
+    },
+    {
+      "case_id": "caption-indoor-speaking-short-high",
+      "query_id": "19ad4f0e-d024-446a-afff-7d2fcc473546",
+      "candidate_key": "cdc581c4-8d86-4fa5-b946-a5347ce814ba",
+      "repeat_index": 3,
+      "query": "室内有人面对镜头讲话",
+      "rrf_rank": 3,
+      "source_group": "caption_only",
+      "scene_start_seconds": 163.04,
+      "scene_end_seconds": 165.6,
+      "duration_seconds": 2.56,
+      "expected_relevance": 2,
+      "frame_count": 4,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 163.04,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e7aeba5fc023334797d35197dc68c61b605fcfbc2a0149fcdfa0994cd8514e26",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 164.04,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:26eb516211220163d65e336ca7e7526ac520ad406e07ae34ca22bfd8b8730104",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 165.04,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:0ac690e5f2586cb962efcedcd4e980db5eff169a2f3ead55b65cd0ae8cc68cc4",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 165.599,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:3c4f5328dcb88e3e2bb445fdb5684c08955e5747cb639de501cd20aeddb97d4c",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "室内",
+        "有人面对镜头讲话"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人在室内，面向镜头讲话，并且视频帧的时间顺序表明这是连续的对话片段。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"室内\",\n        \"有人面对镜头讲话\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人在室内，面向镜头讲话，并且视频帧的时间顺序表明这是连续的对话片段。\"\n}",
+      "inference_seconds": 2.63,
+      "ollama_total_duration_seconds": 2.628,
+      "ollama_load_duration_seconds": 0.103,
+      "prompt_eval_count": 2324,
+      "eval_count": 66
+    },
+    {
+      "case_id": "visual-indoor-speaking-30s-high",
+      "query_id": "bb2a6777-941f-4c0a-a7ba-02240f3fa1ff",
+      "candidate_key": "abe17dd7-5fba-4d4d-8f70-ec10ebe27f17",
+      "repeat_index": 1,
+      "query": "A person speaking to the camera indoors",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 192.666667,
+      "scene_end_seconds": 222.666667,
+      "duration_seconds": 30.0,
+      "expected_relevance": 2,
+      "frame_count": 12,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 192.666667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:f5fc6fea9e413b7f2393c986eb2243b7f4ffd543168a73921a250a1fc8cb092d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 198.166667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:19a35fe9f5ee1e529565933f024a8fcc0191675de29b5260530c9abea4882f5e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 200.166667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b6cc1076ded7998011ac96e56543cd83a7c6402e4eb76461450fe312f6307866",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 201.666667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:71ee7c3a712366361e79f6bfdec2181ac7608981a62627666b68351356e337b1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 207.666667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:7430d8b46efdfd5c45bc2595b71ddaad9cf71aaaba2f4f74108b27f95210f859",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 212.916667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:efef0ba4fda68c9e9d3af33b3365f06f9b6f9f9e40ba82b593a4f3af1c357191",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 213.416667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:068469214eb4654bbb157a72a02ca933398f874c10c77e57d5afaaf7fea3c1a5",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 213.916667,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:a74f861d25e5e134c1aa1632c7ea98fdc6abb216ad3d942390c0f2dd4e2af053",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 214.416667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:347cd88532bed7907f677064aae7474b9d038e23b18af196ba52c2bfc3a01e16",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 214.916667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:8ac477cae97c62776d5b4bdca709b71d454111f4c43d42712b47283c09f19328",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 215.166667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:355affd0684f75b38603995c31de497d4750b6ce4437677523148f5777ff942c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 12,
+          "time_seconds": 222.665667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:867348e6467884bc5439b6383126688a0716de75689a851b1dcfd9d6c47b6624",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物在室内对着镜头讲话",
+        "人物穿着牛仔夹克"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人物正在室内对着镜头讲话，且该人物穿着牛仔夹克。这些信息与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物在室内对着镜头讲话\",\n        \"人物穿着牛仔夹克\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人物正在室内对着镜头讲话，且该人物穿着牛仔夹克。这些信息与用户查询完全匹配。\"\n}",
+      "inference_seconds": 25.949,
+      "ollama_total_duration_seconds": 25.945,
+      "ollama_load_duration_seconds": 0.12,
+      "prompt_eval_count": 6641,
+      "eval_count": 78
+    },
+    {
+      "case_id": "visual-indoor-speaking-30s-high",
+      "query_id": "bb2a6777-941f-4c0a-a7ba-02240f3fa1ff",
+      "candidate_key": "abe17dd7-5fba-4d4d-8f70-ec10ebe27f17",
+      "repeat_index": 2,
+      "query": "A person speaking to the camera indoors",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 192.666667,
+      "scene_end_seconds": 222.666667,
+      "duration_seconds": 30.0,
+      "expected_relevance": 2,
+      "frame_count": 12,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 192.666667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:f5fc6fea9e413b7f2393c986eb2243b7f4ffd543168a73921a250a1fc8cb092d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 198.166667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:19a35fe9f5ee1e529565933f024a8fcc0191675de29b5260530c9abea4882f5e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 200.166667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b6cc1076ded7998011ac96e56543cd83a7c6402e4eb76461450fe312f6307866",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 201.666667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:71ee7c3a712366361e79f6bfdec2181ac7608981a62627666b68351356e337b1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 207.666667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:7430d8b46efdfd5c45bc2595b71ddaad9cf71aaaba2f4f74108b27f95210f859",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 212.916667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:efef0ba4fda68c9e9d3af33b3365f06f9b6f9f9e40ba82b593a4f3af1c357191",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 213.416667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:068469214eb4654bbb157a72a02ca933398f874c10c77e57d5afaaf7fea3c1a5",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 213.916667,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:a74f861d25e5e134c1aa1632c7ea98fdc6abb216ad3d942390c0f2dd4e2af053",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 214.416667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:347cd88532bed7907f677064aae7474b9d038e23b18af196ba52c2bfc3a01e16",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 214.916667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:8ac477cae97c62776d5b4bdca709b71d454111f4c43d42712b47283c09f19328",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 215.166667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:355affd0684f75b38603995c31de497d4750b6ce4437677523148f5777ff942c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 12,
+          "time_seconds": 222.665667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:867348e6467884bc5439b6383126688a0716de75689a851b1dcfd9d6c47b6624",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物在室内对着镜头讲话",
+        "人物穿着牛仔夹克"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人物正在室内对着镜头讲话，且该人物穿着牛仔夹克。这些信息与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物在室内对着镜头讲话\",\n        \"人物穿着牛仔夹克\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人物正在室内对着镜头讲话，且该人物穿着牛仔夹克。这些信息与用户查询完全匹配。\"\n}",
+      "inference_seconds": 3.487,
+      "ollama_total_duration_seconds": 3.483,
+      "ollama_load_duration_seconds": 0.11,
+      "prompt_eval_count": 6641,
+      "eval_count": 78
+    },
+    {
+      "case_id": "visual-indoor-speaking-30s-high",
+      "query_id": "bb2a6777-941f-4c0a-a7ba-02240f3fa1ff",
+      "candidate_key": "abe17dd7-5fba-4d4d-8f70-ec10ebe27f17",
+      "repeat_index": 3,
+      "query": "A person speaking to the camera indoors",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 192.666667,
+      "scene_end_seconds": 222.666667,
+      "duration_seconds": 30.0,
+      "expected_relevance": 2,
+      "frame_count": 12,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 192.666667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:f5fc6fea9e413b7f2393c986eb2243b7f4ffd543168a73921a250a1fc8cb092d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 198.166667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:19a35fe9f5ee1e529565933f024a8fcc0191675de29b5260530c9abea4882f5e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 200.166667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b6cc1076ded7998011ac96e56543cd83a7c6402e4eb76461450fe312f6307866",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 201.666667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:71ee7c3a712366361e79f6bfdec2181ac7608981a62627666b68351356e337b1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 207.666667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:7430d8b46efdfd5c45bc2595b71ddaad9cf71aaaba2f4f74108b27f95210f859",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 212.916667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:efef0ba4fda68c9e9d3af33b3365f06f9b6f9f9e40ba82b593a4f3af1c357191",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 213.416667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:068469214eb4654bbb157a72a02ca933398f874c10c77e57d5afaaf7fea3c1a5",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 213.916667,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:a74f861d25e5e134c1aa1632c7ea98fdc6abb216ad3d942390c0f2dd4e2af053",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 214.416667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:347cd88532bed7907f677064aae7474b9d038e23b18af196ba52c2bfc3a01e16",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 214.916667,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:8ac477cae97c62776d5b4bdca709b71d454111f4c43d42712b47283c09f19328",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 215.166667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:355affd0684f75b38603995c31de497d4750b6ce4437677523148f5777ff942c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 12,
+          "time_seconds": 222.665667,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:867348e6467884bc5439b6383126688a0716de75689a851b1dcfd9d6c47b6624",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物在室内对着镜头讲话",
+        "人物穿着牛仔夹克"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人物正在室内对着镜头讲话，且该人物穿着牛仔夹克。这些信息与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物在室内对着镜头讲话\",\n        \"人物穿着牛仔夹克\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人物正在室内对着镜头讲话，且该人物穿着牛仔夹克。这些信息与用户查询完全匹配。\"\n}",
+      "inference_seconds": 3.471,
+      "ollama_total_duration_seconds": 3.467,
+      "ollama_load_duration_seconds": 0.107,
+      "prompt_eval_count": 6641,
+      "eval_count": 78
+    },
+    {
+      "case_id": "visual-outdoor-camera-30s-zero",
+      "query_id": "7ec4b8b0-ca9f-49a1-b271-5bba789dee49",
+      "candidate_key": "b23eed34-f082-4527-ad27-5f46a673a420",
+      "repeat_index": 1,
+      "query": "户外有人手里拿着拍摄设备",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 255.133333,
+      "scene_end_seconds": 285.133333,
+      "duration_seconds": 30.0,
+      "expected_relevance": 0,
+      "frame_count": 12,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 255.133333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:bd834948f1bc0d2df364320e677cf05200480eba98c297fc771c076d70e312f0",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 257.133333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:36e4b2b18f7481b651c25d9e2924d34bb265107318a437acd9375e9079449f58",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 257.883333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:9575c32e802ec6cc6b34705764e767f080d080411d7a44f2056b008184131729",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 258.383333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:53905f446539be2f96a17d6bf815795ed39e71995722499ed0125cb3126304fa",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 258.883333,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:30e32a111eca9306c3c5e438706e39403251872624c1607b0cd26ecae549e713",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 259.383333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:37c57aa5d87ce042dcc77153da35037b24aaf9678d369c3efcfff32652f8c04b",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 259.883333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:4d85cb4016d3f2ab2e3ecf119ecf47ec408ca2b15cf942877f0c81a0f272de6c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 262.633333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:65d4cfce466e9e3285355a0b28fdd54eec32f2532ad7fc17acacef58ff764861",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 267.133333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:9eb64b7c935b109ab06d591cd0f3d103f8810d22d728ed1ffe888a5d73f9f4c1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 270.133333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:53cc3ec11295281d04fd63c7f5d1d5822f511dc7cfcf100a0904c575d65f35c6",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 277.633333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:ae8024515422d133177cd267be1fdbdad411d55b79d575f08bff61a51b60c6ca",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 12,
+          "time_seconds": 285.132333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:93882dc6b4dc61343ed88ccc28cb428de1ce7ab8aa334d01683518da8891684e",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物",
+        "物体（拍摄设备）"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示了一个人物，手持一个拍摄设备，符合用户查询的条件。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物\",\n        \"物体（拍摄设备）\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示了一个人物，手持一个拍摄设备，符合用户查询的条件。\"\n}",
+      "inference_seconds": 32.009,
+      "ollama_total_duration_seconds": 32.003,
+      "ollama_load_duration_seconds": 0.218,
+      "prompt_eval_count": 6640,
+      "eval_count": 61
+    },
+    {
+      "case_id": "visual-outdoor-camera-30s-zero",
+      "query_id": "7ec4b8b0-ca9f-49a1-b271-5bba789dee49",
+      "candidate_key": "b23eed34-f082-4527-ad27-5f46a673a420",
+      "repeat_index": 2,
+      "query": "户外有人手里拿着拍摄设备",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 255.133333,
+      "scene_end_seconds": 285.133333,
+      "duration_seconds": 30.0,
+      "expected_relevance": 0,
+      "frame_count": 12,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 255.133333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:bd834948f1bc0d2df364320e677cf05200480eba98c297fc771c076d70e312f0",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 257.133333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:36e4b2b18f7481b651c25d9e2924d34bb265107318a437acd9375e9079449f58",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 257.883333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:9575c32e802ec6cc6b34705764e767f080d080411d7a44f2056b008184131729",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 258.383333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:53905f446539be2f96a17d6bf815795ed39e71995722499ed0125cb3126304fa",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 258.883333,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:30e32a111eca9306c3c5e438706e39403251872624c1607b0cd26ecae549e713",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 259.383333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:37c57aa5d87ce042dcc77153da35037b24aaf9678d369c3efcfff32652f8c04b",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 259.883333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:4d85cb4016d3f2ab2e3ecf119ecf47ec408ca2b15cf942877f0c81a0f272de6c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 262.633333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:65d4cfce466e9e3285355a0b28fdd54eec32f2532ad7fc17acacef58ff764861",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 267.133333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:9eb64b7c935b109ab06d591cd0f3d103f8810d22d728ed1ffe888a5d73f9f4c1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 270.133333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:53cc3ec11295281d04fd63c7f5d1d5822f511dc7cfcf100a0904c575d65f35c6",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 277.633333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:ae8024515422d133177cd267be1fdbdad411d55b79d575f08bff61a51b60c6ca",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 12,
+          "time_seconds": 285.132333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:93882dc6b4dc61343ed88ccc28cb428de1ce7ab8aa334d01683518da8891684e",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物",
+        "物体（拍摄设备）"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示了一个人物，手持一个拍摄设备，符合用户查询的条件。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物\",\n        \"物体（拍摄设备）\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示了一个人物，手持一个拍摄设备，符合用户查询的条件。\"\n}",
+      "inference_seconds": 3.507,
+      "ollama_total_duration_seconds": 3.504,
+      "ollama_load_duration_seconds": 0.112,
+      "prompt_eval_count": 6640,
+      "eval_count": 61
+    },
+    {
+      "case_id": "visual-outdoor-camera-30s-zero",
+      "query_id": "7ec4b8b0-ca9f-49a1-b271-5bba789dee49",
+      "candidate_key": "b23eed34-f082-4527-ad27-5f46a673a420",
+      "repeat_index": 3,
+      "query": "户外有人手里拿着拍摄设备",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 255.133333,
+      "scene_end_seconds": 285.133333,
+      "duration_seconds": 30.0,
+      "expected_relevance": 0,
+      "frame_count": 12,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 255.133333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:bd834948f1bc0d2df364320e677cf05200480eba98c297fc771c076d70e312f0",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 257.133333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:36e4b2b18f7481b651c25d9e2924d34bb265107318a437acd9375e9079449f58",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 257.883333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:9575c32e802ec6cc6b34705764e767f080d080411d7a44f2056b008184131729",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 258.383333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:53905f446539be2f96a17d6bf815795ed39e71995722499ed0125cb3126304fa",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 258.883333,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:30e32a111eca9306c3c5e438706e39403251872624c1607b0cd26ecae549e713",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 259.383333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:37c57aa5d87ce042dcc77153da35037b24aaf9678d369c3efcfff32652f8c04b",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 259.883333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:4d85cb4016d3f2ab2e3ecf119ecf47ec408ca2b15cf942877f0c81a0f272de6c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 262.633333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:65d4cfce466e9e3285355a0b28fdd54eec32f2532ad7fc17acacef58ff764861",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 267.133333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:9eb64b7c935b109ab06d591cd0f3d103f8810d22d728ed1ffe888a5d73f9f4c1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 270.133333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:53cc3ec11295281d04fd63c7f5d1d5822f511dc7cfcf100a0904c575d65f35c6",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 277.633333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:ae8024515422d133177cd267be1fdbdad411d55b79d575f08bff61a51b60c6ca",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 12,
+          "time_seconds": 285.132333,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:93882dc6b4dc61343ed88ccc28cb428de1ce7ab8aa334d01683518da8891684e",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物",
+        "物体（拍摄设备）"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示了一个人物，手持一个拍摄设备，符合用户查询的条件。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物\",\n        \"物体（拍摄设备）\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示了一个人物，手持一个拍摄设备，符合用户查询的条件。\"\n}",
+      "inference_seconds": 3.514,
+      "ollama_total_duration_seconds": 3.511,
+      "ollama_load_duration_seconds": 0.117,
+      "prompt_eval_count": 6640,
+      "eval_count": 61
+    },
+    {
+      "case_id": "visual-drum-playing-30s-zero",
+      "query_id": "aa001e65-1676-4079-8b60-6def3c614971",
+      "candidate_key": "91f7185c-ea6b-46ce-909d-e31d0f1d2ea8",
+      "repeat_index": 1,
+      "query": "穿白色上衣的人坐在架子鼓后演奏",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 120.1,
+      "scene_end_seconds": 150.1,
+      "duration_seconds": 30.0,
+      "expected_relevance": 0,
+      "frame_count": 11,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 120.1,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:2a9d81c4a94a8be87b5a4cc90743b2578320ddbec689f87f894eae8859a3c4d2",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 123.6,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:02fd9610a8601e4ac7c1dfe4b373d9125fda678b40372bb692ea422161cfd24d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 127.6,
+          "selection_reasons": [
+            "motion_peak",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:6b87e9fd7cb04556240c9cc3f04838c7766e379cd6817c4d41d3c5f434fc439a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 130.35,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:03005c6e25b3e7c09544eedff1e7a0d631599e9e881cacdc0ae3bcefdf0e4f46",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 130.85,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:8eb6ae93998056cfededa59f40e7159996095384e80f57299ac99567d064897c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 131.35,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:662779bd3b8459a71ac0989004737e9f8dc0752e8159a90a2dc75a897a655f84",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 131.85,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:f7c1976355bb250ec1268b91deb85de06a5c6cb8cf5ee5dfdb11e5bbe83d6b72",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 132.35,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:9ec24064ab5f6043bd6e3a367182378e2a932e8028018a5b4ae7f2f536dee0b1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 135.1,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:03c11e8b177a78363882d34654517216237c2d0c1999136701d7f316499bd973",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 142.6,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b24e5e6ab4d604190b39ace1ece59775bdad62719cf30dbee84cfc4423dc445c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 150.099,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:618ce701311d0d5218ebdd328716fa4e381039f9e546b703f98f0a1532c467f4",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "穿白色上衣的人坐在架子鼓后演奏"
+      ],
+      "missing_constraints": [],
+      "reason": "图片1至图片6显示了一个穿着白色上衣的人在架子鼓前，符合描述。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"穿白色上衣的人坐在架子鼓后演奏\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片1至图片6显示了一个穿着白色上衣的人在架子鼓前，符合描述。\"\n}",
+      "inference_seconds": 31.977,
+      "ollama_total_duration_seconds": 31.974,
+      "ollama_load_duration_seconds": 0.128,
+      "prompt_eval_count": 6621,
+      "eval_count": 64
+    },
+    {
+      "case_id": "visual-drum-playing-30s-zero",
+      "query_id": "aa001e65-1676-4079-8b60-6def3c614971",
+      "candidate_key": "91f7185c-ea6b-46ce-909d-e31d0f1d2ea8",
+      "repeat_index": 2,
+      "query": "穿白色上衣的人坐在架子鼓后演奏",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 120.1,
+      "scene_end_seconds": 150.1,
+      "duration_seconds": 30.0,
+      "expected_relevance": 0,
+      "frame_count": 11,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 120.1,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:2a9d81c4a94a8be87b5a4cc90743b2578320ddbec689f87f894eae8859a3c4d2",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 123.6,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:02fd9610a8601e4ac7c1dfe4b373d9125fda678b40372bb692ea422161cfd24d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 127.6,
+          "selection_reasons": [
+            "motion_peak",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:6b87e9fd7cb04556240c9cc3f04838c7766e379cd6817c4d41d3c5f434fc439a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 130.35,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:03005c6e25b3e7c09544eedff1e7a0d631599e9e881cacdc0ae3bcefdf0e4f46",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 130.85,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:8eb6ae93998056cfededa59f40e7159996095384e80f57299ac99567d064897c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 131.35,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:662779bd3b8459a71ac0989004737e9f8dc0752e8159a90a2dc75a897a655f84",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 131.85,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:f7c1976355bb250ec1268b91deb85de06a5c6cb8cf5ee5dfdb11e5bbe83d6b72",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 132.35,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:9ec24064ab5f6043bd6e3a367182378e2a932e8028018a5b4ae7f2f536dee0b1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 135.1,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:03c11e8b177a78363882d34654517216237c2d0c1999136701d7f316499bd973",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 142.6,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b24e5e6ab4d604190b39ace1ece59775bdad62719cf30dbee84cfc4423dc445c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 150.099,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:618ce701311d0d5218ebdd328716fa4e381039f9e546b703f98f0a1532c467f4",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "穿白色上衣的人坐在架子鼓后演奏"
+      ],
+      "missing_constraints": [],
+      "reason": "图片1至图片6显示了一个穿着白色上衣的人在架子鼓前，符合描述。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"穿白色上衣的人坐在架子鼓后演奏\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片1至图片6显示了一个穿着白色上衣的人在架子鼓前，符合描述。\"\n}",
+      "inference_seconds": 3.649,
+      "ollama_total_duration_seconds": 3.646,
+      "ollama_load_duration_seconds": 0.119,
+      "prompt_eval_count": 6621,
+      "eval_count": 64
+    },
+    {
+      "case_id": "visual-drum-playing-30s-zero",
+      "query_id": "aa001e65-1676-4079-8b60-6def3c614971",
+      "candidate_key": "91f7185c-ea6b-46ce-909d-e31d0f1d2ea8",
+      "repeat_index": 3,
+      "query": "穿白色上衣的人坐在架子鼓后演奏",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 120.1,
+      "scene_end_seconds": 150.1,
+      "duration_seconds": 30.0,
+      "expected_relevance": 0,
+      "frame_count": 11,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 120.1,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:2a9d81c4a94a8be87b5a4cc90743b2578320ddbec689f87f894eae8859a3c4d2",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 123.6,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:02fd9610a8601e4ac7c1dfe4b373d9125fda678b40372bb692ea422161cfd24d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 127.6,
+          "selection_reasons": [
+            "motion_peak",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:6b87e9fd7cb04556240c9cc3f04838c7766e379cd6817c4d41d3c5f434fc439a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 130.35,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:03005c6e25b3e7c09544eedff1e7a0d631599e9e881cacdc0ae3bcefdf0e4f46",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 130.85,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:8eb6ae93998056cfededa59f40e7159996095384e80f57299ac99567d064897c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 131.35,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:662779bd3b8459a71ac0989004737e9f8dc0752e8159a90a2dc75a897a655f84",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 7,
+          "time_seconds": 131.85,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:f7c1976355bb250ec1268b91deb85de06a5c6cb8cf5ee5dfdb11e5bbe83d6b72",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 8,
+          "time_seconds": 132.35,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:9ec24064ab5f6043bd6e3a367182378e2a932e8028018a5b4ae7f2f536dee0b1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 9,
+          "time_seconds": 135.1,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:03c11e8b177a78363882d34654517216237c2d0c1999136701d7f316499bd973",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 10,
+          "time_seconds": 142.6,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b24e5e6ab4d604190b39ace1ece59775bdad62719cf30dbee84cfc4423dc445c",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 11,
+          "time_seconds": 150.099,
+          "selection_reasons": [
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:618ce701311d0d5218ebdd328716fa4e381039f9e546b703f98f0a1532c467f4",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "穿白色上衣的人坐在架子鼓后演奏"
+      ],
+      "missing_constraints": [],
+      "reason": "图片1至图片6显示了一个穿着白色上衣的人在架子鼓前，符合描述。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"穿白色上衣的人坐在架子鼓后演奏\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片1至图片6显示了一个穿着白色上衣的人在架子鼓前，符合描述。\"\n}",
+      "inference_seconds": 3.643,
+      "ollama_total_duration_seconds": 3.64,
+      "ollama_load_duration_seconds": 0.119,
+      "prompt_eval_count": 6621,
+      "eval_count": 64
+    },
+    {
+      "case_id": "visual-birthday-short-high",
+      "query_id": "2b969b24-bdd8-4f37-a452-3c3d4fabe7e3",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "repeat_index": 1,
+      "query": "有生日氛围的画面",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 34.0,
+      "scene_end_seconds": 34.5,
+      "duration_seconds": 0.5,
+      "expected_relevance": 2,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 34.0,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e0e6b7947ab0685a1d362da93051be28b3d43e66534ff8651dc807be47fc94ab",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 34.25,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:a310f416ff954794ea294c62abf01ec4a1d195bafbe29b2c16a2c45fc69248ea",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 34.4995,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:29b23c1b81f63760786010f3d7f73dcd25c74462a09da117d1f7449f6fcd7c52",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物穿着白色带有花卉刺绣的衬衫",
+        "人物手持一个蛋糕",
+        "蛋糕上插有一根点燃的蜡烛"
+      ],
+      "missing_constraints": [],
+      "reason": "两张图片都显示了人物在庆祝生日，有明显的生日氛围。第一张图片中人物没有看向蜡烛，而第二张图片中人物正注视着蜡烛，进一步强化了生日的主题。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物穿着白色带有花卉刺绣的衬衫\",\n        \"人物手持一个蛋糕\",\n        \"蛋糕上插有一根点燃的蜡烛\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"两张图片都显示了人物在庆祝生日，有明显的生日氛围。第一张图片中人物没有看向蜡烛，而第二张图片中人物正注视着蜡烛，进一步强化了生日的主题。\"\n}",
+      "inference_seconds": 10.167,
+      "ollama_total_duration_seconds": 10.165,
+      "ollama_load_duration_seconds": 0.132,
+      "prompt_eval_count": 2298,
+      "eval_count": 105
+    },
+    {
+      "case_id": "visual-birthday-short-high",
+      "query_id": "2b969b24-bdd8-4f37-a452-3c3d4fabe7e3",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "repeat_index": 2,
+      "query": "有生日氛围的画面",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 34.0,
+      "scene_end_seconds": 34.5,
+      "duration_seconds": 0.5,
+      "expected_relevance": 2,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 34.0,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e0e6b7947ab0685a1d362da93051be28b3d43e66534ff8651dc807be47fc94ab",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 34.25,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:a310f416ff954794ea294c62abf01ec4a1d195bafbe29b2c16a2c45fc69248ea",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 34.4995,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:29b23c1b81f63760786010f3d7f73dcd25c74462a09da117d1f7449f6fcd7c52",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物穿着白色带有花卉刺绣的衬衫",
+        "人物手持一个蛋糕",
+        "蛋糕上插有一根点燃的蜡烛"
+      ],
+      "missing_constraints": [],
+      "reason": "两张图片都显示了人物在庆祝生日，有明显的生日氛围。第一张图片中人物拿着蛋糕，第二张图片中蛋糕上有点燃的蜡烛，这些细节共同构成了生日场景。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物穿着白色带有花卉刺绣的衬衫\",\n        \"人物手持一个蛋糕\",\n        \"蛋糕上插有一根点燃的蜡烛\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"两张图片都显示了人物在庆祝生日，有明显的生日氛围。第一张图片中人物拿着蛋糕，第二张图片中蛋糕上有点燃的蜡烛，这些细节共同构成了生日场景。\"\n}",
+      "inference_seconds": 5.301,
+      "ollama_total_duration_seconds": 5.299,
+      "ollama_load_duration_seconds": 0.104,
+      "prompt_eval_count": 2298,
+      "eval_count": 103
+    },
+    {
+      "case_id": "visual-birthday-short-high",
+      "query_id": "2b969b24-bdd8-4f37-a452-3c3d4fabe7e3",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "repeat_index": 3,
+      "query": "有生日氛围的画面",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 34.0,
+      "scene_end_seconds": 34.5,
+      "duration_seconds": 0.5,
+      "expected_relevance": 2,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 34.0,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:e0e6b7947ab0685a1d362da93051be28b3d43e66534ff8651dc807be47fc94ab",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 34.25,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:a310f416ff954794ea294c62abf01ec4a1d195bafbe29b2c16a2c45fc69248ea",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 34.4995,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:29b23c1b81f63760786010f3d7f73dcd25c74462a09da117d1f7449f6fcd7c52",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物穿着白色带有花卉刺绣的衬衫",
+        "人物手持一个蛋糕",
+        "蛋糕上插有一根点燃的蜡烛"
+      ],
+      "missing_constraints": [],
+      "reason": "两张图片都显示了人物在庆祝生日，有明显的生日氛围。第一张图片中人物拿着蛋糕，第二张图片中蛋糕上有点燃的蜡烛，这些细节共同构成了生日场景。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物穿着白色带有花卉刺绣的衬衫\",\n        \"人物手持一个蛋糕\",\n        \"蛋糕上插有一根点燃的蜡烛\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"两张图片都显示了人物在庆祝生日，有明显的生日氛围。第一张图片中人物拿着蛋糕，第二张图片中蛋糕上有点燃的蜡烛，这些细节共同构成了生日场景。\"\n}",
+      "inference_seconds": 5.319,
+      "ollama_total_duration_seconds": 5.315,
+      "ollama_load_duration_seconds": 0.107,
+      "prompt_eval_count": 2298,
+      "eval_count": 103
+    },
+    {
+      "case_id": "visual-chopsticks-short-partial",
+      "query_id": "3e942025-1d00-4637-b2a0-5424fa182282",
+      "candidate_key": "fe00c856-f63d-460e-9c08-568e2b9fa673",
+      "repeat_index": 1,
+      "query": "有人用筷子从分格餐盒里夹食物",
+      "rrf_rank": 2,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 310.833333,
+      "scene_end_seconds": 311.366667,
+      "duration_seconds": 0.533334,
+      "expected_relevance": 1,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 310.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:ede6ca65af318698d494758068336ba70d5b5bf5ae512e0982345f587a6392c4",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 311.1,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:6b65716bbb273eb799a616c3e13b5c379ed6701d91912eccbf73ff87c58f6a4a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 311.366134,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:d96d7952d64eae4743cc99f4de898d0382359232880ea16bce1390fc53d3fd6d",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "有人用筷子从分格餐盒里夹食物"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示一个人正在使用筷子从一个分格的餐盒里夹取食物，符合用户查询的核心意图。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"有人用筷子从分格餐盒里夹食物\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示一个人正在使用筷子从一个分格的餐盒里夹取食物，符合用户查询的核心意图。\"\n}",
+      "inference_seconds": 12.14,
+      "ollama_total_duration_seconds": 12.138,
+      "ollama_load_duration_seconds": 0.131,
+      "prompt_eval_count": 2308,
+      "eval_count": 70
+    },
+    {
+      "case_id": "visual-chopsticks-short-partial",
+      "query_id": "3e942025-1d00-4637-b2a0-5424fa182282",
+      "candidate_key": "fe00c856-f63d-460e-9c08-568e2b9fa673",
+      "repeat_index": 2,
+      "query": "有人用筷子从分格餐盒里夹食物",
+      "rrf_rank": 2,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 310.833333,
+      "scene_end_seconds": 311.366667,
+      "duration_seconds": 0.533334,
+      "expected_relevance": 1,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 310.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:ede6ca65af318698d494758068336ba70d5b5bf5ae512e0982345f587a6392c4",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 311.1,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:6b65716bbb273eb799a616c3e13b5c379ed6701d91912eccbf73ff87c58f6a4a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 311.366134,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:d96d7952d64eae4743cc99f4de898d0382359232880ea16bce1390fc53d3fd6d",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "有人用筷子从分格餐盒里夹食物"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示一个人正在使用筷子从一个分格的餐盒里夹取食物，符合用户查询的核心意图。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"有人用筷子从分格餐盒里夹食物\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示一个人正在使用筷子从一个分格的餐盒里夹取食物，符合用户查询的核心意图。\"\n}",
+      "inference_seconds": 3.702,
+      "ollama_total_duration_seconds": 3.699,
+      "ollama_load_duration_seconds": 0.105,
+      "prompt_eval_count": 2308,
+      "eval_count": 70
+    },
+    {
+      "case_id": "visual-chopsticks-short-partial",
+      "query_id": "3e942025-1d00-4637-b2a0-5424fa182282",
+      "candidate_key": "fe00c856-f63d-460e-9c08-568e2b9fa673",
+      "repeat_index": 3,
+      "query": "有人用筷子从分格餐盒里夹食物",
+      "rrf_rank": 2,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 310.833333,
+      "scene_end_seconds": 311.366667,
+      "duration_seconds": 0.533334,
+      "expected_relevance": 1,
+      "frame_count": 3,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 310.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:ede6ca65af318698d494758068336ba70d5b5bf5ae512e0982345f587a6392c4",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 311.1,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:6b65716bbb273eb799a616c3e13b5c379ed6701d91912eccbf73ff87c58f6a4a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 311.366134,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:d96d7952d64eae4743cc99f4de898d0382359232880ea16bce1390fc53d3fd6d",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "有人用筷子从分格餐盒里夹食物"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示一个人正在使用筷子从一个分格的餐盒里夹取食物，符合用户查询的核心意图。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"有人用筷子从分格餐盒里夹食物\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示一个人正在使用筷子从一个分格的餐盒里夹取食物，符合用户查询的核心意图。\"\n}",
+      "inference_seconds": 3.631,
+      "ollama_total_duration_seconds": 3.628,
+      "ollama_load_duration_seconds": 0.102,
+      "prompt_eval_count": 2308,
+      "eval_count": 70
+    },
+    {
+      "case_id": "visual-red-singer-short-zero",
+      "query_id": "f6f7a3a2-d80c-4c10-8996-7fbfd8b2346f",
+      "candidate_key": "6c7efaaa-3412-478e-b054-02cc0976d257",
+      "repeat_index": 1,
+      "query": "红发歌手戴着蓝色眼镜拿橙色麦克风",
+      "rrf_rank": 2,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 974.56,
+      "scene_end_seconds": 975.4,
+      "duration_seconds": 0.84,
+      "expected_relevance": 0,
+      "frame_count": 4,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 974.56,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:63a940efc166295f767ed3699819d1d5159b8611f2eb781df4df8808a3a8bf68",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 974.98,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:05627d57e39946c7eabce105d40c444e66f145bc748d3554c6a2c0457f01917f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 975.06,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:f509a3d0faa5302a94697634c04fc80e0760ba61cbf8908ecb74612e44e3743f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 975.39916,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:f1ed48163880cb5ba6f3edd04c4a287d4c5a54b41465d15625eb6936985648d8",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 0,
+      "matched_constraints": [],
+      "missing_constraints": [
+        "红发歌手戴着蓝色眼镜拿橙色麦克风"
+      ],
+      "reason": "图片中没有显示红发歌手戴着蓝色眼镜拿橙色麦克风的证据。",
+      "raw_response": "{\n    \"relevance\": 0,\n    \"matched_constraints\": [],\n    \"missing_constraints\": [\n        \"红发歌手戴着蓝色眼镜拿橙色麦克风\"\n    ],\n    \"reason\": \"图片中没有显示红发歌手戴着蓝色眼镜拿橙色麦克风的证据。\"\n}",
+      "inference_seconds": 11.872,
+      "ollama_total_duration_seconds": 11.87,
+      "ollama_load_duration_seconds": 0.134,
+      "prompt_eval_count": 2330,
+      "eval_count": 63
+    },
+    {
+      "case_id": "visual-red-singer-short-zero",
+      "query_id": "f6f7a3a2-d80c-4c10-8996-7fbfd8b2346f",
+      "candidate_key": "6c7efaaa-3412-478e-b054-02cc0976d257",
+      "repeat_index": 2,
+      "query": "红发歌手戴着蓝色眼镜拿橙色麦克风",
+      "rrf_rank": 2,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 974.56,
+      "scene_end_seconds": 975.4,
+      "duration_seconds": 0.84,
+      "expected_relevance": 0,
+      "frame_count": 4,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 974.56,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:63a940efc166295f767ed3699819d1d5159b8611f2eb781df4df8808a3a8bf68",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 974.98,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:05627d57e39946c7eabce105d40c444e66f145bc748d3554c6a2c0457f01917f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 975.06,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:f509a3d0faa5302a94697634c04fc80e0760ba61cbf8908ecb74612e44e3743f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 975.39916,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:f1ed48163880cb5ba6f3edd04c4a287d4c5a54b41465d15625eb6936985648d8",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 0,
+      "matched_constraints": [],
+      "missing_constraints": [
+        "红发歌手戴着蓝色眼镜拿橙色麦克风"
+      ],
+      "reason": "图片中没有显示红发歌手戴着蓝色眼镜拿橙色麦克风的证据。",
+      "raw_response": "{\n    \"relevance\": 0,\n    \"matched_constraints\": [],\n    \"missing_constraints\": [\n        \"红发歌手戴着蓝色眼镜拿橙色麦克风\"\n    ],\n    \"reason\": \"图片中没有显示红发歌手戴着蓝色眼镜拿橙色麦克风的证据。\"\n}",
+      "inference_seconds": 3.279,
+      "ollama_total_duration_seconds": 3.277,
+      "ollama_load_duration_seconds": 0.107,
+      "prompt_eval_count": 2330,
+      "eval_count": 63
+    },
+    {
+      "case_id": "visual-red-singer-short-zero",
+      "query_id": "f6f7a3a2-d80c-4c10-8996-7fbfd8b2346f",
+      "candidate_key": "6c7efaaa-3412-478e-b054-02cc0976d257",
+      "repeat_index": 3,
+      "query": "红发歌手戴着蓝色眼镜拿橙色麦克风",
+      "rrf_rank": 2,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 974.56,
+      "scene_end_seconds": 975.4,
+      "duration_seconds": 0.84,
+      "expected_relevance": 0,
+      "frame_count": 4,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 974.56,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:63a940efc166295f767ed3699819d1d5159b8611f2eb781df4df8808a3a8bf68",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 974.98,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:05627d57e39946c7eabce105d40c444e66f145bc748d3554c6a2c0457f01917f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 975.06,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:f509a3d0faa5302a94697634c04fc80e0760ba61cbf8908ecb74612e44e3743f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 975.39916,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:f1ed48163880cb5ba6f3edd04c4a287d4c5a54b41465d15625eb6936985648d8",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 0,
+      "matched_constraints": [],
+      "missing_constraints": [
+        "红发歌手戴着蓝色眼镜拿橙色麦克风"
+      ],
+      "reason": "图片中没有显示红发歌手戴着蓝色眼镜拿橙色麦克风的证据。",
+      "raw_response": "{\n    \"relevance\": 0,\n    \"matched_constraints\": [],\n    \"missing_constraints\": [\n        \"红发歌手戴着蓝色眼镜拿橙色麦克风\"\n    ],\n    \"reason\": \"图片中没有显示红发歌手戴着蓝色眼镜拿橙色麦克风的证据。\"\n}",
+      "inference_seconds": 3.272,
+      "ollama_total_duration_seconds": 3.269,
+      "ollama_load_duration_seconds": 0.105,
+      "prompt_eval_count": 2330,
+      "eval_count": 63
+    },
+    {
+      "case_id": "visual-hanging-clothes-high",
+      "query_id": "28823ce0-ce90-41cd-b05d-e1c0c1086038",
+      "candidate_key": "35fbbbed-98e7-48e7-967b-5ff283c96b63",
+      "repeat_index": 1,
+      "query": "人物旁边挂着衣服",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 883.4,
+      "scene_end_seconds": 884.8,
+      "duration_seconds": 1.4,
+      "expected_relevance": 2,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 883.4,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:33995312033ac966bd69f6bdfbb8d9be3dcf42491917a2ca5af34c0e05b0f35e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 883.6,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:cf38561a16152cfc910b83f1c766f3f6ad908062f3a04046b55287aafff1b586",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 884.1,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:7cdd380d7c1647fea597931cb095e05d3a097648698ffcf1784ca0aefd484cf1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 884.4,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:2abae7b998fd784bd7fe66975b12f169708d62bb03807a9986e622dba03f849a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 884.6,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:50426e9b52e64745dc293923b56779cc5e734f43336c7bb3fc0ead75f2db44f5",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 884.799,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:37670f575b3e51e36d650beaec14b74a925835e1560255cbb6a9348a8ce62014",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物旁边挂着衣服"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示了人物旁边挂着的衣服，与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物旁边挂着衣服\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示了人物旁边挂着的衣服，与用户查询完全匹配。\"\n}",
+      "inference_seconds": 15.935,
+      "ollama_total_duration_seconds": 15.933,
+      "ollama_load_duration_seconds": 0.128,
+      "prompt_eval_count": 3401,
+      "eval_count": 53
+    },
+    {
+      "case_id": "visual-hanging-clothes-high",
+      "query_id": "28823ce0-ce90-41cd-b05d-e1c0c1086038",
+      "candidate_key": "35fbbbed-98e7-48e7-967b-5ff283c96b63",
+      "repeat_index": 2,
+      "query": "人物旁边挂着衣服",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 883.4,
+      "scene_end_seconds": 884.8,
+      "duration_seconds": 1.4,
+      "expected_relevance": 2,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 883.4,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:33995312033ac966bd69f6bdfbb8d9be3dcf42491917a2ca5af34c0e05b0f35e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 883.6,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:cf38561a16152cfc910b83f1c766f3f6ad908062f3a04046b55287aafff1b586",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 884.1,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:7cdd380d7c1647fea597931cb095e05d3a097648698ffcf1784ca0aefd484cf1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 884.4,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:2abae7b998fd784bd7fe66975b12f169708d62bb03807a9986e622dba03f849a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 884.6,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:50426e9b52e64745dc293923b56779cc5e734f43336c7bb3fc0ead75f2db44f5",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 884.799,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:37670f575b3e51e36d650beaec14b74a925835e1560255cbb6a9348a8ce62014",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物旁边挂着衣服"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示了人物旁边挂着的衣服，与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物旁边挂着衣服\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示了人物旁边挂着的衣服，与用户查询完全匹配。\"\n}",
+      "inference_seconds": 2.84,
+      "ollama_total_duration_seconds": 2.837,
+      "ollama_load_duration_seconds": 0.108,
+      "prompt_eval_count": 3401,
+      "eval_count": 53
+    },
+    {
+      "case_id": "visual-hanging-clothes-high",
+      "query_id": "28823ce0-ce90-41cd-b05d-e1c0c1086038",
+      "candidate_key": "35fbbbed-98e7-48e7-967b-5ff283c96b63",
+      "repeat_index": 3,
+      "query": "人物旁边挂着衣服",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 883.4,
+      "scene_end_seconds": 884.8,
+      "duration_seconds": 1.4,
+      "expected_relevance": 2,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 883.4,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:33995312033ac966bd69f6bdfbb8d9be3dcf42491917a2ca5af34c0e05b0f35e",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 883.6,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:cf38561a16152cfc910b83f1c766f3f6ad908062f3a04046b55287aafff1b586",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 884.1,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:7cdd380d7c1647fea597931cb095e05d3a097648698ffcf1784ca0aefd484cf1",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 884.4,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:2abae7b998fd784bd7fe66975b12f169708d62bb03807a9986e622dba03f849a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 884.6,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:50426e9b52e64745dc293923b56779cc5e734f43336c7bb3fc0ead75f2db44f5",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 884.799,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:37670f575b3e51e36d650beaec14b74a925835e1560255cbb6a9348a8ce62014",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物旁边挂着衣服"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示了人物旁边挂着的衣服，与用户查询完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物旁边挂着衣服\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示了人物旁边挂着的衣服，与用户查询完全匹配。\"\n}",
+      "inference_seconds": 2.847,
+      "ollama_total_duration_seconds": 2.843,
+      "ollama_load_duration_seconds": 0.103,
+      "prompt_eval_count": 3401,
+      "eval_count": 53
+    },
+    {
+      "case_id": "visual-computer-desk-high",
+      "query_id": "705c3aac-9d80-47f3-b615-5ab3e0e8ce75",
+      "candidate_key": "107d5c0b-4733-445d-bf5a-c0d707e4a934",
+      "repeat_index": 1,
+      "query": "有人坐在电脑桌前",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 23.766667,
+      "scene_end_seconds": 25.2,
+      "duration_seconds": 1.433333,
+      "expected_relevance": 2,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 23.766667,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:4ccd888704b9c1357bd3ad5386d5dab62c83136f880cc95438f12f6f6a3bc0d1",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 23.983334,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:26e11edf406dd0423d802bb2707e345f624d0ec8bdbe69ef093a51c8a92eb267",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 24.266667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:c0a88b7e32146376859b236ee3c26969afab931b6a29d45d5cd5ed112d4fb854",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 24.483334,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:5bf56690f9cadf5f26df829c8b858276149698bfde98f96992d96b42847334db",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 24.983334,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:87fb52c44aabc2627fe91836baf0d8ea01d7980889a94f4159ec8a35840b93a2",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 25.199,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:9b2d90161227874125fc9620fd97141c23feb6a962ae8e28388c06acf0f29b40",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物坐在电脑桌前",
+        "人物正在使用打字机"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人坐在桌子前，头部靠在桌子上，手放在一个黑色的打字机上。这与用户查询中描述的情景完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物坐在电脑桌前\",\n        \"人物正在使用打字机\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人坐在桌子前，头部靠在桌子上，手放在一个黑色的打字机上。这与用户查询中描述的情景完全匹配。\"\n}",
+      "inference_seconds": 17.394,
+      "ollama_total_duration_seconds": 17.389,
+      "ollama_load_duration_seconds": 0.133,
+      "prompt_eval_count": 3396,
+      "eval_count": 83
+    },
+    {
+      "case_id": "visual-computer-desk-high",
+      "query_id": "705c3aac-9d80-47f3-b615-5ab3e0e8ce75",
+      "candidate_key": "107d5c0b-4733-445d-bf5a-c0d707e4a934",
+      "repeat_index": 2,
+      "query": "有人坐在电脑桌前",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 23.766667,
+      "scene_end_seconds": 25.2,
+      "duration_seconds": 1.433333,
+      "expected_relevance": 2,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 23.766667,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:4ccd888704b9c1357bd3ad5386d5dab62c83136f880cc95438f12f6f6a3bc0d1",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 23.983334,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:26e11edf406dd0423d802bb2707e345f624d0ec8bdbe69ef093a51c8a92eb267",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 24.266667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:c0a88b7e32146376859b236ee3c26969afab931b6a29d45d5cd5ed112d4fb854",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 24.483334,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:5bf56690f9cadf5f26df829c8b858276149698bfde98f96992d96b42847334db",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 24.983334,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:87fb52c44aabc2627fe91836baf0d8ea01d7980889a94f4159ec8a35840b93a2",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 25.199,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:9b2d90161227874125fc9620fd97141c23feb6a962ae8e28388c06acf0f29b40",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物坐在电脑桌前",
+        "人物正在使用打字机"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人坐在桌子前，头部靠在桌子上，手放在一个黑色的打字机上。这与用户查询中描述的情景完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物坐在电脑桌前\",\n        \"人物正在使用打字机\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人坐在桌子前，头部靠在桌子上，手放在一个黑色的打字机上。这与用户查询中描述的情景完全匹配。\"\n}",
+      "inference_seconds": 4.364,
+      "ollama_total_duration_seconds": 4.362,
+      "ollama_load_duration_seconds": 0.112,
+      "prompt_eval_count": 3396,
+      "eval_count": 83
+    },
+    {
+      "case_id": "visual-computer-desk-high",
+      "query_id": "705c3aac-9d80-47f3-b615-5ab3e0e8ce75",
+      "candidate_key": "107d5c0b-4733-445d-bf5a-c0d707e4a934",
+      "repeat_index": 3,
+      "query": "有人坐在电脑桌前",
+      "rrf_rank": 1,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 23.766667,
+      "scene_end_seconds": 25.2,
+      "duration_seconds": 1.433333,
+      "expected_relevance": 2,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 23.766667,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:4ccd888704b9c1357bd3ad5386d5dab62c83136f880cc95438f12f6f6a3bc0d1",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 23.983334,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:26e11edf406dd0423d802bb2707e345f624d0ec8bdbe69ef093a51c8a92eb267",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 24.266667,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:c0a88b7e32146376859b236ee3c26969afab931b6a29d45d5cd5ed112d4fb854",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 24.483334,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:5bf56690f9cadf5f26df829c8b858276149698bfde98f96992d96b42847334db",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 24.983334,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:87fb52c44aabc2627fe91836baf0d8ea01d7980889a94f4159ec8a35840b93a2",
+          "width": 640,
+          "height": 1138
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 25.199,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:9b2d90161227874125fc9620fd97141c23feb6a962ae8e28388c06acf0f29b40",
+          "width": 640,
+          "height": 1138
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物坐在电脑桌前",
+        "人物正在使用打字机"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中的场景显示一个人坐在桌子前，头部靠在桌子上，手放在一个黑色的打字机上。这与用户查询中描述的情景完全匹配。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物坐在电脑桌前\",\n        \"人物正在使用打字机\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中的场景显示一个人坐在桌子前，头部靠在桌子上，手放在一个黑色的打字机上。这与用户查询中描述的情景完全匹配。\"\n}",
+      "inference_seconds": 4.362,
+      "ollama_total_duration_seconds": 4.358,
+      "ollama_load_duration_seconds": 0.102,
+      "prompt_eval_count": 3396,
+      "eval_count": 83
+    },
+    {
+      "case_id": "visual-door-pose-partial",
+      "query_id": "3b192186-f6c0-4980-85cd-a6960e84c03d",
+      "candidate_key": "e0294cc3-a91b-4aec-9be3-c991d0f3c0ca",
+      "repeat_index": 1,
+      "query": "有人靠在门框边摆姿势",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 264.733333,
+      "scene_end_seconds": 265.933333,
+      "duration_seconds": 1.2,
+      "expected_relevance": 1,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 264.733333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b6b281f874abe342ea99fd259fcf22dfe76a3bd4d61ecd2480e0dab0b306019d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 264.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:bd78c8e65bffe9468d183c99cd13c453c37199228a71c90908c07314af0f910a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 265.233333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:edef2397669663106392b1aeed05431605552281d39b3099e666744eef0cd3b8",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 265.333333,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:467ba075c6035ba8b7074670c7e94602efff49b2a7719c3b6aa0efc43b82b242",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 265.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:42aa16c9d956e40e3f3a187d8e9bec1701acdc669a307af53ef18a5735c3893f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 265.932333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:629b1a13bcf52dab6ebe43f172e07f74a3c2d89b61e29384bee7cbe66ce72341",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物靠在门框边",
+        "人物摆姿势"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示的人物确实靠在门框边上，并且似乎在摆姿势。这些特征与用户查询完全匹配，因此认为这两个约束都已满足。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物靠在门框边\",\n        \"人物摆姿势\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示的人物确实靠在门框边上，并且似乎在摆姿势。这些特征与用户查询完全匹配，因此认为这两个约束都已满足。\"\n}",
+      "inference_seconds": 17.153,
+      "ollama_total_duration_seconds": 17.148,
+      "ollama_load_duration_seconds": 0.128,
+      "prompt_eval_count": 3405,
+      "eval_count": 79
+    },
+    {
+      "case_id": "visual-door-pose-partial",
+      "query_id": "3b192186-f6c0-4980-85cd-a6960e84c03d",
+      "candidate_key": "e0294cc3-a91b-4aec-9be3-c991d0f3c0ca",
+      "repeat_index": 2,
+      "query": "有人靠在门框边摆姿势",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 264.733333,
+      "scene_end_seconds": 265.933333,
+      "duration_seconds": 1.2,
+      "expected_relevance": 1,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 264.733333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b6b281f874abe342ea99fd259fcf22dfe76a3bd4d61ecd2480e0dab0b306019d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 264.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:bd78c8e65bffe9468d183c99cd13c453c37199228a71c90908c07314af0f910a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 265.233333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:edef2397669663106392b1aeed05431605552281d39b3099e666744eef0cd3b8",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 265.333333,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:467ba075c6035ba8b7074670c7e94602efff49b2a7719c3b6aa0efc43b82b242",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 265.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:42aa16c9d956e40e3f3a187d8e9bec1701acdc669a307af53ef18a5735c3893f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 265.932333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:629b1a13bcf52dab6ebe43f172e07f74a3c2d89b61e29384bee7cbe66ce72341",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物靠在门框边",
+        "人物摆姿势"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示的人物确实靠在门框边，并且似乎在摆姿势。这些特征与用户查询完全匹配，因此认为这两个约束都已满足。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物靠在门框边\",\n        \"人物摆姿势\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示的人物确实靠在门框边，并且似乎在摆姿势。这些特征与用户查询完全匹配，因此认为这两个约束都已满足。\"\n}",
+      "inference_seconds": 4.152,
+      "ollama_total_duration_seconds": 4.149,
+      "ollama_load_duration_seconds": 0.101,
+      "prompt_eval_count": 3405,
+      "eval_count": 79
+    },
+    {
+      "case_id": "visual-door-pose-partial",
+      "query_id": "3b192186-f6c0-4980-85cd-a6960e84c03d",
+      "candidate_key": "e0294cc3-a91b-4aec-9be3-c991d0f3c0ca",
+      "repeat_index": 3,
+      "query": "有人靠在门框边摆姿势",
+      "rrf_rank": 3,
+      "source_group": "siglip_visual",
+      "scene_start_seconds": 264.733333,
+      "scene_end_seconds": 265.933333,
+      "duration_seconds": 1.2,
+      "expected_relevance": 1,
+      "frame_count": 6,
+      "frame_evidence": [
+        {
+          "frame_index": 1,
+          "time_seconds": 264.733333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:b6b281f874abe342ea99fd259fcf22dfe76a3bd4d61ecd2480e0dab0b306019d",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 2,
+          "time_seconds": 264.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:bd78c8e65bffe9468d183c99cd13c453c37199228a71c90908c07314af0f910a",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 3,
+          "time_seconds": 265.233333,
+          "selection_reasons": [
+            "motion_peak"
+          ],
+          "content_hash": "sha256:edef2397669663106392b1aeed05431605552281d39b3099e666744eef0cd3b8",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 4,
+          "time_seconds": 265.333333,
+          "selection_reasons": [
+            "siglip_best"
+          ],
+          "content_hash": "sha256:467ba075c6035ba8b7074670c7e94602efff49b2a7719c3b6aa0efc43b82b242",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 5,
+          "time_seconds": 265.833333,
+          "selection_reasons": [
+            "siglip_best_neighbor"
+          ],
+          "content_hash": "sha256:42aa16c9d956e40e3f3a187d8e9bec1701acdc669a307af53ef18a5735c3893f",
+          "width": 640,
+          "height": 360
+        },
+        {
+          "frame_index": 6,
+          "time_seconds": 265.932333,
+          "selection_reasons": [
+            "siglip_best_neighbor",
+            "uniform_coverage"
+          ],
+          "content_hash": "sha256:629b1a13bcf52dab6ebe43f172e07f74a3c2d89b61e29384bee7cbe66ce72341",
+          "width": 640,
+          "height": 360
+        }
+      ],
+      "failure_type": null,
+      "relevance": 2,
+      "matched_constraints": [
+        "人物靠在门框边",
+        "人物摆姿势"
+      ],
+      "missing_constraints": [],
+      "reason": "图片中显示的人物确实靠在门框边，并且似乎在摆姿势。这些特征与用户查询完全匹配，因此认为这两个约束都已满足。",
+      "raw_response": "{\n    \"relevance\": 2,\n    \"matched_constraints\": [\n        \"人物靠在门框边\",\n        \"人物摆姿势\"\n    ],\n    \"missing_constraints\": [],\n    \"reason\": \"图片中显示的人物确实靠在门框边，并且似乎在摆姿势。这些特征与用户查询完全匹配，因此认为这两个约束都已满足。\"\n}",
+      "inference_seconds": 4.209,
+      "ollama_total_duration_seconds": 4.204,
+      "ollama_load_duration_seconds": 0.106,
+      "prompt_eval_count": 3405,
+      "eval_count": 79
+    }
+  ],
+  "gate": {
+    "all_calls_succeeded": true,
+    "all_expected_relevance_matches": false,
+    "all_repeats_stable": true,
+    "strict_frame_contract_passed": true,
+    "all_30_second_inferences_within_60_seconds": true,
+    "worst_top3_30_second_total_seconds": 89.935,
+    "worst_top3_within_180_seconds": true,
+    "swap_pressure_within_limit": true,
+    "cold_start_prepared": true,
+    "latency_summary_seconds": {
+      "count": 36,
+      "cold": 11.955,
+      "hot_mean": 8.063,
+      "mean": 8.172,
+      "p95": 31.977,
+      "maximum": 32.009
+    },
+    "source_group_metrics": {
+      "caption_only": {
+        "case_count": 3,
+        "repeat_count": 9,
+        "accuracy": 0.6666666666666666
+      },
+      "siglip_visual": {
+        "case_count": 9,
+        "repeat_count": 27,
+        "accuracy": 0.5555555555555556
+      }
+    },
+    "source_groups_have_minimum_samples": true,
+    "caption_only_accuracy_gap": -0.11111111111111105,
+    "caption_only_significantly_worse": false,
+    "resource_metrics": {
+      "start_swap_used_bytes": 11291262976,
+      "peak_swap_used_bytes": 11291262976,
+      "end_swap_used_bytes": 11222188032,
+      "peak_system_memory_used_bytes": 18530123776,
+      "sample_count": 1245,
+      "ollama_unload_succeeded": true,
+      "cold_start_prepared": true,
+      "cleanup_cooldown_seconds": 10.0,
+      "unload_error": null,
+      "peak_swap_growth_bytes": 0,
+      "end_swap_growth_bytes": 0,
+      "max_peak_swap_growth_bytes": 4294967296,
+      "max_end_swap_growth_bytes": 1073741824
+    },
+    "automatic_gate_passed": false,
+    "human_reason_review": "failed",
+    "final_gate_passed": false,
+    "human_reason_review_summary": {
+      "reviewed_case_count": 12,
+      "reason_issue_case_count": 9,
+      "reason_issue_case_ids": [
+        "caption-birthday-en-short-high",
+        "caption-gray-subtitle-short-zero",
+        "caption-indoor-speaking-short-high",
+        "visual-birthday-short-high",
+        "visual-chopsticks-short-partial",
+        "visual-computer-desk-high",
+        "visual-door-pose-partial",
+        "visual-drum-playing-30s-zero",
+        "visual-outdoor-camera-30s-zero"
+      ],
+      "ambiguous_frozen_label_case_ids": [
+        "visual-computer-desk-high",
+        "visual-drum-playing-30s-zero"
+      ],
+      "notes": "逐例查看全部 12 个冻结场景的实际抽帧。至少 9 条理由混淆对象、动作、人物关系或环境约束；两个歧义标签保持冻结，不在看到模型输出后改写。",
+      "report_fingerprint": "sha256:4e463427ac5687632397122c782894514ff8d25800e0240c8732c68ba83b2d3b"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": "phase9a-human-review-v1",
+  "report_fingerprint": "sha256:4e463427ac5687632397122c782894514ff8d25800e0240c8732c68ba83b2d3b",
+  "decision": "failed",
+  "reviewed_case_ids": [
+    "caption-birthday-en-short-high",
+    "caption-gray-subtitle-short-zero",
+    "caption-indoor-speaking-short-high",
+    "visual-birthday-short-high",
+    "visual-chopsticks-short-partial",
+    "visual-computer-desk-high",
+    "visual-door-pose-partial",
+    "visual-drum-playing-30s-zero",
+    "visual-hanging-clothes-high",
+    "visual-indoor-speaking-30s-high",
+    "visual-outdoor-camera-30s-zero",
+    "visual-red-singer-short-zero"
+  ],
+  "reason_issue_case_ids": [
+    "caption-birthday-en-short-high",
+    "caption-gray-subtitle-short-zero",
+    "caption-indoor-speaking-short-high",
+    "visual-birthday-short-high",
+    "visual-chopsticks-short-partial",
+    "visual-computer-desk-high",
+    "visual-door-pose-partial",
+    "visual-drum-playing-30s-zero",
+    "visual-outdoor-camera-30s-zero"
+  ],
+  "ambiguous_frozen_label_case_ids": [
+    "visual-computer-desk-high",
+    "visual-drum-playing-30s-zero"
+  ],
+  "notes": "逐例查看全部 12 个冻结场景的实际抽帧。至少 9 条理由混淆对象、动作、人物关系或环境约束；两个歧义标签保持冻结，不在看到模型输出后改写。"
+}

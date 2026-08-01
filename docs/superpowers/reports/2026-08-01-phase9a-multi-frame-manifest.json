@@ -1,0 +1,98 @@
+{
+  "schema_version": "phase9a-multi-frame-v1",
+  "phase8_run_id": "6298b745-d9d3-44bf-86a0-2d0a0b46360c",
+  "ollama_model": "qwen2.5vl:7b",
+  "ollama_digest": "5ced39dfa4bac325dc183dd1e4febaa1c46b3ea28bce48896c8e69c1e79611cc",
+  "prompt_version": "frame-verify-v1",
+  "repeat_count": 3,
+  "source_group_gate": {
+    "minimum_cases_per_group": 3,
+    "maximum_caption_only_accuracy_gap": 0.2
+  },
+  "cases": [
+    {
+      "id": "caption-birthday-en-short-high",
+      "query_id": "69198fb6-bbd9-4c2e-ba7b-37f9d54551ea",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "expected_relevance": 2,
+      "coverage_tags": ["caption_only", "short_scene", "environment_constraint"]
+    },
+    {
+      "id": "caption-gray-subtitle-short-zero",
+      "query_id": "bf4e2dc4-038b-477a-ab32-02c4aa95d414",
+      "candidate_key": "571eedf4-973a-4591-a2d4-ec261216be6a",
+      "expected_relevance": 0,
+      "coverage_tags": ["caption_only", "short_scene", "visible_text_constraint"]
+    },
+    {
+      "id": "caption-indoor-speaking-short-high",
+      "query_id": "19ad4f0e-d024-446a-afff-7d2fcc473546",
+      "candidate_key": "cdc581c4-8d86-4fa5-b946-a5347ce814ba",
+      "expected_relevance": 2,
+      "coverage_tags": ["caption_only", "short_scene", "transient_action"]
+    },
+    {
+      "id": "visual-indoor-speaking-30s-high",
+      "query_id": "bb2a6777-941f-4c0a-a7ba-02240f3fa1ff",
+      "candidate_key": "abe17dd7-5fba-4d4d-8f70-ec10ebe27f17",
+      "expected_relevance": 2,
+      "coverage_tags": ["siglip_visual", "thirty_second", "transient_action"]
+    },
+    {
+      "id": "visual-outdoor-camera-30s-zero",
+      "query_id": "7ec4b8b0-ca9f-49a1-b271-5bba789dee49",
+      "candidate_key": "b23eed34-f082-4527-ad27-5f46a673a420",
+      "expected_relevance": 0,
+      "coverage_tags": ["siglip_visual", "thirty_second", "environment_constraint"]
+    },
+    {
+      "id": "visual-drum-playing-30s-zero",
+      "query_id": "aa001e65-1676-4079-8b60-6def3c614971",
+      "candidate_key": "91f7185c-ea6b-46ce-909d-e31d0f1d2ea8",
+      "expected_relevance": 0,
+      "coverage_tags": ["siglip_visual", "thirty_second", "person_object_relationship"]
+    },
+    {
+      "id": "visual-birthday-short-high",
+      "query_id": "2b969b24-bdd8-4f37-a452-3c3d4fabe7e3",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "expected_relevance": 2,
+      "coverage_tags": ["siglip_visual", "short_scene", "environment_constraint"]
+    },
+    {
+      "id": "visual-chopsticks-short-partial",
+      "query_id": "3e942025-1d00-4637-b2a0-5424fa182282",
+      "candidate_key": "fe00c856-f63d-460e-9c08-568e2b9fa673",
+      "expected_relevance": 1,
+      "coverage_tags": ["siglip_visual", "short_scene", "transient_action"]
+    },
+    {
+      "id": "visual-red-singer-short-zero",
+      "query_id": "f6f7a3a2-d80c-4c10-8996-7fbfd8b2346f",
+      "candidate_key": "6c7efaaa-3412-478e-b054-02cc0976d257",
+      "expected_relevance": 0,
+      "coverage_tags": ["siglip_visual", "short_scene", "person_object_relationship"]
+    },
+    {
+      "id": "visual-hanging-clothes-high",
+      "query_id": "28823ce0-ce90-41cd-b05d-e1c0c1086038",
+      "candidate_key": "35fbbbed-98e7-48e7-967b-5ff283c96b63",
+      "expected_relevance": 2,
+      "coverage_tags": ["siglip_visual", "short_scene", "person_object_relationship"]
+    },
+    {
+      "id": "visual-computer-desk-high",
+      "query_id": "705c3aac-9d80-47f3-b615-5ab3e0e8ce75",
+      "candidate_key": "107d5c0b-4733-445d-bf5a-c0d707e4a934",
+      "expected_relevance": 2,
+      "coverage_tags": ["siglip_visual", "short_scene", "person_object_relationship"]
+    },
+    {
+      "id": "visual-door-pose-partial",
+      "query_id": "3b192186-f6c0-4980-85cd-a6960e84c03d",
+      "candidate_key": "e0294cc3-a91b-4aec-9be3-c991d0f3c0ca",
+      "expected_relevance": 1,
+      "coverage_tags": ["siglip_visual", "short_scene", "person_environment_relationship"]
+    }
+  ]
+}
