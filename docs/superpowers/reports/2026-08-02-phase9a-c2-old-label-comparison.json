@@ -1,0 +1,34 @@
+{
+  "schema_version": "phase9a-c2-old-label-comparison-v1",
+  "phase8_run_id": "6298b745-d9d3-44bf-86a0-2d0a0b46360c",
+  "reference_fingerprint": "sha256:1ebf793e56b41287d07c9fc073cef91d8713d2003bece0702716e6d2f24410ff",
+  "case_count": 30,
+  "same_count": 18,
+  "changed_count": 12,
+  "changed_rate": 0.4,
+  "transitions": {
+    "0_to_0": 8,
+    "0_to_1": 2,
+    "1_to_0": 7,
+    "1_to_1": 3,
+    "2_to_0": 1,
+    "2_to_1": 2,
+    "2_to_2": 7
+  },
+  "changed_cases": [
+    { "case_id": "c2-02-c3db7e9e", "old_relevance": 1, "new_relevance": 0 },
+    { "case_id": "c2-06-b94ad2f2", "old_relevance": 0, "new_relevance": 1 },
+    { "case_id": "c2-07-b748d7be", "old_relevance": 0, "new_relevance": 1 },
+    { "case_id": "c2-08-22c54253", "old_relevance": 1, "new_relevance": 0 },
+    { "case_id": "c2-12-f711be69", "old_relevance": 1, "new_relevance": 0 },
+    { "case_id": "c2-16-3e63d47c", "old_relevance": 2, "new_relevance": 1 },
+    { "case_id": "c2-17-cc4ceb41", "old_relevance": 2, "new_relevance": 0 },
+    { "case_id": "c2-19-30d04723", "old_relevance": 1, "new_relevance": 0 },
+    { "case_id": "c2-20-27dfc1bf", "old_relevance": 2, "new_relevance": 1 },
+    { "case_id": "c2-21-dc343cfa", "old_relevance": 1, "new_relevance": 0 },
+    { "case_id": "c2-23-319ad495", "old_relevance": 1, "new_relevance": 0 },
+    { "case_id": "c2-28-a78758f3", "old_relevance": 1, "new_relevance": 0 }
+  ],
+  "database_writes": 0,
+  "cloud_calls": 0
+}

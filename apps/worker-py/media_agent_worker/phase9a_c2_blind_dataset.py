@@ -245,6 +245,34 @@ def validate_blind_packet(packet):
     """Reject incomplete packets and accidental evidence leakage before UI use."""
     if not isinstance(packet, dict) or packet.get("schema_version") != PACKET_SCHEMA_VERSION:
         raise ValueError(f"schema_version must be {PACKET_SCHEMA_VERSION}")
+    expected_packet_keys = {
+        "schema_version",
+        "phase8_run_id",
+        "selection_seed",
+        "selection_summary",
+        "cases",
+        "packet_fingerprint",
+    }
+    if set(packet) != expected_packet_keys:
+        raise ValueError(f"Blind packet root fields changed: {sorted(set(packet))}")
+    expected_summary_keys = {
+        "case_count",
+        "minimum_short_scene_count",
+        "minimum_thirty_second_scene_count",
+    }
+    if not isinstance(packet.get("selection_summary"), dict) or set(
+        packet["selection_summary"]
+    ) != expected_summary_keys:
+        raise ValueError("Blind packet selection_summary fields changed")
+    if packet.get("selection_seed") != SELECTION_SEED:
+        raise ValueError("Blind packet selection_seed must remain frozen")
+    expected_summary = {
+        "case_count": EXPECTED_CASE_COUNT,
+        "minimum_short_scene_count": 5,
+        "minimum_thirty_second_scene_count": 5,
+    }
+    if packet["selection_summary"] != expected_summary:
+        raise ValueError("Blind packet selection_summary values must remain frozen")
     if packet.get("phase8_run_id") != PHASE8_FORMAL_RUN_ID:
         raise ValueError("phase8_run_id must remain the frozen Phase 8 run")
     cases = packet.get("cases")

@@ -1,0 +1,43 @@
+{
+  "schema_version": "phase9a-c2-adjudication-v1",
+  "packet_fingerprint": "sha256:c016eb5a2a06500fe5e38eeb16cd9930601f89581f37836c1c2ec339406f1afc",
+  "confirmation_text": "确认裁决",
+  "confirmed_on": "2026-08-02",
+  "decisions": {
+    "c2-02-c3db7e9e": {
+      "must_have": ["yes", "yes", "no"],
+      "exclusions": ["yes", "no"],
+      "notes": "人物位于门口，但连续画面显示其经过并关门，没有接触门框后保持摆姿势。"
+    },
+    "c2-06-b94ad2f2": {
+      "must_have": ["yes", "no", "no", "yes"],
+      "exclusions": ["no", "no"],
+      "notes": "人物正在进食，但手中是肉串或签子，不是筷子；桌上是大盘食物，不是盒饭或分格餐盒。"
+    },
+    "c2-08-22c54253": {
+      "must_have": ["yes", "yes", "no", "yes"],
+      "exclusions": ["no", "yes"],
+      "notes": "人物使用筷子进食，但容器是碗和独立餐盘，没有盒饭，命中“使用筷子但没有盒饭”。"
+    },
+    "c2-11-92b0245e": {
+      "must_have": ["yes", "no", "no"],
+      "exclusions": ["no", "yes"],
+      "notes": "人物戴针织帽，但画面是面向镜头的近景，没有下蹲，也没有大型蓝色鱼玩偶或面对玩偶关系。"
+    },
+    "c2-15-e8d260e3": {
+      "must_have": ["no", "no"],
+      "exclusions": ["no", "yes"],
+      "notes": "人物没有佩戴冰晶或尖角王冠，手中物体不是麦克风；画面中的麦克风位于支架上。"
+    },
+    "c2-16-3e63d47c": {
+      "must_have": ["yes", "no", "no"],
+      "exclusions": ["no", "no"],
+      "notes": "可见人物和筷子，但桌面是多个独立餐盘，不是分格餐盒，因此也不能判定为从餐盒夹取食物。"
+    },
+    "c2-23-319ad495": {
+      "must_have": ["yes", "yes", "no"],
+      "exclusions": ["yes", "no"],
+      "notes": "人物位于门口并操作门把手，但连续画面显示其经过并关门，没有接触门框后保持摆姿势。"
+    }
+  }
+}

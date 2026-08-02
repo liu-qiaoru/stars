@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 from media_agent_worker.phase9a_c2_annotation_agreement import main as agreement_main
+from media_agent_worker.phase9a_c2_freeze_reference import finalize_reference_labels
 from media_agent_worker.phase9a_c2_blind_dataset import (
     _load_excluded_pairs,
     _packet_fingerprint,
@@ -153,6 +154,29 @@ class Phase9aC2PacketTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "forbidden"):
             validate_blind_packet(packet)
 
+    def test_rejects_changed_selection_seed_or_frozen_summary_values(self):
+        """防止修改固定抽样协议后仅重算指纹就伪装成原盲标包。"""
+        packet = build_blind_packet(select_blind_cases(build_quota_candidates(), excluded_pairs=set()))
+        packet["selection_seed"] = "different-selection"
+        packet["packet_fingerprint"] = _packet_fingerprint(packet)
+        with self.assertRaisesRegex(ValueError, "selection_seed"):
+            validate_blind_packet(packet)
+
+        for field, changed_value in (
+            ("case_count", 29),
+            ("minimum_short_scene_count", 4),
+            ("minimum_thirty_second_scene_count", 4),
+        ):
+            packet = build_blind_packet(
+                select_blind_cases(build_quota_candidates(), excluded_pairs=set())
+            )
+            packet["selection_summary"][field] = changed_value
+            packet["packet_fingerprint"] = _packet_fingerprint(packet)
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ValueError, "selection_summary"
+            ):
+                validate_blind_packet(packet)
+
 
 class Phase9aC2AgreementTests(unittest.TestCase):
     def build_annotation(self, packet, round_name, *, changed_case_id=None):
@@ -247,6 +271,116 @@ class Phase9aC2AgreementTests(unittest.TestCase):
                 _load_excluded_pairs(tampered)
             with self.assertRaisesRegex(ValueError, "must not overwrite"):
                 ensure_distinct_output_path(tampered, [tampered])
+
+    def test_freezes_only_after_every_atomic_disagreement_is_adjudicated(self):
+        packet = build_blind_packet(select_blind_cases(build_quota_candidates(), excluded_pairs=set()))
+        first_case = packet["cases"][0]
+        round_a = self.build_annotation(packet, "A")
+        round_a["undocumented_private_field"] = "/private/path-must-not-be-committed"
+        round_b = self.build_annotation(packet, "B", changed_case_id=first_case["id"])
+        adjudication = {
+            "schema_version": "phase9a-c2-adjudication-v1",
+            "packet_fingerprint": packet["packet_fingerprint"],
+            "confirmation_text": "确认裁决",
+            "decisions": {
+                first_case["id"]: {
+                    "must_have": ["yes"] * len(first_case["must_have"]),
+                    "exclusions": ["no"] * len(first_case["exclusions"]),
+                    "notes": "复核可见画面后确认全部必须条件成立。",
+                }
+            },
+            "undocumented_private_field": "/private/adjudication-path",
+        }
+
+        bundle = finalize_reference_labels(
+            packet,
+            round_a,
+            round_b,
+            adjudication,
+            annotation_a_sha256="a" * 64,
+            annotation_b_sha256="b" * 64,
+        )
+
+        self.assertEqual(bundle["schema_version"], "phase9a-c2-human-freeze-bundle-v1")
+        self.assertEqual(bundle["agreement"]["disagreement_count"], 1)
+        self.assertEqual(bundle["reference"]["results"][first_case["id"]]["relevance"], 2)
+        self.assertEqual(bundle["reference"]["results"][first_case["id"]]["source"], "adjudication")
+        self.assertEqual(len(bundle["reference"]["results"]), 30)
+        self.assertTrue(bundle["reference"]["reference_fingerprint"].startswith("sha256:"))
+        self.assertNotIn("undocumented_private_field", bundle["annotation_inputs"]["round_a"])
+        self.assertNotIn("undocumented_private_field", bundle["adjudication"])
+        self.assertTrue(bundle["annotation_inputs"]["round_a_normalized_fingerprint"].startswith("sha256:"))
+        self.assertTrue(bundle["annotation_inputs"]["round_b_normalized_fingerprint"].startswith("sha256:"))
+        self.assertTrue(bundle["adjudication_fingerprint"].startswith("sha256:"))
+        self.assertTrue(bundle["bundle_fingerprint"].startswith("sha256:"))
+
+        changed_input_identity = finalize_reference_labels(
+            packet,
+            round_a,
+            round_b,
+            adjudication,
+            annotation_a_sha256="c" * 64,
+            annotation_b_sha256="b" * 64,
+        )
+        self.assertNotEqual(bundle["bundle_fingerprint"], changed_input_identity["bundle_fingerprint"])
+
+        tampered_packet = json.loads(json.dumps(packet))
+        tampered_packet["undocumented_private_field"] = "/private/packet-path"
+        tampered_packet["packet_fingerprint"] = _packet_fingerprint(tampered_packet)
+        with self.assertRaisesRegex(ValueError, "root fields changed"):
+            finalize_reference_labels(
+                tampered_packet,
+                round_a,
+                round_b,
+                adjudication,
+                annotation_a_sha256="a" * 64,
+                annotation_b_sha256="b" * 64,
+            )
+
+    def test_refuses_missing_or_extra_adjudication_decisions(self):
+        packet = build_blind_packet(select_blind_cases(build_quota_candidates(), excluded_pairs=set()))
+        first_case = packet["cases"][0]
+        round_a = self.build_annotation(packet, "A")
+        round_b = self.build_annotation(packet, "B", changed_case_id=first_case["id"])
+        base = {
+            "schema_version": "phase9a-c2-adjudication-v1",
+            "packet_fingerprint": packet["packet_fingerprint"],
+            "confirmation_text": "确认裁决",
+            "decisions": {},
+        }
+
+        with self.assertRaisesRegex(ValueError, "exactly cover atomic disagreements"):
+            finalize_reference_labels(
+                packet,
+                round_a,
+                round_b,
+                base,
+                annotation_a_sha256="a" * 64,
+                annotation_b_sha256="b" * 64,
+            )
+
+        agreed_case = packet["cases"][1]
+        base["decisions"] = {
+            first_case["id"]: {
+                "must_have": ["yes"] * len(first_case["must_have"]),
+                "exclusions": ["no"] * len(first_case["exclusions"]),
+                "notes": "确认。",
+            },
+            agreed_case["id"]: {
+                "must_have": ["yes"] * len(agreed_case["must_have"]),
+                "exclusions": ["no"] * len(agreed_case["exclusions"]),
+                "notes": "不应覆盖无分歧样本。",
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "exactly cover atomic disagreements"):
+            finalize_reference_labels(
+                packet,
+                round_a,
+                round_b,
+                base,
+                annotation_a_sha256="a" * 64,
+                annotation_b_sha256="b" * 64,
+            )
 
 
 if __name__ == "__main__":

@@ -103,6 +103,13 @@ PYTHONPATH=apps/worker-py .venv/bin/python \
 指纹是对全部题目、UUID 和时间边界计算的摘要；任意内容变化都会得到不同值，因此 A/B
 文件不会被误配到另一批样本。
 
+2026-08-02，A/B 两轮已完成，用户确认 7 条逐项裁决。最终参考标签已冻结，指纹为
+`sha256:1ebf793e56b41287d07c9fc073cef91d8713d2003bece0702716e6d2f24410ff`，绑定全部
+输入、裁决与输出的完整冻结包指纹为
+`sha256:dd16339029c33c275bb17d926a99c99a86304dd358f3ef1a9bcd8713e5a91a0b`；一致性与
+冻结报告见
+[`2026-08-02-phase9a-c2-human-agreement.md`](./2026-08-02-phase9a-c2-human-agreement.md)。
+
 ## 后续模型测试（本次代码提交不执行）
 
 冻结参考标签后，可在重新取得明确外发授权的前提下，对 Qwen3-VL-Plus 和
