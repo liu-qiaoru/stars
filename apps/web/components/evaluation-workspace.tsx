@@ -119,9 +119,14 @@ export function EvaluationWorkspace({
         <p className="eyebrow">内部工具</p>
         <h1 className="page-title">检索评测</h1>
         <p className="muted">候选完成盲标前隐藏来源名次和 RRF 贡献；RRF 分数不是相关概率。</p>
-        <a className="secondary-action mt-3" href="/evaluation/phase9a-c2">
-          进入 Phase 9A-C2 的 30 条新盲标
-        </a>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a className="primary-action" href="/evaluation/reports">
+            查看测评报告
+          </a>
+          <a className="secondary-action" href="/evaluation/phase9a-c2">
+            进入 Phase 9A-C2 的 30 条新盲标
+          </a>
+        </div>
       </header>
       {error ? <p role="alert">操作失败：{error}</p> : null}
       <form className="panel flex flex-col gap-2 sm:flex-row" onSubmit={restoreRun}>

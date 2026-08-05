@@ -9,6 +9,7 @@ describe('evaluation controller dependency injection', () => {
     // 这个测试复现 /evaluation/* 路由曾因 service=undefined 返回 HTTP 500 的问题。
     const service = {
       randomTargets: vi.fn().mockResolvedValue({ items: [] }),
+      listRuns: vi.fn().mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 }),
     }
     const moduleRef = await Test.createTestingModule({
       controllers: [EvaluationController],
@@ -24,6 +25,12 @@ describe('evaluation controller dependency injection', () => {
         libraryId: undefined,
         limit: 10,
         seed: 'phase8',
+      })
+      await expect(controller.listRuns('25', '0', undefined)).resolves.toMatchObject({ total: 0 })
+      expect(service.listRuns).toHaveBeenCalledWith({
+        limit: 25,
+        offset: 0,
+        versionId: undefined,
       })
     } finally {
       await moduleRef.close()

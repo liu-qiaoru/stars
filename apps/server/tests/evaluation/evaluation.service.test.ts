@@ -168,6 +168,12 @@ describe('Phase 6 evaluation runtime', () => {
       primaryPool: false,
     })
     await service.saveJudgment(run.id, outsidePoolId, { relevance: 2 })
+    const partiallyLabeledHistory = await service.listRuns({ limit: 10, offset: 0 })
+    expect(partiallyLabeledHistory.items[0]).toMatchObject({
+      required_candidate_count: 1,
+      judged_required_candidate_count: 0,
+      judged_candidate_count: 1,
+    })
 
     // 指定目标只读冻结目标唯一标识与名次；只完成自然发现正式池即可结束标注。
     const labeled = await service.saveJudgment(run.id, discovery.id, { relevance: 1 })
@@ -185,6 +191,23 @@ describe('Phase 6 evaluation runtime', () => {
     const discoveryReport = report.queries.find((entry) => entry.query_id === discovery.query_id)
     expect(discoveryReport?.current.ndcgAt10).toBe(1)
     expect(discoveryReport?.rrf.ndcgAt10).toBe(1)
+
+    // 报告页先读取轻量运行列表，再按需读取某次运行的候选详情。列表必须带上评测集、
+    // 版本和标注进度，否则页面只能要求用户手工保存不可读的 UUID。
+    const history = await service.listRuns({ limit: 10, offset: 0 })
+    expect(history).toMatchObject({ total: 1, limit: 10, offset: 0 })
+    expect(history.items[0]).toMatchObject({
+      id: run.id,
+      set_name: '最小评测',
+      version: 1,
+      status: 'reported',
+      query_count: 2,
+      candidate_count: 3,
+      required_candidate_count: 1,
+      judged_required_candidate_count: 1,
+      judged_candidate_count: 2,
+    })
+    expect(history.items[0]?.report).toEqual(reported.report)
     await expect(
       service.saveJudgment(run.id, discovery.id, { relevance: 0 }),
     ).rejects.toThrow(/immutable/)

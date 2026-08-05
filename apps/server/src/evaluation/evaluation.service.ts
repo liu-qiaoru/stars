@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { DATABASE } from '../database/database.module.js'
 import type { Database } from '../database/repositories.js'
@@ -116,6 +116,114 @@ export class EvaluationService {
       }),
     )
     return { items }
+  }
+
+  /**
+   * 返回报告页所需的轻量历史记录，不重新执行检索或模型推理。
+   *
+   * PostgreSQL 是测评状态的事实来源：这里把 run 与所属评测集、版本、查询和候选快照
+   * 关联起来。候选媒体证据仍只由 getRun(revealEvidence=true) 在标注完成后按需返回，
+   * 避免历史列表一次泄露大量本地媒体信息。
+   */
+  async listRuns(input: { limit?: number; offset?: number; versionId?: string } = {}) {
+    const limit = z.number().int().min(1).max(100).default(25).parse(input.limit)
+    const offset = z.number().int().min(0).default(0).parse(input.offset)
+    const versionId = input.versionId
+      ? z.string().uuid().parse(input.versionId)
+      : undefined
+    const condition = versionId ? eq(evaluationRuns.versionId, versionId) : undefined
+
+    const baseSelection = {
+      id: evaluationRuns.id,
+      versionId: evaluationRuns.versionId,
+      status: evaluationRuns.status,
+      report: evaluationRuns.reportJson,
+      errorCode: evaluationRuns.errorCode,
+      errorMessage: evaluationRuns.errorMessage,
+      createdAt: evaluationRuns.createdAt,
+      finishedAt: evaluationRuns.finishedAt,
+      setId: evaluationSets.id,
+      setName: evaluationSets.name,
+      version: evaluationVersions.version,
+    }
+    const [totalRow] = await this.db
+      .select({ value: count() })
+      .from(evaluationRuns)
+      .where(condition)
+    const page = await this.db
+      .select(baseSelection)
+      .from(evaluationRuns)
+      .innerJoin(evaluationVersions, eq(evaluationRuns.versionId, evaluationVersions.id))
+      .innerJoin(evaluationSets, eq(evaluationVersions.setId, evaluationSets.id))
+      .where(condition)
+      .orderBy(desc(evaluationRuns.createdAt), desc(evaluationRuns.id))
+      .limit(limit)
+      .offset(offset)
+    const runIds = page.map((run) => run.id)
+    const versionIds = [...new Set(page.map((run) => run.versionId))]
+    const candidates = runIds.length
+      ? await this.db
+          .select({
+            runId: evaluationCandidates.runId,
+            queryId: evaluationCandidates.queryId,
+            labelStatus: evaluationCandidates.labelStatus,
+            currentRank: evaluationCandidates.currentRank,
+            rrfRank: evaluationCandidates.rrfRank,
+          })
+          .from(evaluationCandidates)
+          .where(inArray(evaluationCandidates.runId, runIds))
+      : []
+    const queries = versionIds.length
+      ? await this.db
+          .select({
+            id: evaluationQueries.id,
+            versionId: evaluationQueries.versionId,
+            queryType: evaluationQueries.queryType,
+          })
+          .from(evaluationQueries)
+          .where(inArray(evaluationQueries.versionId, versionIds))
+      : []
+    const queryById = new Map(queries.map((query) => [query.id, query]))
+
+    return {
+      items: page.map((run) => {
+        const runCandidates = candidates.filter((candidate) => candidate.runId === run.id)
+        const requiredCandidates = runCandidates.filter((candidate) =>
+          requiresCandidateJudgment(
+            queryById.get(candidate.queryId)?.queryType,
+            candidate.currentRank,
+            candidate.rrfRank,
+          ),
+        )
+        return {
+          id: run.id,
+          version_id: run.versionId,
+          set_id: run.setId,
+          set_name: run.setName,
+          version: run.version,
+          status: run.status,
+          query_count: queries.filter((query) => query.versionId === run.versionId).length,
+          candidate_count: runCandidates.length,
+          required_candidate_count: requiredCandidates.length,
+          judged_required_candidate_count: requiredCandidates.filter(
+            (candidate) => candidate.labelStatus === 'judged',
+          ).length,
+          // 保留所有已完成判断的数量用于审计；它可能大于正式指标池，因为历史运行允许
+          // 用户判断 Top-20 之外的候选，但这些额外判断不会进入指标计算。
+          judged_candidate_count: runCandidates.filter(
+            (candidate) => candidate.labelStatus === 'judged',
+          ).length,
+          report: run.report,
+          error_code: run.errorCode,
+          error_message: run.errorMessage,
+          created_at: run.createdAt.toISOString(),
+          finished_at: run.finishedAt?.toISOString() ?? null,
+        }
+      }),
+      total: totalRow?.value ?? 0,
+      limit,
+      offset,
+    }
   }
 
   async getVersion(id: string) {
@@ -417,16 +525,18 @@ export class EvaluationService {
             ),
           )
       : []
-    const queryRows = rows.length
-      ? await db
-          .select({
-            id: evaluationQueries.id,
-            queryText: evaluationQueries.queryText,
-            queryType: evaluationQueries.queryType,
-          })
-          .from(evaluationQueries)
-          .where(inArray(evaluationQueries.id, [...new Set(rows.map((row) => row.queryId))]))
-      : []
+    // 直接按冻结版本读取全部查询，而不是从候选反推。某条查询零召回时没有 candidate 行，
+    // 但报告页仍必须展示原查询文本和对应的 0 分指标。
+    const queryRows = await db
+      .select({
+        id: evaluationQueries.id,
+        queryText: evaluationQueries.queryText,
+        queryType: evaluationQueries.queryType,
+        intentCategory: evaluationQueries.intentCategory,
+      })
+      .from(evaluationQueries)
+      .where(eq(evaluationQueries.versionId, run.versionId))
+      .orderBy(asc(evaluationQueries.createdAt))
     const queryTextById = new Map(queryRows.map((row) => [row.id, row.queryText]))
     const queryTypeById = new Map(queryRows.map((row) => [row.id, row.queryType]))
     const byCandidate = new Map(judgments.map((row) => [row.candidateId, row]))
@@ -453,6 +563,12 @@ export class EvaluationService {
       report: run.reportJson,
       error_code: run.errorCode,
       error_message: run.errorMessage,
+      queries: queryRows.map((query) => ({
+        id: query.id,
+        query_text: query.queryText,
+        query_type: query.queryType,
+        intent_category: query.intentCategory,
+      })),
       candidates: rows.map((row) => {
         const judgment = byCandidate.get(row.id)
         return {

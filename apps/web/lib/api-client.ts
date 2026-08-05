@@ -153,6 +153,67 @@ export interface EvaluationSet {
   latest_version: EvaluationVersion | null
 }
 
+/**
+ * 单条查询在某一种排序下的测评指标。发现类查询使用 Precision/nDCG，指定目标查询
+ * 使用 Hit/MRR；不适用的字段是 null，不能当成 0 分。
+ */
+export interface EvaluationRankingMetrics {
+  precisionAt5: number | null
+  precisionAt10: number | null
+  ndcgAt10: number | null
+  ndcgAt20: number | null
+  hitAt5: number | null
+  hitAt10: number | null
+  hitAt20: number | null
+  reciprocalRank: number | null
+  unjudgeableCount: number
+}
+
+export interface EvaluationReport {
+  generated_at: string
+  queries: Array<{
+    query_id: string
+    current: EvaluationRankingMetrics
+    rrf: EvaluationRankingMetrics
+    // 未来影子模式写入真实结果后可直接展示；缺失表示该运行没有执行 VLM 重排。
+    shadow_rerank?: EvaluationRankingMetrics | null
+  }>
+}
+
+export interface EvaluationRunSummary {
+  id: string
+  version_id: string
+  set_id: string
+  set_name: string
+  version: number
+  status: EvaluationRunStatus
+  query_count: number
+  candidate_count: number
+  required_candidate_count: number
+  judged_required_candidate_count: number
+  judged_candidate_count: number
+  report: EvaluationReport | null
+  error_code: string | null
+  error_message: string | null
+  created_at: string
+  finished_at: string | null
+}
+
+export interface EvaluationRunListResponse {
+  items: EvaluationRunSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export type EvaluationRunStatus =
+  | 'pending'
+  | 'retrieving'
+  | 'ready_for_labeling'
+  | 'labeled'
+  | 'reported'
+  | 'failed'
+
 export interface EvaluationTarget {
   file_id: string
   scene_id: string | null
@@ -165,10 +226,17 @@ export interface EvaluationTarget {
 export interface EvaluationRun {
   id: string
   version_id: string
-  status: string
+  status: EvaluationRunStatus
   error_code: string | null
   error_message: string | null
-  report: unknown
+  config?: unknown
+  report: EvaluationReport | null
+  queries?: Array<{
+    id: string
+    query_text: string
+    query_type: 'known_target' | 'discovery'
+    intent_category: string
+  }>
   candidates: Array<{
     id: string
     query_id: string
@@ -182,6 +250,10 @@ export interface EvaluationRun {
     // 自然发现需要分级相关标注；指定目标只读取冻结目标的名次。
     requires_judgment: boolean
     judgment: { relevance: number | null; unjudgeable: boolean } | null
+    current_rank?: number | null
+    rrf_rank?: number | null
+    // 与 report.shadow_rerank 同步演进；没有真实持久化数据时必须保持缺失。
+    shadow_rerank_rank?: number | null
   }>
 }
 
@@ -334,6 +406,15 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<SearchResponse>('/search', { method: 'POST', body: JSON.stringify(input) }),
     listEvaluationSets: () =>
       request<{ items: EvaluationSet[] }>('/evaluation/sets', { method: 'GET' }),
+    listEvaluationRuns: (input: { limit?: number; offset?: number; versionId?: string } = {}) =>
+      request<EvaluationRunListResponse>(
+        withQuery('/evaluation/runs', {
+          limit: input.limit,
+          offset: input.offset,
+          version_id: input.versionId,
+        }),
+        { method: 'GET' },
+      ),
     createEvaluationSet: (input: { name: string }) =>
       request<EvaluationSet & { version_id: string }>('/evaluation/sets', {
         method: 'POST',
@@ -368,6 +449,9 @@ export function createApiClient(options: ApiClientOptions = {}) {
     // 通过不可变运行标识重新读取 PostgreSQL 快照，刷新页面后仍从首个未标候选继续。
     getEvaluationRun: (id: string) =>
       request<EvaluationRun>(`/evaluation/runs/${id}`, { method: 'GET' }),
+    // 报告详情只有在正式指标池完成盲标后才允许揭示名次与来源证据。
+    getEvaluationRunReport: (id: string) =>
+      request<EvaluationRun>(`/evaluation/runs/${id}?reveal_evidence=true`, { method: 'GET' }),
     saveEvaluationJudgment: (
       runId: string,
       candidateId: string,

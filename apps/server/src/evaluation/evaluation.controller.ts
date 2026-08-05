@@ -13,6 +13,17 @@ export class EvaluationController {
   @Get('sets') listSets() {
     return this.service.listSets()
   }
+  @Get('runs') listRuns(
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('version_id') versionId?: string,
+  ) {
+    return this.service.listRuns({
+      limit: limit === undefined ? undefined : Number(limit),
+      offset: offset === undefined ? undefined : Number(offset),
+      versionId,
+    })
+  }
   @Post('sets') createSet(@Body() body: { name: string; description?: string }) {
     return this.service.createSet(body)
   }
