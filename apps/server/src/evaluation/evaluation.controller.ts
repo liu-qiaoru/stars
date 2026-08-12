@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common'
 import { EvaluationService } from './evaluation.service.js'
+import { ShadowRerankService } from './shadow-rerank.service.js'
 
 @Controller('evaluation')
 export class EvaluationController {
@@ -8,6 +9,8 @@ export class EvaluationController {
     // 显式声明注入 Token，避免真实 /evaluation/* 路由拿到 undefined service。
     @Inject(EvaluationService)
     private readonly service: EvaluationService,
+    @Inject(ShadowRerankService)
+    private readonly shadowRerank: ShadowRerankService,
   ) {}
 
   @Get('sets') listSets() {
@@ -70,5 +73,13 @@ export class EvaluationController {
   }
   @Post('runs/:id/finalize') finalize(@Param('id') id: string) {
     return this.service.finalizeRun(id)
+  }
+
+  @Post('runs/:id/shadow-rerank') startShadowRerank(@Param('id') id: string) {
+    return this.shadowRerank.startAndSchedule(id)
+  }
+
+  @Get('runs/:id/shadow-rerank') getShadowRerank(@Param('id') id: string) {
+    return this.shadowRerank.findByEvaluationRun(id)
   }
 }

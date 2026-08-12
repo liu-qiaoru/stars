@@ -138,6 +138,7 @@ export interface EvaluationQuery {
   version_id: string
   query_text: string
   query_type: 'known_target' | 'discovery'
+  search_scope: 'visual' | 'spoken' | 'all' | null
   intent_category: string
   must_have: string[]
   optional: string[]
@@ -175,8 +176,6 @@ export interface EvaluationReport {
     query_id: string
     current: EvaluationRankingMetrics
     rrf: EvaluationRankingMetrics
-    // 未来影子模式写入真实结果后可直接展示；缺失表示该运行没有执行 VLM 重排。
-    shadow_rerank?: EvaluationRankingMetrics | null
   }>
 }
 
@@ -235,6 +234,7 @@ export interface EvaluationRun {
     id: string
     query_text: string
     query_type: 'known_target' | 'discovery'
+    search_scope: 'visual' | 'spoken' | 'all' | null
     intent_category: string
   }>
   candidates: Array<{
@@ -252,9 +252,89 @@ export interface EvaluationRun {
     judgment: { relevance: number | null; unjudgeable: boolean } | null
     current_rank?: number | null
     rrf_rank?: number | null
-    // 与 report.shadow_rerank 同步演进；没有真实持久化数据时必须保持缺失。
-    shadow_rerank_rank?: number | null
   }>
+}
+
+export type ShadowRerankStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'completed_with_errors'
+  | 'failed'
+  | 'not_applicable'
+
+export interface ShadowRerankRun {
+  id: string
+  evaluation_run_id: string
+  status: ShadowRerankStatus
+  provider: string
+  requested_model: 'qwen3-vl-rerank'
+  response_model: string | null
+  model_snapshot: string | null
+  region: string | null
+  protocol_version: string
+  query_count: number
+  succeeded_count: number
+  failed_count: number
+  not_applicable_count: number
+  actual_sample_count: number
+  request_bytes: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  latency_ms: number
+  billed_cost_cny: number
+  review_status: 'not_run'
+  error: { code: string; message: string; details: unknown } | null
+  metric_summary: {
+    successful_samples: {
+      n: number
+      rrf: EvaluationRankingMetrics | null
+      shadow: EvaluationRankingMetrics | null
+    }
+    full_product_samples: {
+      n: number
+      rrf: EvaluationRankingMetrics | null
+      shadow_with_rrf_fallback: EvaluationRankingMetrics | null
+    }
+  }
+  attempts: Array<{
+    id: string
+    query_id: string
+    query_text: string
+    status: 'pending' | 'running' | 'succeeded' | 'failed' | 'outcome_unknown' | 'not_applicable'
+    external_call_status: 'not_dispatched' | 'dispatched' | 'completed' | 'outcome_unknown'
+    provider_request_id: string | null
+    response_model: string | null
+    model_snapshot: string | null
+    region: string | null
+    query_fingerprint: string | null
+    evidence_fingerprint: string | null
+    response_fingerprint: string | null
+    request_bytes: number | null
+    input_tokens: number | null
+    output_tokens: number | null
+    total_tokens: number | null
+    latency_ms: number | null
+    billed_cost_cny: number | null
+    actual_candidate_count: number
+    actual_result_count: number
+    metrics: {
+      rrf: EvaluationRankingMetrics
+      shadow: EvaluationRankingMetrics
+    } | null
+    error: { code: string; message: string; details: unknown } | null
+    applicability_reason: string | null
+    rankings: Array<{
+      candidate_id: string
+      candidate_key: string
+      rrf_rank: number
+      shadow_rank: number | null
+      relevance_score: number | null
+    }>
+  }>
+  created_at: string
+  finished_at: string | null
 }
 
 export interface MediaAsset {
@@ -579,6 +659,16 @@ export function createApiClient(options: ApiClientOptions = {}) {
       }),
     finalizeEvaluationRun: (id: string) =>
       request<EvaluationRun>(`/evaluation/runs/${id}/finalize`, { method: 'POST' }),
+    startEvaluationShadowRerank: (id: string, signal?: AbortSignal) =>
+      request<ShadowRerankRun>(`/evaluation/runs/${id}/shadow-rerank`, {
+        method: 'POST',
+        signal,
+      }),
+    getEvaluationShadowRerank: (id: string, signal?: AbortSignal) =>
+      request<ShadowRerankRun | null>(`/evaluation/runs/${id}/shadow-rerank`, {
+        method: 'GET',
+        signal,
+      }),
     getMedia: (id: string) =>
       request<MediaDetail>(`/media/${id}?include_assets=true&assets_limit=50&assets_offset=0`, {
         method: 'GET',

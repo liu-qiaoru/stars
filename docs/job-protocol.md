@@ -419,6 +419,20 @@ PostgreSQL 事务提交；Server 重启后直接读取该事实，不从文件�
 
 该 Job 不读取或写入 Qdrant，不调用任何外部 Provider，不执行 Rerank/VLM，也不产生业务结论。
 
+### Phase E 为什么不是 Worker Job
+
+Phase E 的 `qwen3-vl-rerank` 影子调用不加入本 PostgreSQL Worker Job 队列。
+它由 NestJS Server 在 Evaluation 域执行：输入是同一冻结视觉查询、RRF Top-20
+候选身份和 Phase D 已成功证据，输出是严格 Top-10 index/score。Server 会等待
+Provider 响应，但 HTTP 创建接口先返回可轮询的 PostgreSQL 事实；因此用户页面
+不需要一直占用一个 HTTP 请求。
+
+不进 Worker 队列的原因是：这是评测层的单次、可计费外部调用，必须在发出前提交
+`dispatched`，并在重启时把未确认结果标记为 `outcome_unknown`，不能套用通用 Job
+自动重试。Python Worker 不被调用，Qdrant 不读写，也不会重新搜索、抽帧或索引。
+只有 `evaluation_shadow_runs/attempts/rankings` 三类规范化 PostgreSQL 事实发生状态
+变化；普通 `jobs` 表和候选排名不变。
+
 ### export_clip
 
 Input：

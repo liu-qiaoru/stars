@@ -253,6 +253,9 @@ export const evaluationQueries = pgTable(
       .references(() => evaluationVersions.id, { onDelete: 'cascade' }),
     queryText: text('query_text').notNull(),
     queryType: text('query_type').notNull(),
+    // Phase E 只允许人工冻结为 visual 的查询外发图像。旧评测行保持 null，
+    // 不从查询文本或 AgentIntent 猜测范围，避免意外扩大隐私授权。
+    searchScope: text('search_scope'),
     intentCategory: text('intent_category').notNull(),
     mustHaveJson: jsonb('must_have_json').notNull().default([]),
     optionalJson: jsonb('optional_json').notNull().default([]),
@@ -339,6 +342,121 @@ export const evaluationJudgments = pgTable(
     ...timestamps,
   },
   (table) => [uniqueIndex('evaluation_judgments_candidate_unique').on(table.candidateId)],
+)
+
+// Phase E 的影子重排事实与普通 evaluation_runs 分离：普通 Search/RRF 快照不可变，
+// 影子失败也只能影响本表状态，绝不能回写 production candidate rank。
+export const evaluationShadowRuns = pgTable(
+  'evaluation_shadow_runs',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    evaluationRunId: uuid('evaluation_run_id')
+      .notNull()
+      .references(() => evaluationRuns.id, { onDelete: 'cascade' }),
+    protocolVersion: text('protocol_version').notNull(),
+    status: text('status').notNull().default('pending'),
+    provider: text('provider').notNull().default('dashscope'),
+    requestedModel: text('requested_model').notNull().default('qwen3-vl-rerank'),
+    responseModel: text('response_model'),
+    modelSnapshot: text('model_snapshot'),
+    region: text('region'),
+    queryCount: integer('query_count').notNull().default(0),
+    succeededCount: integer('succeeded_count').notNull().default(0),
+    failedCount: integer('failed_count').notNull().default(0),
+    notApplicableCount: integer('not_applicable_count').notNull().default(0),
+    actualSampleCount: integer('actual_sample_count').notNull().default(0),
+    requestBytes: bigint('request_bytes', { mode: 'number' }).notNull().default(0),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    totalTokens: integer('total_tokens').notNull().default(0),
+    latencyMs: bigint('latency_ms', { mode: 'number' }).notNull().default(0),
+    billedCostCny: numeric('billed_cost_cny').notNull().default('0'),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    errorDetailsJson: jsonb('error_details_json'),
+    ...timestamps,
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('evaluation_shadow_runs_identity_unique').on(
+      table.evaluationRunId,
+      table.protocolVersion,
+    ),
+    index('evaluation_shadow_runs_status_idx').on(table.status, table.createdAt),
+  ],
+)
+
+// 每条冻结视觉查询只有一个 Provider 尝试。dispatched 先于网络调用提交；Server 重启发现
+// dispatched 且未 completed 时只写 outcome_unknown，禁止自动重放并产生第二次费用。
+export const evaluationShadowAttempts = pgTable(
+  'evaluation_shadow_attempts',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    shadowRunId: uuid('shadow_run_id')
+      .notNull()
+      .references(() => evaluationShadowRuns.id, { onDelete: 'cascade' }),
+    queryId: uuid('query_id')
+      .notNull()
+      .references(() => evaluationQueries.id, { onDelete: 'cascade' }),
+    idempotencyKey: text('idempotency_key').notNull(),
+    status: text('status').notNull().default('pending'),
+    externalCallStatus: text('external_call_status').notNull().default('not_dispatched'),
+    providerRequestId: text('provider_request_id'),
+    responseModel: text('response_model'),
+    modelSnapshot: text('model_snapshot'),
+    region: text('region'),
+    queryFingerprint: text('query_fingerprint'),
+    evidenceFingerprint: text('evidence_fingerprint'),
+    responseFingerprint: text('response_fingerprint'),
+    requestBytes: bigint('request_bytes', { mode: 'number' }),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    latencyMs: bigint('latency_ms', { mode: 'number' }),
+    billedCostCny: numeric('billed_cost_cny'),
+    actualCandidateCount: integer('actual_candidate_count').notNull().default(0),
+    actualResultCount: integer('actual_result_count').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    errorDetailsJson: jsonb('error_details_json'),
+    notApplicableReason: text('not_applicable_reason'),
+    ...timestamps,
+    dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('evaluation_shadow_attempts_query_unique').on(table.shadowRunId, table.queryId),
+    uniqueIndex('evaluation_shadow_attempts_idempotency_unique').on(table.idempotencyKey),
+    index('evaluation_shadow_attempts_status_idx').on(table.status, table.createdAt),
+  ],
+)
+
+// 保存完整 20 个输入候选：Top-10 有 shadow_rank/score，其余保持 null。这样可以证明模型
+// 没有改变或删除普通 RRF 候选，也能审计 Provider 是否漏项、重复或返回非法 index。
+export const evaluationShadowRankings = pgTable(
+  'evaluation_shadow_rankings',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    attemptId: uuid('attempt_id')
+      .notNull()
+      .references(() => evaluationShadowAttempts.id, { onDelete: 'cascade' }),
+    candidateId: uuid('candidate_id')
+      .notNull()
+      .references(() => evaluationCandidates.id, { onDelete: 'cascade' }),
+    candidateKey: text('candidate_key').notNull(),
+    rrfRank: integer('rrf_rank').notNull(),
+    shadowRank: integer('shadow_rank'),
+    relevanceScore: numeric('relevance_score'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('evaluation_shadow_rankings_candidate_unique').on(
+      table.attemptId,
+      table.candidateId,
+    ),
+    uniqueIndex('evaluation_shadow_rankings_rank_unique').on(table.attemptId, table.shadowRank),
+    index('evaluation_shadow_rankings_attempt_idx').on(table.attemptId, table.rrfRank),
+  ],
 )
 
 // agent_runs 是 Agent V1 恢复状态机的主事实。它不复用 Python jobs 队列：

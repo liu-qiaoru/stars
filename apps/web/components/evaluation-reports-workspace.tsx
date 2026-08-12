@@ -9,6 +9,7 @@ import {
   type EvaluationRunStatus,
   type EvaluationRunSummary,
 } from '../lib/api-client'
+import { ShadowRerankPanel } from './shadow-rerank-panel'
 
 const metricDefinitions = [
   ['precisionAt5', 'Precision@5', '前 5 条中相关候选的比例'],
@@ -84,8 +85,9 @@ export function EvaluationReportsWorkspace({
 
   const report = detail?.report ?? null
   const queryTextById = new Map([
-    ...(detail?.candidates.map((candidate) => [candidate.query_id, candidate.query_text] as const) ??
-      []),
+    ...(detail?.candidates.map(
+      (candidate) => [candidate.query_id, candidate.query_text] as const,
+    ) ?? []),
     ...(detail?.queries?.map((query) => [query.id, query.query_text] as const) ?? []),
   ])
   const selectedCandidates =
@@ -120,7 +122,9 @@ export function EvaluationReportsWorkspace({
             <h2 id="run-history-title" className="section-title">
               历史运行
             </h2>
-            <p className="muted">共 {total} 次；当前显示最近 {runs.length} 次。</p>
+            <p className="muted">
+              共 {total} 次；当前显示最近 {runs.length} 次。
+            </p>
           </div>
         </div>
         {runs.length ? (
@@ -156,6 +160,9 @@ export function EvaluationReportsWorkspace({
                 >
                   {loadingRunId === run.id ? '读取中…' : run.report ? '查看报告' : '报告未生成'}
                 </button>
+                <a className="secondary-action" href={`/evaluation/runs/${run.id}`}>
+                  运行详情
+                </a>
               </article>
             ))}
           </div>
@@ -181,10 +188,12 @@ export function EvaluationReportsWorkspace({
               {selectedRun?.set_name} · v{selectedRun?.version}
             </h2>
             <p className="muted mt-2">
-              完成时间：{selectedRun ? formatDate(selectedRun.finished_at ?? selectedRun.created_at) : ''}
+              完成时间：
+              {selectedRun ? formatDate(selectedRun.finished_at ?? selectedRun.created_at) : ''}
               {' · '}运行 ID：{selectedRun?.id}
             </p>
           </section>
+          <ShadowRerankPanel evaluationRunId={detail!.id} canStart={false} apiClient={apiClient} />
           <ReportMethodology report={report} />
           <ReportSummary report={report} />
           <section className="panel space-y-4" aria-labelledby="query-comparison-title">
@@ -198,14 +207,13 @@ export function EvaluationReportsWorkspace({
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] border-collapse text-left text-sm">
-                <caption className="sr-only">每条查询的 Current、RRF 与 VLM 影子重排指标</caption>
+                <caption className="sr-only">每条查询的 Current 与 RRF 基线指标</caption>
                 <thead>
                   <tr className="border-b">
                     <th className="p-3">查询</th>
                     <th className="p-3">指标</th>
                     <th className="p-3">Current</th>
                     <th className="p-3">RRF</th>
-                    <th className="p-3">VLM 影子重排</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -221,11 +229,6 @@ export function EvaluationReportsWorkspace({
                         </td>
                         <td className="p-3 tabular-nums">{formatScore(query.current[key])}</td>
                         <td className="p-3 tabular-nums">{formatScore(query.rrf[key])}</td>
-                        <td className="p-3 tabular-nums">
-                          {query.shadow_rerank
-                            ? formatScore(query.shadow_rerank[key])
-                            : '尚未执行'}
-                        </td>
                       </tr>
                     )),
                   )}
@@ -261,12 +264,10 @@ function ReportSummary({ report }: { report: EvaluationReport }) {
       {applicable.map(([key, label]) => {
         const currentValues = report.queries.map((query) => query.current[key])
         const rrfValues = report.queries.map((query) => query.rrf[key])
-        const shadowValues = report.queries.map((query) => query.shadow_rerank?.[key] ?? null)
         const current = average(currentValues)
         const rrf = average(rrfValues)
-        const shadow = average(shadowValues)
         return (
-          <div key={key} className="grid gap-3 sm:grid-cols-3">
+          <div key={key} className="grid gap-3 sm:grid-cols-2">
             <MetricCard
               label={`Current · ${label} · n=${applicableCount(currentValues)}`}
               value={formatScore(current)}
@@ -274,10 +275,6 @@ function ReportSummary({ report }: { report: EvaluationReport }) {
             <MetricCard
               label={`RRF · ${label} · n=${applicableCount(rrfValues)}`}
               value={formatScore(rrf)}
-            />
-            <MetricCard
-              label={`VLM 影子重排 · ${label} · n=${applicableCount(shadowValues)}`}
-              value={shadow === null ? '尚未执行' : formatScore(shadow)}
             />
           </div>
         )
@@ -287,9 +284,7 @@ function ReportSummary({ report }: { report: EvaluationReport }) {
 }
 
 function ReportMethodology({ report }: { report: EvaluationReport }) {
-  const discoveryCount = report.queries.filter(
-    (query) => query.current.ndcgAt10 !== null,
-  ).length
+  const discoveryCount = report.queries.filter((query) => query.current.ndcgAt10 !== null).length
   const knownTargetCount = report.queries.filter(
     (query) => query.current.reciprocalRank !== null,
   ).length
@@ -301,8 +296,8 @@ function ReportMethodology({ report }: { report: EvaluationReport }) {
       <div className="grid gap-3 text-sm leading-6 md:grid-cols-2">
         <p>
           <strong className="text-neutral-950">自然发现查询（{discoveryCount} 条）</strong>：
-          Precision@K（前 K 条准确率）等于前 K 条中人工判为相关的比例；nDCG@K
-          （Normalized Discounted Cumulative Gain，归一化折损累计增益）先让相关收益随名次靠后逐步折损，
+          Precision@K（前 K 条准确率）等于前 K 条中人工判为相关的比例；nDCG@K （Normalized
+          Discounted Cumulative Gain，归一化折损累计增益）先让相关收益随名次靠后逐步折损，
           再用实际累计收益除以理想排序的累计收益，因此高度相关内容越靠前得分越高。
         </p>
         <p>
@@ -315,8 +310,9 @@ function ReportMethodology({ report }: { report: EvaluationReport }) {
           <code>n</code> 是参与该平均的查询数，不适用的查询不会按 0 分混入。
         </p>
         <p>
-          Current 是当前生产排序；RRF（Reciprocal Rank Fusion，倒数排名融合）只按各召回通道名次合并；
-          VLM（Vision-Language Model，视觉语言模型）影子重排只做对照，不改变用户实际看到的生产排序。
+          Current 是当前生产排序；RRF（Reciprocal Rank
+          Fusion，倒数排名融合）只按各召回通道名次合并； VLM（Vision-Language
+          Model，视觉语言模型）影子重排只做对照，不改变用户实际看到的生产排序。
         </p>
       </div>
     </section>
@@ -364,7 +360,6 @@ function CandidateRanks({
               <th className="p-3">候选</th>
               <th className="p-3">人工判断</th>
               <th className="p-3">Current → RRF</th>
-              <th className="p-3">VLM 影子重排</th>
             </tr>
           </thead>
           <tbody>
@@ -377,11 +372,6 @@ function CandidateRanks({
                 <td className="p-3">{judgmentLabel(candidate.judgment)}</td>
                 <td className="p-3 font-medium tabular-nums text-neutral-950">
                   {formatRank(candidate.current_rank)} → {formatRank(candidate.rrf_rank)}
-                </td>
-                <td className="p-3 tabular-nums">
-                  {candidate.shadow_rerank_rank === undefined
-                    ? '尚未执行'
-                    : formatRank(candidate.shadow_rerank_rank)}
                 </td>
               </tr>
             ))}

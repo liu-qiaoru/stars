@@ -21,6 +21,72 @@ function unicodeStringSchema(fieldName: string, maximum: number) {
     })
 }
 
+// Phase E 的专用多模态重排协议固定在一次请求内比较完整 20 个候选，并只接受 Top-10。
+// index 是请求 documents 数组中的零基位置；Server 用它回映冻结候选，Provider 不能自造 ID。
+export const shadowRerankDocumentSchema = z
+  .object({
+    index: z.number().int().min(0).max(19),
+    candidate_key: z.string().min(1).max(300),
+    evidence_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    image_base64: z.string().min(1),
+  })
+  .strict()
+
+export const shadowRerankRequestSchema = z
+  .object({
+    model: z.literal('qwen3-vl-rerank'),
+    query: unicodeStringSchema('query', 4000),
+    top_n: z.literal(10),
+    documents: z.array(shadowRerankDocumentSchema).length(20),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const indices = value.documents.map((document) => document.index)
+    if (new Set(indices).size !== 20 || !indices.every((index, position) => index === position)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'documents must contain each index from 0 through 19 exactly once and in order',
+        path: ['documents'],
+      })
+    }
+  })
+
+export const shadowRerankResponseSchema = z
+  .object({
+    results: z
+      .array(
+        z
+          .object({
+            index: z.number().int().min(0).max(19),
+            relevance_score: z.number().finite(),
+          })
+          .strict(),
+      )
+      .length(10),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (new Set(value.results.map((result) => result.index)).size !== 10) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'results must contain 10 unique document indices',
+        path: ['results'],
+      })
+    }
+    if (
+      value.results.some(
+        (result, index) =>
+          index > 0 && result.relevance_score > value.results[index - 1]!.relevance_score,
+      )
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'results must be ordered by non-increasing relevance_score',
+        path: ['results'],
+      })
+    }
+  })
+
 // Agent V1 是 Server 控制的固定状态机。模型输出和 API 输入都只能使用这些状态，
 // 不能自造“思考中”或跳过等待授权边界的状态。
 export const agentRunStatusSchema = z.enum([

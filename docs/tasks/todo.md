@@ -154,6 +154,49 @@ Review：
   与 Qdrant 写入均为 0。以 `b1fbdea` 为固定点的 Standards/Spec 首轮发现已修复，最终复审无
   阻断项；实现严格停在 Phase D。
 
+## Agent V1 Phase E：`qwen3-vl-rerank` 影子评测
+
+- Start：2026-08-12。目标是只在 Evaluation 中读取冻结视觉查询、RRF Top-20 与
+  Phase D 成功本地证据，用一次专用 `qwen3-vl-rerank` 协议产生 Top-10 影子
+  排序，并把状态、名次、指纹、用量、费用和错误保存为 PostgreSQL 历史事实。
+- 范围边界：不改普通 Search/Agent 候选顺序，不重新搜索、扫描、抽帧或索引，
+  不写 Qdrant，不执行 Phase F VLM Review，不产生 `passed/rejected` 等结论。
+  未获得真实图像外发与费用授权前 Provider 保持禁用，测试只使用本地 fake。
+- 验证计划：以 Shared 公开 Schema、Server Evaluation HTTP/持久化、Web 用户可见状态/轮询
+  和普通 Search/Agent 排序不变为测试接缝；以 `a1f23c4` 为固定起点完成
+  Standards/Spec 双轴 Review。
+
+- [x] 冻结完整 Top-20/唯一 Top-10 请求响应 Schema，拒绝非法 index、重复、非有限
+  score 和不完整输出。
+- [x] 新增规范化 shadow run/attempt/ranking 事实、冻结 `search_scope` 和增量迁移。
+- [x] 实现候选/证据身份与 SHA-256 校验、单请求调度、严格 Provider 输出校验、
+  幂等并发与 dispatched/unknown 重启恢复边界。
+- [x] 保存/展示 RRF 与影子名次及指标、模型协议、token、请求字节、耗时、
+  费用、Provider request ID、三类指纹、实际样本数和结构化错误。
+- [x] Web 覆盖未运行、运行中、成功、部分失败、失败与不适用；实现页面隐藏
+  暂停轮询、恢复立即刷新、终态停止和卸载取消。
+- [x] 审计 `apps/web/app` 全部用户可访问页面，补齐 Evaluation 主页、运行详情、
+  报告和历史 Phase 9 页的可见入口/返回路径及 Web 完整性测试。
+- [x] 迁移前备份 PostgreSQL，迁移后核对媒体数据和三个 Qdrant Collection。
+- [x] 完成定向/全量验证、lint、format、`git diff --check` 和双轴复审后只提交
+  Phase E 文件。
+
+Review：
+
+- Result：Phase E 的本地实现与验证已完成。Evaluation 对每条适用查询冻结完整 RRF Top-20，
+  图片按固定规则缩放、视频只读取 Phase D 指纹通过的 `contact_sheet_v1`，再通过一次专用
+  `qwen3-vl-rerank` 请求产生严格有序 Top-10。普通 Search、Agent 候选与 Qdrant 均不改写；
+  历史页面只读 PostgreSQL，并明确显示“尚未执行 VLM 审核”。
+- Notes：迁移前备份位于
+  `.media-agent/backups/agent-v1-phase-e-pre-migration-20260812.dump`；迁移后媒体文件 35、
+  Asset 7,940、场景 1,919、已索引 Vector Ref 7,564 与迁移前一致，Qdrant 三个 Collection
+  Point 仍为 8 / 5,629 / 1,927。影子 run/attempt/ranking 均为 0，因此本阶段没有真实评测
+  指标；真实 Provider 调用、图片外发、费用与 Qdrant 写入均为 0。全量验证通过 Shared 21、
+  Server 213、Web 79、Python Worker 133 项和 Web 生产构建；lint 仅有一个未修改历史文件
+  warning，Phase E 23 个可格式化文件单独通过，全仓 format check 仍由 31 个既有文件阻断，
+  `git diff --check` 通过。以 `a1f23c4` 为固定点的 Standards/Spec 首轮阻断项已修复，最终
+  复审结论记录在本次交付报告中；实现严格停在 Phase E。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

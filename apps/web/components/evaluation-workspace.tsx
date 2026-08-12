@@ -10,6 +10,7 @@ import {
   type LibrarySummary,
 } from '../lib/api-client'
 import { CandidateEvidencePanel } from './candidate-evidence-panel'
+import { ShadowRerankPanel } from './shadow-rerank-panel'
 
 /**
  * 本地评测工作台：草稿阶段选择正式图片或 video_scenes 场景目标；运行后逐条盲标。
@@ -84,6 +85,7 @@ export function EvaluationWorkspace({
       await apiClient.addEvaluationQuery(version.id, {
         query_text: String(data.get('query_text')),
         query_type: selected ? 'known_target' : 'discovery',
+        search_scope: String(data.get('search_scope')) as 'visual' | 'spoken' | 'all',
         intent_category: String(data.get('intent_category')),
         must_have: String(data.get('must_have'))
           .split('\n')
@@ -192,6 +194,18 @@ export function EvaluationWorkspace({
                     placeholder="意图分类"
                     className="w-full rounded border p-2"
                   />
+                  <label className="block text-sm font-medium">
+                    冻结检索范围
+                    <select
+                      name="search_scope"
+                      defaultValue="visual"
+                      className="mt-1 w-full rounded border p-2"
+                    >
+                      <option value="visual">视觉（Phase E 可用）</option>
+                      <option value="spoken">口述/语音（Phase E 不适用）</option>
+                      <option value="all">混合（Phase E 不适用）</option>
+                    </select>
+                  </label>
                   <textarea
                     name="must_have"
                     required
@@ -357,6 +371,23 @@ export function EvaluationWorkspace({
           ) : null}
         </div>
       </div>
+      {run ? (
+        <div className="space-y-3">
+          <nav aria-label="当前评测运行导航" className="flex flex-wrap gap-2">
+            <a className="secondary-action" href={`/evaluation/runs/${run.id}`}>
+              打开运行详情
+            </a>
+            <a className="secondary-action" href="/evaluation/reports">
+              查看历史报告
+            </a>
+          </nav>
+          <ShadowRerankPanel
+            evaluationRunId={run.id}
+            canStart={run.status === 'reported'}
+            apiClient={apiClient}
+          />
+        </div>
+      ) : null}
     </section>
   )
 }

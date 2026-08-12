@@ -21,11 +21,13 @@ describe('database migration chain', () => {
       '0000_final_baseline.sql',
       '0001_agent_v1_phase_a.sql',
       '0002_agent_v1_phase_d_candidate_evidence.sql',
+      '0003_happy_morlun.sql',
     ])
     expect(metadataFiles).toEqual([
       '0000_snapshot.json',
       '0001_snapshot.json',
       '0002_snapshot.json',
+      '0003_snapshot.json',
       '_journal.json',
     ])
     const journal = JSON.parse(await readFile(resolve('drizzle/meta/_journal.json'), 'utf8')) as {
@@ -35,6 +37,7 @@ describe('database migration chain', () => {
       '0000_final_baseline',
       '0001_agent_v1_phase_a',
       '0002_agent_v1_phase_d_candidate_evidence',
+      '0003_happy_morlun',
     ])
 
     const sql = await readFile(resolve('drizzle', migrationFiles[0]!), 'utf8')
@@ -149,6 +152,29 @@ describe('database migration chain', () => {
         'retention_class',
         'expires_at',
         'frozen_at',
+      ]),
+    )
+  })
+
+  test('applies Phase E additively and creates only normalized shadow rerank facts', async () => {
+    client = new PGlite()
+    for (const file of [
+      '0000_final_baseline.sql',
+      '0001_agent_v1_phase_a.sql',
+      '0002_agent_v1_phase_d_candidate_evidence.sql',
+      '0003_happy_morlun.sql',
+    ]) {
+      await client.exec(await readFile(resolve('drizzle', file), 'utf8'))
+    }
+    const tables = await client.query<{ tablename: string }>(
+      "select tablename from pg_tables where schemaname='public' order by tablename",
+    )
+    expect(tables.rows).toHaveLength(24)
+    expect(tables.rows.map((row) => row.tablename)).toEqual(
+      expect.arrayContaining([
+        'evaluation_shadow_runs',
+        'evaluation_shadow_attempts',
+        'evaluation_shadow_rankings',
       ]),
     )
   })

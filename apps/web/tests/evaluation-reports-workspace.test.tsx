@@ -39,34 +39,40 @@ describe('evaluation reports workspace', () => {
     ]
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          id: runId,
-          version_id: initialRuns[0]!.version_id,
-          status: 'reported',
-          config: {},
-          report: initialRuns[0]!.report,
-          error_code: null,
-          error_message: null,
-          candidates: [
-            {
-              id: 'candidate-1',
-              query_id: 'query-1',
-              query_text: '有人在草地上放风筝',
-              candidate_key: 'scene-1',
-              file_id: '11111111-1111-4111-8111-111111111111',
-              scene_id: '22222222-2222-4222-8222-222222222222',
-              media_type: 'video',
-              start_time_seconds: 3,
-              end_time_seconds: 9,
-              requires_judgment: true,
-              current_rank: 4,
-              rrf_rank: 1,
-              judgment: { relevance: 2, unjudgeable: false },
-            },
-          ],
-        }),
+      vi.fn().mockImplementation(async (request: string | URL | Request) => {
+        const url = String(request)
+        return {
+          ok: true,
+          json: async () =>
+            url.endsWith('/shadow-rerank')
+              ? null
+              : {
+                  id: runId,
+                  version_id: initialRuns[0]!.version_id,
+                  status: 'reported',
+                  config: {},
+                  report: initialRuns[0]!.report,
+                  error_code: null,
+                  error_message: null,
+                  candidates: [
+                    {
+                      id: 'candidate-1',
+                      query_id: 'query-1',
+                      query_text: '有人在草地上放风筝',
+                      candidate_key: 'scene-1',
+                      file_id: '11111111-1111-4111-8111-111111111111',
+                      scene_id: '22222222-2222-4222-8222-222222222222',
+                      media_type: 'video',
+                      start_time_seconds: 3,
+                      end_time_seconds: 9,
+                      requires_judgment: true,
+                      current_rank: 4,
+                      rrf_rank: 1,
+                      judgment: { relevance: 2, unjudgeable: false },
+                    },
+                  ],
+                },
+        }
       }),
     )
 
@@ -77,7 +83,7 @@ describe('evaluation reports workspace', () => {
     expect(screen.getByRole('cell', { name: '60.0%' })).toBeInTheDocument()
     expect(screen.getByRole('cell', { name: '90.0%' })).toBeInTheDocument()
     expect(screen.getByText('4 → 1')).toBeInTheDocument()
-    expect(screen.getAllByText('尚未执行').length).toBeGreaterThan(0)
+    expect(await screen.findByText(/尚未运行；历史页面不会自动调用 Provider/)).toBeInTheDocument()
   })
 })
 

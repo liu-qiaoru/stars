@@ -731,7 +731,7 @@ Worker 领取该 Job 后删除此文件在 PostgreSQL 和 Qdrant 中的可重建
 - `GET /evaluation/targets/random`：按可选 `library_id`、`limit`（最大 20）和 `seed` 返回已索引图片与稳定视频 scene 的随机目标。相同 seed 返回稳定顺序；响应只含媒体身份、路径与时间范围，不返回 Caption 或 Transcript。同一视频一批最多返回一个 scene。
 - `POST /evaluation/sets`：创建评测集和首个草稿版本。
 - `GET /evaluation/versions/{id}`：读取版本与查询。
-- `POST /evaluation/versions/{id}/queries`：向草稿版本添加查询。必须提供查询文本、类型、意图分类和非空的必须满足条件。
+- `POST /evaluation/versions/{id}/queries`：向草稿版本添加查询。必须提供查询文本、类型、意图分类、非空的必须满足条件，以及人工冻结的 `search_scope=visual|spoken|all`。Phase E 只对 `visual` 外发视觉证据；旧查询的 null 不会被猜测为视觉。
 - `POST /evaluation/versions/{id}/freeze`：冻结非空版本；冻结后不可修改。
 - `POST /evaluation/versions/{id}/runs`：使用 `library_ids` 启动基线运行。基线固定关闭查询扩展，只使用当前 visual/caption/lexical 三路来源；每路深度为 20，RRF `k=60`，三路权重均为 1。
 - `GET /evaluation/runs/{id}`：读取运行与盲标候选。未标候选默认不返回来源证据、分数和排名；诊断读取可传 `reveal_evidence=true`。
@@ -746,6 +746,84 @@ current/RRF 名次；人工标注完成前普通读取隐藏这些证据。运�
 `search_scope=all`、`query_expansion_mode=original`，不维护第二套召回或 RRF 公式。任一
 必需通道缺失、Qdrant Point 无法回表或 generation 不一致时，会清空该运行的候选并把整次
 运行标为 `failed`。
+
+### Phase E 影子重排
+
+- `POST /evaluation/runs/{id}/shadow-rerank`：只允许已生成 `reported` 报告的运行。以
+  `(evaluation_run_id, qwen3-vl-rerank-top20-v1)` 幂等创建或复用影子 run，先返回
+  PostgreSQL 事实，再由 Server 后台执行。重复或并发 POST 不会创建第二个
+  attempt。
+- `GET /evaluation/runs/{id}/shadow-rerank`：返回已保存事实；尚未运行时返回
+  `null`。历史读取不调 Provider、不读取 Qdrant，也不会从文件重算排名。
+
+run 状态为 `pending | running | succeeded | completed_with_errors | failed |
+not_applicable`；attempt 还可以为 `outcome_unknown`。`spoken`、`all` 或未冻结范围的
+查询保存为 `not_applicable` 且 `external_call_status=not_dispatched`。只有同一个
+`visual` 查询的完整 RRF Top-20 和完整本地证据通过身份/SHA-256 校验后，
+才能形成一次 `qwen3-vl-rerank` 请求。
+
+简化响应：
+
+```json
+{
+  "id": "shadow-run-uuid",
+  "evaluation_run_id": "evaluation-run-uuid",
+  "status": "succeeded",
+  "provider": "dashscope",
+  "requested_model": "qwen3-vl-rerank",
+  "response_model": "qwen3-vl-rerank",
+  "model_snapshot": "provider-snapshot-or-null",
+  "region": "provider-region-or-null",
+  "protocol_version": "qwen3-vl-rerank-top20-v1",
+  "query_count": 1,
+  "succeeded_count": 1,
+  "failed_count": 0,
+  "not_applicable_count": 0,
+  "actual_sample_count": 1,
+  "request_bytes": 123456,
+  "input_tokens": 1234,
+  "output_tokens": 10,
+  "total_tokens": 1244,
+  "latency_ms": 2300,
+  "billed_cost_cny": 0.01,
+  "review_status": "not_run",
+  "error": null,
+  "attempts": [
+    {
+      "status": "succeeded",
+      "external_call_status": "completed",
+      "provider_request_id": "provider-request-id",
+      "query_fingerprint": "sha256",
+      "evidence_fingerprint": "sha256",
+      "response_fingerprint": "sha256",
+      "actual_candidate_count": 20,
+      "actual_result_count": 10,
+      "metrics": { "rrf": {}, "shadow": {} },
+      "rankings": [
+        {
+          "candidate_id": "uuid",
+          "candidate_key": "scene-uuid",
+          "rrf_rank": 4,
+          "shadow_rank": 1,
+          "relevance_score": 0.87
+        }
+      ]
+    }
+  ]
+}
+```
+
+根响应还包含 `metric_summary`：`successful_samples` 只对 Provider 严格成功的查询
+分别宏平均 RRF/影子指标；`full_product_samples` 覆盖全部适用查询，技术失败
+时 `shadow_with_rrf_fallback` 使用已冻结 RRF 指标。`n` 是实际进入该口径的
+查询数，不是候选数。
+
+`relevance_score` 不是概率，不设阈值，也不能跨请求比较。非有限分数、非法或
+重复 index、非按 score 非递增排序、少于/多于 10 条返回都使整个 attempt 失败，
+不保存部分排名；但仍保存脱敏 Provider 请求 ID、模型、用量、耗时、费用、
+实际返回数和响应指纹，并把 `external_call_status` 明确标为 `completed`。
+API 和普通日志不返回绝对路径、Base64、文件名、Caption、转录或图片字节。
+`review_status` 固定为 `not_run`，表示尚未执行 Phase F VLM 审核。
 
 `POST /jobs/{id}/retry` 只接受 `failed` 任务，并复制原任务已经校验的输入创建新的
 `queued` 任务。原失败任务保持不变，便于保留错误详情和审计链。

@@ -47,6 +47,9 @@ importers:
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
       zod:
         specifier: ^3.25.0
         version: 3.25.76
@@ -3369,8 +3372,7 @@ snapshots:
 
   '@exodus/bytes@1.15.1': {}
 
-  '@img/colour@1.1.0':
-    optional: true
+  '@img/colour@1.1.0': {}
 
   '@img/sharp-darwin-arm64@0.34.5':
     optionalDependencies:
@@ -4877,8 +4879,7 @@ snapshots:
 
   scheduler@0.27.0: {}
 
-  semver@7.8.1:
-    optional: true
+  semver@7.8.1: {}
 
   send@1.2.1:
     dependencies:
@@ -4937,7 +4938,6 @@ snapshots:
       '@img/sharp-win32-arm64': 0.34.5
       '@img/sharp-win32-ia32': 0.34.5
       '@img/sharp-win32-x64': 0.34.5
-    optional: true
 
   side-channel-list@1.0.1:
     dependencies:

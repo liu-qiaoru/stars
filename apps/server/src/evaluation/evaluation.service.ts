@@ -28,6 +28,7 @@ import { SearchService } from '../search/search.service.js'
 const querySchema = z.object({
   query_text: z.string().trim().min(1),
   query_type: z.enum(['known_target', 'discovery']),
+  search_scope: z.enum(['visual', 'spoken', 'all']),
   intent_category: z.string().trim().min(1),
   must_have: z.array(z.string().trim().min(1)).min(1),
   optional: z.array(z.string().trim().min(1)).default([]),
@@ -128,9 +129,7 @@ export class EvaluationService {
   async listRuns(input: { limit?: number; offset?: number; versionId?: string } = {}) {
     const limit = z.number().int().min(1).max(100).default(25).parse(input.limit)
     const offset = z.number().int().min(0).default(0).parse(input.offset)
-    const versionId = input.versionId
-      ? z.string().uuid().parse(input.versionId)
-      : undefined
+    const versionId = input.versionId ? z.string().uuid().parse(input.versionId) : undefined
     const condition = versionId ? eq(evaluationRuns.versionId, versionId) : undefined
 
     const baseSelection = {
@@ -299,6 +298,7 @@ export class EvaluationService {
           versionId,
           queryText: parsed.query_text,
           queryType: parsed.query_type,
+          searchScope: parsed.search_scope,
           intentCategory: parsed.intent_category,
           mustHaveJson: parsed.must_have,
           optionalJson: parsed.optional,
@@ -532,6 +532,7 @@ export class EvaluationService {
         id: evaluationQueries.id,
         queryText: evaluationQueries.queryText,
         queryType: evaluationQueries.queryType,
+        searchScope: evaluationQueries.searchScope,
         intentCategory: evaluationQueries.intentCategory,
       })
       .from(evaluationQueries)
@@ -544,11 +545,8 @@ export class EvaluationService {
     // 冻结目标唯一标识与名次，不应阻塞证据揭示或要求无意义的人工标注。
     const allJudged = rows.every(
       (row) =>
-        !requiresCandidateJudgment(
-          queryTypeById.get(row.queryId),
-          row.currentRank,
-          row.rrfRank,
-        ) || byCandidate.has(row.id),
+        !requiresCandidateJudgment(queryTypeById.get(row.queryId), row.currentRank, row.rrfRank) ||
+        byCandidate.has(row.id),
     )
     if (revealEvidence && !allJudged) {
       throw new ConflictException(
@@ -567,6 +565,7 @@ export class EvaluationService {
         id: query.id,
         query_text: query.queryText,
         query_type: query.queryType,
+        search_scope: query.searchScope,
         intent_category: query.intentCategory,
       })),
       candidates: rows.map((row) => {
@@ -694,9 +693,7 @@ export class EvaluationService {
         throw new ConflictException('run is not ready')
       }
       if (
-        blind.candidates.some(
-          (candidate) => candidate.requires_judgment && !candidate.judgment,
-        )
+        blind.candidates.some((candidate) => candidate.requires_judgment && !candidate.judgment)
       ) {
         throw new ConflictException('all discovery candidates must be judged')
       }
@@ -921,6 +918,7 @@ export class EvaluationService {
       version_id: row.versionId,
       query_text: row.queryText,
       query_type: row.queryType,
+      search_scope: row.searchScope,
       intent_category: row.intentCategory,
       must_have: row.mustHaveJson,
       optional: row.optionalJson,

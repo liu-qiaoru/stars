@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing'
 import { describe, expect, test, vi } from 'vitest'
 import { EvaluationController } from '../../src/evaluation/evaluation.controller.js'
 import { EvaluationService } from '../../src/evaluation/evaluation.service.js'
+import { ShadowRerankService } from '../../src/evaluation/shadow-rerank.service.js'
 
 describe('evaluation controller dependency injection', () => {
   test('NestJS 向 Controller 注入 EvaluationService，使真实 HTTP 路由可以调用评测能力', async () => {
@@ -11,9 +12,15 @@ describe('evaluation controller dependency injection', () => {
       randomTargets: vi.fn().mockResolvedValue({ items: [] }),
       listRuns: vi.fn().mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 }),
     }
+    const shadowRerank = {
+      findByEvaluationRun: vi.fn().mockResolvedValue(null),
+    }
     const moduleRef = await Test.createTestingModule({
       controllers: [EvaluationController],
-      providers: [{ provide: EvaluationService, useValue: service }],
+      providers: [
+        { provide: EvaluationService, useValue: service },
+        { provide: ShadowRerankService, useValue: shadowRerank },
+      ],
     }).compile()
 
     try {
@@ -32,6 +39,7 @@ describe('evaluation controller dependency injection', () => {
         offset: 0,
         versionId: undefined,
       })
+      await expect(controller.getShadowRerank('run-id')).resolves.toBeNull()
     } finally {
       await moduleRef.close()
     }

@@ -32,7 +32,7 @@ describe('Phase 6 evaluation runtime', () => {
     expect(requiresCandidateJudgment('discovery', null, 21)).toBe(false)
   })
 
-  test('PGlite migration creates all six evaluation tables', async () => {
+  test('PGlite migration creates baseline and Phase E evaluation tables', async () => {
     const rows = await context.client.query<{ tablename: string }>(
       "select tablename from pg_tables where schemaname='public' and tablename like 'evaluation_%'",
     )
@@ -42,6 +42,9 @@ describe('Phase 6 evaluation runtime', () => {
       'evaluation_queries',
       'evaluation_runs',
       'evaluation_sets',
+      'evaluation_shadow_attempts',
+      'evaluation_shadow_rankings',
+      'evaluation_shadow_runs',
       'evaluation_versions',
     ])
   })
@@ -108,6 +111,7 @@ describe('Phase 6 evaluation runtime', () => {
       service.addQuery(set.version_id, {
         query_text: '缺少视频场景',
         query_type: 'known_target',
+        search_scope: 'visual',
         intent_category: '人物',
         must_have: ['人'],
         target_file_id: file.id,
@@ -117,6 +121,7 @@ describe('Phase 6 evaluation runtime', () => {
     await service.addQuery(set.version_id, {
       query_text: '海边的人',
       query_type: 'known_target',
+      search_scope: 'visual',
       intent_category: '人物',
       must_have: ['人'],
       target_file_id: file.id,
@@ -125,6 +130,7 @@ describe('Phase 6 evaluation runtime', () => {
     await service.addQuery(set.version_id, {
       query_text: '自然发现海边的人',
       query_type: 'discovery',
+      search_scope: 'visual',
       intent_category: '人物',
       must_have: ['人'],
     })
@@ -178,7 +184,9 @@ describe('Phase 6 evaluation runtime', () => {
     // 指定目标只读冻结目标唯一标识与名次；只完成自然发现正式池即可结束标注。
     const labeled = await service.saveJudgment(run.id, discovery.id, { relevance: 1 })
     expect(labeled.status).toBe('labeled')
-    expect(labeled.candidates.find((candidate) => candidate.id === knownTarget.id)?.judgment).toBeNull()
+    expect(
+      labeled.candidates.find((candidate) => candidate.id === knownTarget.id)?.judgment,
+    ).toBeNull()
     const reported = await service.finalizeRun(run.id)
     expect(reported.status).toBe('reported')
     const report = reported.report as {
@@ -208,9 +216,9 @@ describe('Phase 6 evaluation runtime', () => {
       judged_candidate_count: 2,
     })
     expect(history.items[0]?.report).toEqual(reported.report)
-    await expect(
-      service.saveJudgment(run.id, discovery.id, { relevance: 0 }),
-    ).rejects.toThrow(/immutable/)
+    await expect(service.saveJudgment(run.id, discovery.id, { relevance: 0 })).rejects.toThrow(
+      /immutable/,
+    )
   })
 
   test('removes partial candidates and marks the whole run failed when a required source is absent', async () => {
@@ -228,6 +236,7 @@ describe('Phase 6 evaluation runtime', () => {
     await service.addQuery(set.version_id, {
       query_text: '缺少视觉通道',
       query_type: 'discovery',
+      search_scope: 'visual',
       intent_category: '完整性',
       must_have: ['视觉'],
     })

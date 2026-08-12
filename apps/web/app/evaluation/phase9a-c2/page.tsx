@@ -3,6 +3,7 @@ import {
   Phase9aC2BlindWorkspace,
   type Phase9aC2BlindPacket,
 } from '../../../components/phase9a-c2-blind-workspace'
+import Link from 'next/link'
 
 /**
  * 独立的 Phase 9A-C2 本地盲标入口。
@@ -11,9 +12,16 @@ import {
 export default function Phase9aC2BlindPage() {
   const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000'
   return (
-    <Phase9aC2BlindWorkspace
-      apiBaseUrl={apiBaseUrl.replace(/\/$/, '')}
-      packet={packetData as Phase9aC2BlindPacket}
-    />
+    <section className="space-y-4">
+      <nav aria-label="面包屑">
+        <Link className="secondary-action" href="/evaluation">
+          返回评测主页
+        </Link>
+      </nav>
+      <Phase9aC2BlindWorkspace
+        apiBaseUrl={apiBaseUrl.replace(/\/$/, '')}
+        packet={packetData as Phase9aC2BlindPacket}
+      />
+    </section>
   )
 }

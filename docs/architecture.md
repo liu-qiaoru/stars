@@ -253,6 +253,40 @@ Pillow 11.3.0；版本变化必须升级协议。1/2/3–4/5–6/7–9/10–12 �
 本阶段没有接入 Rerank（重排）或 VLM（Vision-Language Model，视觉语言模型）审核，没有任何
 图片、Caption、转录、路径或文件名外发，也不产生通过/拒绝结论。
 
+### Agent V1 Phase E：Evaluation 影子重排
+
+Phase E 只在 Evaluation 中比较冻结的 RRF Top-20 和专用 `qwen3-vl-rerank`
+返回的影子 Top-10。RRF（Reciprocal Rank Fusion，倒数排名融合）只利用各检索
+通道名次合并结果；影子重排是只记录新排序但不改变用户结果的评测方式。
+
+```text
+用户在已 reported 的 Evaluation run 明确点击运行
+→ Server 以 (evaluation_run_id, protocol_version) 创建或复用 shadow run
+→ search_scope=visual 的查询创建唯一 attempt；spoken/all 持久化为 not_applicable
+→ Server 读取同一查询完整 RRF Top-20；视频读 Phase D contact_sheet_v1，图片校验当前 generation/Asset 后缩放
+→ 校验候选身份、generation、场景、证据 SHA-256 和连续名次
+→ 在网络调用前先提交 external_call_status=dispatched
+→ Provider 一次接收完整 Top-20，严格返回唯一索引的 Top-10
+→ PostgreSQL 事务保存 20 条 RRF rank、10 条 shadow rank/score 及请求审计事实
+→ Web 从 PostgreSQL 只读比较名次与指标，打开历史页不再调 Provider
+```
+
+Server 负责发起请求、严格 Schema 校验和状态恢复；PostgreSQL 保存 run、attempt、
+ranking、Provider/request ID、请求/返回模型、区域、三类指纹、字节数、token、毫秒、
+人民币费用和结构化错误。Qdrant 和 Python Worker 不参与 Phase E；`/search`、
+`evaluation_candidates.rrf_rank` 和 `agent_run_candidates.rank` 不写入。Provider 返回的
+`relevance_score` 不是概率，只能在同一次 Top-20 请求中比较。为计算 nDCG@20
+和 MRR，影子 Top-10 之后按原 RRF 顺序接上未入选候选，该口径仅用于报告。
+图片在 Server 内存中用 Sharp（Node.js 图像缩放库）等比缩到 1600×1600 边界内并固定
+PNG 编码，不产生临时文件。报告同时展示技术成功样本的宏平均，以及把失败
+查询按原 RRF 回退计算的完整产品样本宏平均，避免通过删除失败样本夸大改善。
+
+幂等由唯一运行身份、每查询唯一 attempt 和条件更新共同保证。未 dispatched 的
+pending attempt 可在 Server 重启后继续；已 dispatched 但没有确认结果的 attempt
+只能转为 `outcome_unknown`，禁止自动重放以避免重复费用。当前真实 Provider
+默认禁用，没有新增 Provider 环境变量；测试只注入本地 fake。用户重新授权前
+不会外发查询或图像，也不执行 Phase F VLM 审核。
+
 NestJS AgentModule 组织：
 
 ```text
