@@ -61,3 +61,42 @@ Server 的 `dev` 命令不会自动运行迁移。如果跳过该步，启动时
 
 本项目的 Drizzle Migration 不提供自动 down migration（向下迁移）。如果需要回退真实数据库，
 应在应用前先创建 PostgreSQL 备份，然后恢复备份；不应手工删列猜测回退顺序。
+
+## 2026-08-12 真实数据库原地迁移审计
+
+Phase B 编码前已对真实 PostgreSQL 执行原地基线对齐。只读核对证明旧库的 15 张表、
+171 个列定义、40 个索引和 16 个外键与 `0000_final_baseline` 快照等价；迁移登记仍是
+压缩前的 6 条历史记录，因此没有直接运行迁移工具，避免它把 `0000` 当成未执行迁移。
+
+修改迁移登记前创建了 PostgreSQL custom-format 备份：
+
+```text
+.media-agent/backups/agent-v1-phase-a-pre-migration-20260812.dump
+SHA-256: fdcee372d86d82ac0d2c6476864a3455c774aae262ffa63805e950ddbd8d64ec
+```
+
+`pg_restore --list` 已验证备份目录可读。恢复时应先停止 Server 和 Worker，把备份复制进
+PostgreSQL 容器，再对目标库执行 `pg_restore --clean --if-exists --no-owner`。该操作会覆盖
+数据库，因此只能在明确回退时执行，不能用于日常重跑迁移。
+
+基线对齐在一个 PostgreSQL 事务中完成，并用“最后一条旧迁移时间戳、现有表数、Phase A
+表不存在”三个条件保护：只登记 SHA-256 为
+`b883043172354490b1f6039575b665a5f2562dc43f6667a0f047edbfdbd135b5` 的等价 `0000`，随后
+正常执行 SHA-256 为
+`70bbcb50f635e44490feb874fc23571e8bfb5397b54e72c60f11b8e401b0abc6` 的
+`0001_agent_v1_phase_a`。迁移后共有 20 张表、236 个列定义、55 个索引和 22 个外键，
+与 `0001` 快照一致。
+
+| 事实 | 迁移前 | 迁移后 |
+| --- | ---: | ---: |
+| `libraries` | 1 | 1 |
+| `media_files` | 35，全部 `indexed` | 35，全部 `indexed` |
+| `media_assets` | 7,940 | 7,940 |
+| `video_scenes` | 1,919 | 1,919 |
+| `vector_refs` | 7,564，全部 `indexed` | 7,564，全部 `indexed` |
+| `jobs` | 9,910 | 9,910 |
+| 5 张新增 Agent 表中的行 | 0 | 0 |
+
+Qdrant 的 `image_vectors=8`、`video_frame_vectors=5,629`、
+`caption_text_vectors=1,927`，合计 7,564 个 Point，迁移前后完全一致。整个过程没有删除或
+重建 PostgreSQL、没有修改 Qdrant、没有触发扫描/索引/评测，也不需要媒体回填。

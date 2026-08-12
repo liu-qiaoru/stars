@@ -118,8 +118,8 @@ const settingsSchema = z.object({
     }),
   RIGHT_CODE_BASE_URL: z.string().url('RIGHT_CODE_BASE_URL must be a valid URL').optional(),
   RIGHT_CODE_API_KEY: z.string().min(1).optional(),
-  // Phase A 先交付可恢复执行器，默认关闭步骤执行。Phase B 注册
-  // qwen3.7-plus AgentIntent handler 并完成配置后才开启，避免 run 在无处理器时假装运行。
+  // Phase B 已注册 qwen3.7-plus AgentIntent handler，但执行器仍默认关闭。
+  // 部署者必须在确认 RightAPI 配置与文本外发边界后显式开启，避免仅填凭证就产生调用。
   AGENT_EXECUTOR_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
@@ -328,9 +328,15 @@ const settingsSchema = z.object({
 
 export function createSettings(env: Env = process.env): Settings {
   const parsed = settingsSchema.parse(env)
-  // 租约必须覆盖活动硬超时和最后一次数据库提交；否则正常步骤会在超时前被接管。
-  if (parsed.AGENT_LEASE_DURATION_MS <= parsed.AGENT_ACTIVITY_TIMEOUT_MS) {
-    throw new Error('AGENT_LEASE_DURATION_MS must be greater than AGENT_ACTIVITY_TIMEOUT_MS')
+  // 租约必须覆盖最长的活动/Provider 硬超时，并冻结 5 秒给结果校验和最后一次短事务提交。
+  // 否则请求刚返回时就可能被另一执行器接管，造成合法结果必然成为迟到结果。
+  const agentCommitMarginMs = 5_000
+  const minimumAgentLeaseMs =
+    Math.max(parsed.AGENT_ACTIVITY_TIMEOUT_MS, parsed.AGENT_TOOL_TIMEOUT_MS) + agentCommitMarginMs
+  if (parsed.AGENT_LEASE_DURATION_MS < minimumAgentLeaseMs) {
+    throw new Error(
+      'AGENT_LEASE_DURATION_MS must be at least max(AGENT_ACTIVITY_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS) + 5000',
+    )
   }
 
   return {

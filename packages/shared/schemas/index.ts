@@ -102,7 +102,8 @@ export const resumeAgentRunInputSchema = z
   .object({
     waiting_step_id: uuidSchema,
     client_request_id: z.string().min(1).max(200),
-    response: unicodeStringSchema('response', 2000),
+    // Phase B 不允许模型二次解释自由文本；该动作明确覆盖为无副作用只读搜索。
+    response: z.literal('continue_as_read_only_search_with_resolved_scope'),
   })
   .strict()
 

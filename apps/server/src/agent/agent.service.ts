@@ -12,8 +12,9 @@ import {
   createAgentRunInputSchema,
   resumeAgentRunInputSchema,
   retryUnknownAgentRunInputSchema,
+  agentIntentSchema,
 } from '@local-media-agent/shared/schemas'
-import type { z } from 'zod'
+import { z } from 'zod'
 import { SETTINGS, type Settings } from '../config/settings.js'
 import { DATABASE } from '../database/database.module.js'
 import type { Database } from '../database/repositories.js'
@@ -26,9 +27,27 @@ import {
 } from './agent-run.repository.js'
 import { AGENT_STEP_HANDLER, type AgentStepHandler } from './agent.types.js'
 
+const persistedAgentConditionSchema = z
+  .object({
+    condition_id: z.string().uuid(),
+    source_text: z.string(),
+    normalized_source_text: z.string(),
+    kind: z.enum(['must_have', 'optional', 'exclusion']),
+    evidence_type: z.enum(['visual', 'spoken', 'metadata', 'unknown']),
+  })
+  .strict()
+
+const persistedResolvedScopeSchema = z
+  .object({
+    search_scope: z.enum(['visual', 'spoken', 'all']),
+    media_types: z.array(z.enum(['image', 'video', 'audio'])),
+    library_ids: z.array(z.string().uuid()),
+  })
+  .strict()
+
 /**
- * Agent V1 的 HTTP 用例层。Phase A 只负责校验 API 输入、读写 PostgreSQL 状态机和
- * 报告可用性；它不调用外部模型、SearchService 或 Python Worker。
+ * Agent V1 的 HTTP 用例层。创建接口只校验授权并持久化 queued run；真正的
+ * RightAPI 意图识别和本地 SearchService 搜索由后台执行器异步完成。
  */
 @Injectable()
 export class AgentService {
@@ -49,7 +68,7 @@ export class AgentService {
     if (!stepHandlerReady) unavailableReasons.push('phase_b_step_handler_not_ready')
 
     return {
-      phase: 'A',
+      phase: 'B',
       provider: 'rightapi',
       model: 'qwen3.7-plus',
       run_creation_available: runCreationAvailable,
@@ -58,9 +77,9 @@ export class AgentService {
         configured,
         step_handler_ready: stepHandlerReady,
         available: runCreationAvailable,
-        allowed_fields: ['user_prompt'],
+        allowed_fields: ['user_prompt', 'deidentified_capability_boundary'],
       },
-      // 视觉授权只是数据库协议的独立字段；Phase F 前没有任何发图入口。
+      // 视觉授权只是数据库协议的独立字段；Phase B 没有任何发图入口。
       external_visual: {
         deployment_enabled: false,
         configured: false,
@@ -90,7 +109,13 @@ export class AgentService {
     if (parsed.allow_external_visual) {
       throw new BadRequestException({
         code: 'AGENT_EXTERNAL_VISUAL_NOT_AVAILABLE',
-        message: 'Phase A 不接收视觉外发授权，也不会发送候选图片。',
+        message: 'Phase B 不接收视觉外发授权，也不会发送候选图片。',
+      })
+    }
+    if (parsed.media_types.includes('document')) {
+      throw new BadRequestException({
+        code: 'AGENT_MEDIA_SCOPE_UNSUPPORTED',
+        message: 'Phase B 只支持 image、video 和 audio 检索，不能创建 document run。',
       })
     }
 
@@ -108,6 +133,20 @@ export class AgentService {
     const value = await getDurableAgentRun(this.db, runId)
     if (!value) throw new NotFoundException('Agent run not found')
     const { run, authorization, steps, events, candidates } = value
+    const committedIntent = [...steps]
+      .reverse()
+      .find(
+        (step) => step.stepKind === 'extracting_intent' && step.status === 'completed',
+      )?.outputJson
+    const intentRecord =
+      committedIntent && typeof committedIntent === 'object'
+        ? (committedIntent as Record<string, unknown>)
+        : undefined
+    const parsedIntent = agentIntentSchema.safeParse(intentRecord?.intent)
+    const parsedConditions = z
+      .array(persistedAgentConditionSchema)
+      .safeParse(intentRecord?.conditions)
+    const parsedResolvedScope = persistedResolvedScopeSchema.safeParse(intentRecord?.enforced_scope)
     return {
       id: run.id,
       status: run.status,
@@ -123,6 +162,9 @@ export class AgentService {
         run.errorCode && run.errorMessage
           ? { code: run.errorCode, message: run.errorMessage }
           : null,
+      intent: parsedIntent.success ? parsedIntent.data : null,
+      conditions: parsedConditions.success ? parsedConditions.data : [],
+      resolved_scope: parsedResolvedScope.success ? parsedResolvedScope.data : null,
       authorization: authorization
         ? {
             allow_external_text: authorization.allowExternalText,
@@ -145,11 +187,12 @@ export class AgentService {
         file_generation: candidate.fileGeneration,
         asset_id: candidate.assetId,
         scene_id: candidate.sceneId,
-        scene_start_seconds: candidate.sceneStartSeconds
-          ? Number(candidate.sceneStartSeconds)
-          : null,
-        scene_end_seconds: candidate.sceneEndSeconds ? Number(candidate.sceneEndSeconds) : null,
+        scene_start_seconds:
+          candidate.sceneStartSeconds !== null ? Number(candidate.sceneStartSeconds) : null,
+        scene_end_seconds:
+          candidate.sceneEndSeconds !== null ? Number(candidate.sceneEndSeconds) : null,
         rank: candidate.rank,
+        retrieval: candidate.retrievalJson,
       })),
       events: events.map((event) => ({
         event_id: event.id,

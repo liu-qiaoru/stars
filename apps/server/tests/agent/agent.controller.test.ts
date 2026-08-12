@@ -98,14 +98,14 @@ async function closeCurrentModule() {
 
 afterEach(closeCurrentModule)
 
-describe('Agent V1 Phase A API', () => {
+describe('Agent V1 API', () => {
   beforeEach(async () => {
     await compileAgentModule()
   })
 
   test('Phase B 处理器或 RightAPI 未就绪时，capabilities 明确不可用且创建前拒绝', async () => {
     expect(agentController.getCapabilities()).toMatchObject({
-      phase: 'A',
+      phase: 'B',
       provider: 'rightapi',
       model: 'qwen3.7-plus',
       run_creation_available: false,
@@ -131,6 +131,75 @@ describe('Agent V1 Phase A API', () => {
     await expect(
       agentController.createRun({ prompt: '', allow_external_text: true }),
     ).rejects.toMatchObject({ status: 400 })
+  })
+
+  test.each([
+    [
+      '部署开关关闭',
+      {
+        allowExternalLlm: false,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+      },
+    ],
+    [
+      'RightAPI 缺少配置',
+      { allowExternalLlm: true, rightCodeBaseUrl: undefined, rightCodeApiKey: undefined },
+    ],
+  ])('%s 时在创建 run 前拒绝，数据库写入为 0', async (_case, overrides) => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => false, prepare: prepareStep }
+    await compileAgentModule(testSettings({ ...overrides, agentExecutorEnabled: true }), handler)
+
+    await expect(
+      agentController.createRun({ prompt: '找视频', allow_external_text: true }),
+    ).rejects.toMatchObject({ status: 503 })
+    const [{ total }] = await db.select({ total: count() }).from(agentRuns)
+    expect(total).toBe(0)
+  })
+
+  test('未授予本次外部文本授权时在创建 run 前拒绝，数据库写入为 0', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+      }),
+      handler,
+    )
+
+    await expect(
+      agentController.createRun({ prompt: '找视频', allow_external_text: false }),
+    ).rejects.toMatchObject({ status: 400 })
+    const [{ total }] = await db.select({ total: count() }).from(agentRuns)
+    expect(total).toBe(0)
+  })
+
+  test('Phase B 不支持 document 媒体范围时在创建 run 前拒绝', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+      }),
+      handler,
+    )
+
+    await expect(
+      agentController.createRun({
+        prompt: '找文档',
+        allow_external_text: true,
+        media_types: ['document'],
+      }),
+    ).rejects.toMatchObject({ status: 400 })
+    const [{ total }] = await db.select({ total: count() }).from(agentRuns)
+    expect(total).toBe(0)
   })
 
   test('能力就绪时创建接口只持久化并立即返回 queued，不同步执行步骤', async () => {
@@ -196,8 +265,8 @@ describe('Agent V1 Phase A API', () => {
     const input = {
       waiting_step_id: waitingStepId,
       client_request_id: 'resume-001',
-      response: '搜索全部已授权素材库',
-    }
+      response: 'continue_as_read_only_search_with_resolved_scope',
+    } as const
 
     const first = await agentController.resumeRun(created.run_id, input)
     const duplicate = await agentController.resumeRun(created.run_id, input)
@@ -221,6 +290,47 @@ describe('Agent V1 Phase A API', () => {
       .from(agentRunInputs)
       .where(eq(agentRunInputs.runId, created.run_id))
     expect(total).toBe(1)
+  })
+
+  test('resume 在共享 Schema 层拒绝自由文本，不保存也不重新排队', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+      }),
+      handler,
+    )
+    const created = await agentController.createRun({
+      prompt: '找视频',
+      allow_external_text: true,
+    })
+    const waitingStepId = '99999999-9999-4999-8999-999999999999'
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'waiting_for_user_input',
+        nextStep: 'searching',
+        waitingStepId,
+        waitingExpiresAt: new Date('2026-08-19T00:00:00.000Z'),
+      })
+      .where(eq(agentRuns.id, created.run_id))
+
+    await expect(
+      agentController.resumeRun(created.run_id, {
+        waiting_step_id: waitingStepId,
+        client_request_id: 'resume-free-text',
+        response: '随便继续吧',
+      } as never),
+    ).rejects.toMatchObject({ status: 400 })
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(agentRunInputs)
+      .where(eq(agentRunInputs.runId, created.run_id))
+    expect(total).toBe(0)
   })
 
   test('澄清等待超过 waiting_expires_at 后明确进入 expired，不会静默重新排队', async () => {
@@ -254,7 +364,7 @@ describe('Agent V1 Phase A API', () => {
       agentController.resumeRun(created.run_id, {
         waiting_step_id: waitingStepId,
         client_request_id: 'resume-expired',
-        response: '搜索全部素材库',
+        response: 'continue_as_read_only_search_with_resolved_scope',
       }),
     ).rejects.toMatchObject({ status: 410 })
     await expect(agentController.getRun(created.run_id)).resolves.toMatchObject({

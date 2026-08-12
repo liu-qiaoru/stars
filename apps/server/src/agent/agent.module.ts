@@ -1,26 +1,43 @@
 import { Module } from '@nestjs/common'
 import { DatabaseModule } from '../database/database.module.js'
+import { SearchModule } from '../search/search.module.js'
 import { AgentController } from './agent.controller.js'
-import { AgentExecutorService, PhaseAPendingAgentStepHandler } from './agent-executor.service.js'
+import { AgentV1StepHandler } from './agent-v1-step.handler.js'
+import { AgentExecutorService } from './agent-executor.service.js'
 import { AgentService } from './agent.service.js'
 import { AGENT_STEP_HANDLER } from './agent.types.js'
+import {
+  AGENT_INTENT_HTTP_CLIENT,
+  AGENT_INTENT_RUNNER,
+  QwenAgentIntentRunner,
+} from './qwen-agent-intent.runner.js'
 
 /**
- * Phase A 只注册持久化状态机和 Server 执行器。旧 Vercel AI SDK/Anthropic tool loop
- * 不再注入运行路径，因此本阶段不可能意外调用外部模型或 SearchService。
+ * Phase B 注册固定的两步运行路径：qwen3.7-plus 只做一次意图分类，随后 Server
+ * 用完整原文调用一次 SearchService。HTTP 客户端和 Runner 都保留注入点，测试因此
+ * 可以使用内存桩，绝不会因导入模块而真实调用 RightAPI。
  */
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, SearchModule],
   controllers: [AgentController],
   providers: [
     AgentService,
     AgentExecutorService,
-    PhaseAPendingAgentStepHandler,
+    AgentV1StepHandler,
+    QwenAgentIntentRunner,
+    {
+      provide: AGENT_INTENT_HTTP_CLIENT,
+      useValue: fetch,
+    },
+    {
+      provide: AGENT_INTENT_RUNNER,
+      useExisting: QwenAgentIntentRunner,
+    },
     {
       provide: AGENT_STEP_HANDLER,
-      useExisting: PhaseAPendingAgentStepHandler,
+      useExisting: AgentV1StepHandler,
     },
   ],
-  exports: [AgentService, AgentExecutorService, AGENT_STEP_HANDLER],
+  exports: [AgentService, AgentExecutorService, AGENT_STEP_HANDLER, AGENT_INTENT_RUNNER],
 })
 export class AgentModule {}

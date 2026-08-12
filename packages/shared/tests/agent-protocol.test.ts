@@ -58,16 +58,16 @@ describe('Agent V1 协议', () => {
     ).toThrow()
   })
 
-  test('恢复请求使用 waiting_step_id 和 client_request_id 形成幂等边界', () => {
+  test('恢复请求使用固定只读搜索动作和 client_request_id 形成幂等边界', () => {
     const input = {
       waiting_step_id: '11111111-1111-4111-8111-111111111111',
       client_request_id: 'resume-001',
-      response: '只在“家庭视频”素材库中搜索',
+      response: 'continue_as_read_only_search_with_resolved_scope',
     }
 
     expect(resumeAgentRunInputSchema.parse(input)).toEqual(input)
     expect(() =>
-      resumeAgentRunInputSchema.parse({ ...input, response: '字'.repeat(2001) }),
-    ).toThrow('response must contain at most 2000 Unicode characters')
+      resumeAgentRunInputSchema.parse({ ...input, response: '只在家庭视频中搜索' }),
+    ).toThrow('continue_as_read_only_search_with_resolved_scope')
   })
 })

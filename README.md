@@ -73,7 +73,7 @@
 | 层 | 技术 |
 | --- | --- |
 | 前端 | Next.js 16 / React 19 / Tailwind 4 / TypeScript |
-| 后端 API | NestJS（Express adapter）/ Zod；Agent V1 Phase A 仅提供持久化状态机，尚未接入外部模型 |
+| 后端 API | NestJS（Express adapter）/ Zod；Agent V1 Phase B 使用一次 qwen3.7-plus 意图分类和一次本地原文搜索 |
 | 数据库 | PostgreSQL 16（Drizzle ORM + node-postgres） |
 | 向量库 | Qdrant（JS client + Python HTTP client） |
 | Python worker | FFmpeg、ffprobe、PySceneDetect、SigLIP2（torch/transformers）、faster-whisper、Qwen2.5-VL（可选 Caption） |
@@ -317,7 +317,7 @@ brew install --cask dbeaver-community
 | `agent_run_candidates` | 冻结候选身份 | `file_generation`、`asset_id`、`scene_id`、`rank` |
 | `agent_side_effects` | Phase C 预留的副作用幂等事实 | `effect_key`、`status`、`job_id` |
 | `agent_run_events` | Agent 事件流 | `event_type`、`tool_call_id`、`payload_json` |
-| `agent_tool_calls` | 旧 Agent MVP 工具调用审计（Phase A 不再写入） | `tool_name`、`status`、`requires_confirmation` |
+| `agent_tool_calls` | 旧 Agent MVP 工具调用审计（Phase B 固定工作流不再写入） | `tool_name`、`status`、`requires_confirmation` |
 
 ### 常用查看 SQL
 

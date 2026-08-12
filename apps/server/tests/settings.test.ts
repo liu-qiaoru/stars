@@ -163,14 +163,26 @@ describe('createSettings', () => {
     ).toThrow('SERVER_PORT must be a valid port')
   })
 
-  test('Agent 租约必须长于活动硬超时，避免正常步骤被提前接管', () => {
+  test('Agent 租约必须覆盖最长硬超时和 5 秒提交余量', () => {
     expect(() =>
       createSettings({
         DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
         QDRANT_URL: 'http://localhost:6333',
-        AGENT_LEASE_DURATION_MS: '120000',
+        AGENT_LEASE_DURATION_MS: '124999',
         AGENT_ACTIVITY_TIMEOUT_MS: '120000',
       }),
-    ).toThrow('AGENT_LEASE_DURATION_MS must be greater than AGENT_ACTIVITY_TIMEOUT_MS')
+    ).toThrow(
+      'AGENT_LEASE_DURATION_MS must be at least max(AGENT_ACTIVITY_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS) + 5000',
+    )
+
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        AGENT_TOOL_TIMEOUT_MS: '120000',
+        AGENT_ACTIVITY_TIMEOUT_MS: '100000',
+        AGENT_LEASE_DURATION_MS: '124999',
+      }),
+    ).toThrow('AGENT_LEASE_DURATION_MS must be at least')
   })
 })

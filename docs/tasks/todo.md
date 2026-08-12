@@ -49,6 +49,39 @@ Review：
   122 项测试通过，`cloud_calls=0`。双轴复审剩余 Standards 硬违规 0、Spec 缺口 0；仅保留
   一个非阻断的 Data Clumps 判断项，建议 Phase B 再把重复租约写权字段收拢为领域类型。
 
+## Agent V1 Phase B：qwen3.7-plus 单次意图识别与一次原文搜索
+
+- Start：2026-08-12。只实现一个固定的两步 Server 工作流：先用 RightAPI
+  `qwen3.7-plus` 非思考模式识别一次 AgentIntent，再用用户完整原文调用一次本地
+  SearchService。它不是模型自主 Tool Calling 循环。
+- 范围边界：不实施 Phase C 的 Web 轮询、候选选择、导出确认；不实施 Rerank、VLM、
+  DeepSeek 查询扩展、媒体扫描、重新索引或重新评测。正式 RightAPI 调用仍需另行列出
+  精确外发数据、次数和最坏费用并等待用户授权。
+
+- [x] 新增独立、可注入的 Qwen AgentIntent Runner，固定 `qwen3.7-plus`、非思考模式和
+  唯一强制 `extract_agent_intent` Tool Call。
+- [x] 严格校验 HTTP/响应模型/`stop_reason`/唯一工具名/Zod Schema/长度/原文连续子串，
+  只允许 NFC、CRLF→LF 和 `source_text` 两端空白归一化。
+- [x] 由 Server 本地解析素材库 UUID 并限制媒体/素材库范围；不存在、重名或越权时明确失败。
+- [x] 固定使用完整原文、`query_expansion_mode=original` 和 `ranking_mode=rrf` 搜索一次，
+  并在同一短事务中冻结候选身份、文件 generation、场景边界、排名和召回证据。
+- [x] Provider 调用前持久化 `dispatched`、输入指纹和 `step_attempt_id`；不明结果进入
+  `outcome_unknown`，只有显式 `/retry-unknown` 才生成新尝试。
+- [x] 同步架构、API、环境变量和真实数据库迁移审计，并完成定向/全量验证与双轴 Review。
+
+Review：
+
+- Result：Phase B 已完成并停在 Phase C 前。普通 run 只执行一次 AgentIntent 与一次原文
+  搜索；非法模型输出、范围扩大和候选身份变化均明确失败。重启只从 PostgreSQL 最后提交
+  状态继续，旧 `lease_version` 无法提交迟到结果或候选。
+- Migration：真实 PostgreSQL 先备份，再原地登记与现有 Schema 等价的 `0000`，最后只执行
+  `0001`。迁移前后 35 个已索引文件、7,940 个 Asset、1,919 个场景、7,564 个已索引
+  Vector Ref 和 9,910 个 Job 均未减少；Qdrant 三个 Collection 合计 7,564 个 Point 未变化。
+- Validation：`corepack pnpm check` 通过 Shared 10、Web 47、Server 186 项测试及 Web
+  生产构建；Python Worker 122 项测试、lint 和 `git diff --check` 通过。双轴 Review 结果见
+  本阶段最终复审记录。真实 RightAPI 调用、费用和数据外发均为 0；所有 Provider 测试使用
+  可注入测试桩。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

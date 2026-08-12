@@ -10,12 +10,13 @@ import {
 } from '../../src/agent/agent-run.repository.js'
 import {
   agentRunAuthorizations,
+  agentRunCandidates,
   agentRunEvents,
   agentRunSteps,
   agentRuns,
 } from '../../src/database/schema.js'
 import { createTestDatabase } from '../database/test-db.js'
-import { eq } from 'drizzle-orm'
+import { count, eq } from 'drizzle-orm'
 
 describe('Agent run 租约仓库', () => {
   test('创建 run 时原子保存排队状态、单 run 授权和开始事件', async () => {
@@ -148,10 +149,28 @@ describe('Agent run 租约仓库', () => {
           currentStatus: 'extracting_intent',
           transition: { status: 'searching', nextStep: 'searching' },
           outputJson: { intent: 'stale' },
+          candidates: [
+            {
+              candidateKey: 'video:33333333-3333-4333-8333-333333333333',
+              fileId: '11111111-1111-4111-8111-111111111111',
+              fileGeneration: 1,
+              assetId: '22222222-2222-4222-8222-222222222222',
+              sceneId: '33333333-3333-4333-8333-333333333333',
+              sceneStartSeconds: 0,
+              sceneEndSeconds: 1,
+              rank: 1,
+              retrievalJson: { score: 1 },
+            },
+          ],
         },
         takeoverAt,
       )
       expect(late).toBeUndefined()
+      const [{ total: staleCandidateCount }] = await testDb.db
+        .select({ total: count() })
+        .from(agentRunCandidates)
+        .where(eq(agentRunCandidates.runId, run.id))
+      expect(staleCandidateCount).toBe(0)
 
       const committed = await commitAgentStep(
         testDb.db,

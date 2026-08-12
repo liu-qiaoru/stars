@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import type { AgentNextStep, AgentRunStatus } from './agent.types.js'
+import type { AgentNextStep, AgentRunStatus, FrozenAgentCandidate } from './agent.types.js'
 import type { Database } from '../database/repositories.js'
 import {
   agentRunAuthorizations,
@@ -71,7 +71,9 @@ export async function createDurableAgentRun(
       runId,
       allowExternalText: input.allowExternalText,
       allowExternalVisual: input.allowExternalVisual,
-      textScopeJson: input.allowExternalText ? { fields: ['user_prompt'] } : { fields: [] },
+      textScopeJson: input.allowExternalText
+        ? { fields: ['user_prompt', 'deidentified_capability_boundary'] }
+        : { fields: [] },
       visualScopeJson: input.allowExternalVisual
         ? { fields: ['candidate_frames'] }
         : { fields: [] },
@@ -278,6 +280,7 @@ export async function commitAgentStep(
       waitingExpiresAt?: Date
     }
     outputJson: unknown
+    candidates?: FrozenAgentCandidate[]
   },
   now = new Date(),
 ) {
@@ -356,6 +359,28 @@ export async function commitAgentStep(
     if (!step) {
       throw new Error('Claimed Agent step disappeared before commit')
     }
+    if (input.candidates?.length) {
+      // 候选快照与 searching → succeeded 使用同一个事务。任何候选身份不完整、唯一键
+      // 冲突或外键错误都会回滚 run 状态，绝不留下“成功但候选只写了一部分”的事实。
+      await tx.insert(agentRunCandidates).values(
+        input.candidates.map((candidate) => ({
+          id: randomUUID(),
+          runId: input.runId,
+          candidateKey: candidate.candidateKey,
+          fileId: candidate.fileId,
+          fileGeneration: candidate.fileGeneration,
+          assetId: candidate.assetId,
+          sceneId: candidate.sceneId,
+          sceneStartSeconds:
+            candidate.sceneStartSeconds === null ? null : String(candidate.sceneStartSeconds),
+          sceneEndSeconds:
+            candidate.sceneEndSeconds === null ? null : String(candidate.sceneEndSeconds),
+          rank: candidate.rank,
+          retrievalJson: candidate.retrievalJson,
+          createdAt: now,
+        })),
+      )
+    }
     await tx.insert(agentRunEvents).values({
       id: randomUUID(),
       runId: input.runId,
@@ -363,6 +388,89 @@ export async function commitAgentStep(
       payloadJson: {
         step_attempt_id: input.stepAttemptId,
         next_status: input.transition.status,
+      },
+      createdAt: now,
+    })
+    return run
+  })
+}
+
+/**
+ * 按同一组租约隔离条件提交步骤失败。明确失败清除当前尝试并成为终态；结果不明保留
+ * step_attempt_id，只有 /retry-unknown 能授权后续新尝试。
+ */
+export async function commitAgentStepFailure(
+  db: Database,
+  input: {
+    runId: string
+    leaseOwner: string
+    leaseVersion: number
+    stepAttemptId: string
+    currentStatus: AgentRunStatus
+    errorCode: string
+    errorMessage: string
+    outcomeUnknown: boolean
+  },
+  now = new Date(),
+) {
+  return db.transaction(async (transaction) => {
+    const tx = transaction as Database
+    const status = input.outcomeUnknown ? 'outcome_unknown' : 'failed'
+    const [run] = await tx
+      .update(agentRuns)
+      .set({
+        status,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        currentStepAttemptId: input.outcomeUnknown ? input.stepAttemptId : null,
+        externalCallStatus: input.outcomeUnknown ? 'outcome_unknown' : null,
+        errorCode: input.errorCode,
+        errorMessage: input.errorMessage,
+        finishedAt: input.outcomeUnknown ? null : now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(agentRuns.id, input.runId),
+          eq(agentRuns.status, input.currentStatus),
+          eq(agentRuns.leaseOwner, input.leaseOwner),
+          eq(agentRuns.leaseVersion, input.leaseVersion),
+          eq(agentRuns.currentStepAttemptId, input.stepAttemptId),
+        ),
+      )
+      .returning()
+    if (!run) return undefined
+
+    const [step] = await tx
+      .update(agentRunSteps)
+      .set({
+        status,
+        // 已收到 HTTP/解析结果的外部步骤从 dispatched 进入 completed；prepare 阶段或
+        // SearchService 等本地步骤失败时继续保留 not_dispatched，避免审计误报云调用。
+        externalCallStatus: input.outcomeUnknown
+          ? 'outcome_unknown'
+          : sql`case when ${agentRunSteps.externalCallStatus} = 'dispatched' then 'completed' else ${agentRunSteps.externalCallStatus} end`,
+        errorCode: input.errorCode,
+        errorMessage: input.errorMessage,
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(agentRunSteps.runId, input.runId),
+          eq(agentRunSteps.stepAttemptId, input.stepAttemptId),
+          eq(agentRunSteps.status, 'running'),
+        ),
+      )
+      .returning()
+    if (!step) throw new Error('Claimed Agent step disappeared before failure commit')
+    await tx.insert(agentRunEvents).values({
+      id: randomUUID(),
+      runId: input.runId,
+      eventType: input.outcomeUnknown ? 'external_outcome_unknown' : 'step_failed',
+      payloadJson: {
+        step_attempt_id: input.stepAttemptId,
+        error_code: input.errorCode,
       },
       createdAt: now,
     })
@@ -612,6 +720,11 @@ export async function resumeWaitingAgentRun(
   },
   now = new Date(),
 ): Promise<UserInputResult> {
+  // Phase B 不让模型在澄清后重新解释自由文本。唯一固定动作表示用户明确接受 Server
+  // 已解析并展示的安全范围；其他文本无法可靠改变旧 AgentIntent，因此直接拒绝。
+  if (input.response !== 'continue_as_read_only_search_with_resolved_scope') {
+    return { kind: 'invalid_state' }
+  }
   const [existingInput] = await db
     .select()
     .from(agentRunInputs)
@@ -701,8 +814,8 @@ export async function resumeWaitingAgentRun(
       .update(agentRuns)
       .set({
         status: 'queued',
-        // Phase A 的澄清点位于 AgentIntent 之后。恢复必须继续搜索，不能因调用方
-        // 遗漏 next_step 而再次外发用户原文做第二轮意图识别。
+        // 固定澄清动作只确认使用已持久化的 resolved_scope；恢复继续搜索且不再次外发
+        // 用户原文。自由文本在事务前已拒绝，因此不会被保存后静默忽略。
         nextStep: 'searching',
         waitingStepId: null,
         waitingExpiresAt: null,

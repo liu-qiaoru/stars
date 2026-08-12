@@ -8,7 +8,7 @@ import {
 } from '@local-media-agent/shared/schemas'
 import { AgentService } from './agent.service.js'
 
-/** Agent V1 Phase A HTTP API：Controller 只转发已校验请求，状态迁移在 AgentService/仓库中完成。 */
+/** Agent V1 HTTP API：Controller 只转发请求；Phase B 的模型与搜索工作由后台执行器完成。 */
 @Controller('agent')
 export class AgentController {
   constructor(@Inject(AgentService) private readonly agentService: AgentService) {}

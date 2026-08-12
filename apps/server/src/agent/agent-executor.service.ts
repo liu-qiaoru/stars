@@ -12,20 +12,26 @@ import type { Database } from '../database/repositories.js'
 import {
   claimNextAgentRun,
   commitAgentStep,
+  commitAgentStepFailure,
   expireWaitingAgentRuns,
   finalizeCancelledAgentRuns,
   markAgentExternalCallDispatched,
   recoverExpiredAgentRuns,
   timeoutActiveAgentRuns,
 } from './agent-run.repository.js'
-import { AGENT_STEP_HANDLER, type AgentStepHandler } from './agent.types.js'
+import {
+  AGENT_STEP_HANDLER,
+  AgentStepExecutionError,
+  type AgentRunStatus,
+  type AgentStepHandler,
+} from './agent.types.js'
 
 /**
  * NestJS 内的 Agent run 执行器。它定时扫描 PostgreSQL，一次最多领取一个 run；
  * Python Worker 不读取这些状态，也不决定 Agent 的下一步。
  *
- * Phase A 默认处理器未就绪，执行器只做过期/恢复维护。Phase B 提供 AgentIntent
- * handler 后，prepare 只构造请求，Executor 先提交 dispatched，再在事务外执行网络调用。
+ * Phase B handler 的 prepare 只构造请求；Executor 先提交 dispatched，再在事务外
+ * 执行网络调用。这样崩溃恢复能区分“尚未发送”和“结果未知”，避免静默重放计费请求。
  */
 @Injectable()
 export class AgentExecutorService implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -54,7 +60,14 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
   async runOnce(now = new Date()) {
     if (this.isRunning) return
     this.isRunning = true
-    let activeContext: { runId: string; stepAttemptId: string; leaseVersion: number } | undefined
+    let activeContext:
+      | {
+          runId: string
+          stepAttemptId: string
+          leaseVersion: number
+          currentStatus: AgentRunStatus
+        }
+      | undefined
     try {
       await expireWaitingAgentRuns(this.db, now)
       await finalizeCancelledAgentRuns(this.db, now)
@@ -75,6 +88,7 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
         runId: claim.run.id,
         stepAttemptId: claim.step.stepAttemptId,
         leaseVersion: claim.run.leaseVersion,
+        currentStatus: claim.run.status as AgentRunStatus,
       }
 
       const prepared = await this.stepHandler.prepare({
@@ -121,16 +135,29 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
       ])
       if (timeoutHandle) clearTimeout(timeoutHandle)
       if (execution.kind === 'timed_out') {
-        await timeoutActiveAgentRuns(this.db, {
-          activityTimeoutMs: this.settings.agentActivityTimeoutMs,
-          now: new Date(now.getTime() + this.settings.agentActivityTimeoutMs),
-        })
+        if (prepared.external) {
+          await commitAgentStepFailure(
+            this.db,
+            {
+              ...activeContext,
+              leaseOwner: this.leaseOwner,
+              errorCode: 'AGENT_EXTERNAL_OUTCOME_UNKNOWN',
+              errorMessage: '外部请求已派发，但活动硬超时前未收到可确认的响应。',
+              outcomeUnknown: true,
+            },
+            new Date(now.getTime() + this.settings.agentActivityTimeoutMs),
+          )
+        } else {
+          await timeoutActiveAgentRuns(this.db, {
+            activityTimeoutMs: this.settings.agentActivityTimeoutMs,
+            now: new Date(now.getTime() + this.settings.agentActivityTimeoutMs),
+          })
+        }
         // JavaScript Promise 不能强制终止任意底层调用。这里明确不再 await，也不提交其
-        // 迟到结果；catch 只防止迟到异常成为未处理拒绝，真正状态已持久化为 timed_out。
-        void executePromise.catch((lateError: unknown) => {
-          const message = lateError instanceof Error ? lateError.message : String(lateError)
+        // 迟到结果；外部步骤已是 outcome_unknown，本地步骤已是 timed_out。
+        void executePromise.catch(() => {
           this.logger.warn(
-            `Discarded late timed-out Agent error run_id=${claim.run.id} step_attempt_id=${claim.step.stepAttemptId} lease_version=${claim.run.leaseVersion} error=${message}`,
+            `Discarded late timed-out Agent error run_id=${claim.run.id} step_attempt_id=${claim.step.stepAttemptId} lease_version=${claim.run.leaseVersion}`,
           )
         })
         return
@@ -146,6 +173,7 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
           currentStatus: claim.run.status as 'extracting_intent' | 'searching',
           transition: result.transition,
           outputJson: result.outputJson,
+          candidates: result.candidates,
         },
         new Date(),
       )
@@ -155,27 +183,29 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
         )
       }
     } catch (error) {
-      // Phase B 将按“明确失败”与“结果不明”分类提交错误。Phase A 不吞错，
-      // 先保留租约和步骤尝试，让恢复扫描根据 dispatched 事实做安全决定。
-      const message = error instanceof Error ? error.message : String(error)
+      const stepError =
+        error instanceof AgentStepExecutionError
+          ? error
+          : new AgentStepExecutionError(
+              'AGENT_STEP_INTERNAL_ERROR',
+              'Agent 步骤发生未分类的内部错误。',
+            )
+      if (activeContext) {
+        await commitAgentStepFailure(this.db, {
+          ...activeContext,
+          leaseOwner: this.leaseOwner,
+          errorCode: stepError.code,
+          errorMessage: stepError.message,
+          outcomeUnknown: stepError.outcomeUnknown,
+        })
+      }
+      // 日志只包含稳定身份和脱敏错误码。不得输出 Provider 原始体、密钥、本地路径或媒体文本。
       const identity = activeContext
         ? ` run_id=${activeContext.runId} step_attempt_id=${activeContext.stepAttemptId} lease_version=${activeContext.leaseVersion}`
         : ''
-      this.logger.error(`Agent executor iteration failed:${identity} error=${message}`)
+      this.logger.error(`Agent executor iteration failed:${identity} code=${stepError.code}`)
     } finally {
       this.isRunning = false
     }
-  }
-}
-
-/** Phase A 不会伪造 AgentIntent 结果；没有 Phase B handler 时 capabilities 明确不可用。 */
-@Injectable()
-export class PhaseAPendingAgentStepHandler implements AgentStepHandler {
-  isReady() {
-    return false
-  }
-
-  async prepare(): Promise<never> {
-    throw new Error('Agent V1 Phase B step handler is not implemented')
   }
 }

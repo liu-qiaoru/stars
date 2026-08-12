@@ -470,12 +470,12 @@ Completed job result：
 
 返回 Agent V1 的部署开关、RightAPI 配置和步骤处理器可用性。响应不包含 API Key。
 
-Phase A 默认返回 `run_creation_available=false`，因为 Phase B 的 `qwen3.7-plus`
-AgentIntent handler 尚未实施。这能阻止系统创建一个无法向前执行的假成功 run。
+Phase B 只有在外部文本部署开关、RightAPI URL/Key、后台执行器和 AgentIntent Runner
+同时就绪时才返回 `run_creation_available=true`。任一条件缺失都会阻止创建假成功 run。
 
 ```json
 {
-  "phase": "A",
+  "phase": "B",
   "provider": "rightapi",
   "model": "qwen3.7-plus",
   "run_creation_available": false,
@@ -484,7 +484,7 @@ AgentIntent handler 尚未实施。这能阻止系统创建一个无法向前执
     "configured": false,
     "step_handler_ready": false,
     "available": false,
-    "allowed_fields": ["user_prompt"]
+    "allowed_fields": ["user_prompt", "deidentified_capability_boundary"]
   },
   "external_visual": {
     "deployment_enabled": false,
@@ -517,7 +517,7 @@ AgentIntent handler 尚未实施。这能阻止系统创建一个无法向前执
 
 - `prompt` 最多 4000 个 Unicode 字符，超限拒绝，不静默截断。
 - `allow_external_text` 是本 run 发送用户原 prompt 的授权，Agent V1 必须为 `true`。
-- `allow_external_visual` 是独立视觉授权；Phase A 必须为 `false`，且没有发图入口。
+- `allow_external_visual` 是独立视觉授权；Phase B 必须为 `false`，且没有发图入口。
 - `library_ids` / `media_types` 是 Server 强制范围上限，不由模型扩大。
 
 ```json
@@ -549,6 +549,9 @@ Server 在写数据库前返回 503/400，不创建假成功 run。
   "waiting_step_id": null,
   "waiting_expires_at": null,
   "error": null,
+  "intent": null,
+  "conditions": [],
+  "resolved_scope": null,
   "authorization": {
     "allow_external_text": true,
     "allow_external_visual": false,
@@ -571,6 +574,12 @@ Server 在写数据库前返回 503/400，不创建假成功 run。
 }
 ```
 
+意图步骤提交后，`intent` 返回严格校验的分类结果；`conditions` 中每项包含由 Server
+生成的 `condition_id`、原始 `source_text` 和仅用于校验的归一化文本；`resolved_scope`
+返回 Server 本地解析后的 `search_scope`、媒体类型和素材库 UUID。候选还会返回
+`file_id`、`file_generation`、`asset_id`、`scene_id`、场景秒数、`rank` 和 `retrieval`。
+`retrieval` 只保存 RRF 排名证据，不包含文件路径、Caption 或转录原文。
+
 ## POST /agent/runs/{id}/resume
 
 只处理 `waiting_for_user_input` 澄清。`client_request_id` 在同一 run 内唯一，重复请求
@@ -580,10 +589,13 @@ Server 在写数据库前返回 503/400，不创建假成功 run。
 {
   "waiting_step_id": "11111111-1111-4111-8111-111111111111",
   "client_request_id": "resume-001",
-  "response": "搜索全部已授权素材库"
+  "response": "continue_as_read_only_search_with_resolved_scope"
 }
 ```
 
+Phase B 只接受固定动作 `continue_as_read_only_search_with_resolved_scope`，表示用户明确把
+歧义目标覆盖为“无副作用的只读搜索”，并接受页面展示的 `resolved_scope`；这同时排除导出等
+副作用解释。其他自由文本不符合共享 Schema，返回 400，不会保存后静默忽略，也不会再次调用 AgentIntent。
 成功后返回 `{ "run_id": "...", "status": "queued" }`。等待步骤过期返回 410，
 同时 run 进入 `expired` 终态；步骤身份或状态不匹配返回 409。成功恢复后固定
 `next_step=searching`，不会再次执行已经完成的 AgentIntent。
@@ -599,7 +611,7 @@ Server 在写数据库前返回 503/400，不创建假成功 run。
 
 `queued` 和等待态没有正在提交的步骤，可直接进入 `cancelled`。
 `extracting_intent` / `searching` 先进入 `cancel_requested`，立即使旧结果的状态条件失效；
-租约安全到期后由 Server 转成 `cancelled`。已创建的独立导出 job 不属于 Phase A。
+租约安全到期后由 Server 转成 `cancelled`。已创建的独立导出 job 不属于 Phase B。
 
 ## POST /agent/runs/{id}/retry-unknown
 
@@ -614,10 +626,11 @@ Server 在写数据库前返回 503/400，不创建假成功 run。
 接受后创建新的用户授权输入并回到 `queued`；下次领取会生成新
 `step_attempt_id`。普通 `/resume` 不得代替该授权。
 
-## Phase A 暂不提供的 Agent API
+## Phase B 暂不提供的 Agent API
 
-`/export-selection` 和 `/confirm` 属于 Phase C 安全导出闭环。Phase A 不保留旧的非事务确认路由，
-也不创建 `export_clip` / `index_media` 副作用 job。
+`/export-selection` 和 `/confirm` 属于 Phase C 安全导出闭环。Phase B 不保留旧的非事务确认路由，
+也不创建 `export_clip` / `index_media` 副作用 job。Web 轮询、候选选择、Rerank 和 VLM
+复核同样不属于 Phase B。
 
 ## 单视频重索引接口
 

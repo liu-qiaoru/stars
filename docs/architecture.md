@@ -31,13 +31,14 @@ docs            架构、API 和实施文档
 
 - 前端：Next.js、React、TypeScript、Tailwind。
 - 主控 API：TypeScript、NestJS、默认 Express adapter、Zod。
-- Agent 持久化执行：NestJS Server + PostgreSQL 租约状态机。Phase A 不调用外部模型。
+- Agent 持久化执行：NestJS Server + PostgreSQL 租约状态机；Phase B 可按部署开关调用
+  RightAPI `qwen3.7-plus` 做一次文本意图分类。
 - 数据访问：PostgreSQL、Drizzle、node-postgres。
 - 向量数据库：Qdrant，使用 Qdrant JS client。Collection、point、payload 和 PostgreSQL 引用结构见 `docs/vector-index-design.md`。
 - 后台任务：PostgreSQL-backed jobs。Redis 只作为可选实时事件/pub-sub 通道。
 - Python worker：FFmpeg、ffprobe、PySceneDetect、SigLIP2、faster-whisper、Caption 文本嵌入模型，以及通过 Ollama 调用的 Qwen2.5-VL。
-- Agent 编排：Server 固定状态迁移、租约隔离与逐步持久化。Phase B 才接入
-  RightAPI `qwen3.7-plus` 单次 AgentIntent；Python 不负责 Agent 决策。
+- Agent 编排：Server 固定状态迁移、租约隔离与逐步持久化。Phase B 已接入独立的
+  RightAPI `qwen3.7-plus` 单次 AgentIntent Runner；Python 不负责 Agent 决策。
 - 外部多模态模型层：通过 TypeScript Model Gateway 接入 OpenAI、Claude、Gemini 或其他提供商。
 - 存储：本地文件系统，用于源素材引用、缓存文件、缩略图、抽帧、转写文本和导出剪辑。
 
@@ -102,7 +103,7 @@ LibrariesModule
 JobsModule
 MediaModule
 SearchModule
-AgentModule        持有 Server Agent 租约、恢复状态机和 Phase A API
+AgentModule        持有 Server Agent 租约、Phase B 固定步骤和恢复 API
 ModelGatewayModule
 ```
 
@@ -161,7 +162,7 @@ Retrieval 组合 Qdrant 向量搜索、PostgreSQL full-text search 和 PostgreSQ
 Agent Runtime 位于 TypeScript/NestJS Server 主控层。Agent 是固定工作流编排器，
 不是搜索引擎本身，也不是模型自主 Tool Calling 循环。
 
-Phase A 当前已实现的执行模型：
+Phase B 当前已实现的执行模型：
 
 ```text
 POST /agent/runs
@@ -170,17 +171,21 @@ POST /agent/runs
 → AgentExecutorService 使用条件 UPDATE 领取租约并递增 lease_version
 → 同一短事务创建唯一 step_attempt_id
 → 若为外部步骤，先持久化 dispatched + 输入指纹
-→ 在事务外等待 Provider 或 SearchService
+→ 在事务外调用一次 qwen3.7-plus AgentIntent Runner
+→ 提交严格校验后的意图和 Server 本地解析的素材范围
+→ 用用户完整原文、original、rrf 在事务外调用一次 SearchService
 → 短事务用 lease_owner + lease_version + status + step_attempt_id 提交
+→ 同一事务冻结 agent_run_candidates 和 succeeded 状态
 ```
 
 Lease（租约）是 Server 执行器的限时工作证。`lease_version` 是 Fencing Token
 （隔离旧持有者的令牌）：新执行器接管后版本递增，旧执行器的迟到结果只会
-更新 0 行，必须丢弃。外部请求若已记为 `dispatched` 但未完成，租约过期后
-进入 `outcome_unknown`，只能由 `/retry-unknown` 的新用户授权重试。
+更新 0 行，必须丢弃。外部请求若已记为 `dispatched` 但未完成，当前执行器仍在运行时会在
+活动硬超时点立即提交 `outcome_unknown`；若进程已经崩溃，则由租约过期恢复扫描提交同一状态。
+两条路径都只能由 `/retry-unknown` 的新用户授权重试。
 纯本地活动步骤受 `AGENT_ACTIVITY_TIMEOUT_MS` 硬上限约束，默认 120 秒；超时后
 run、step 和审计事件在同一短事务内进入 `timed_out`。已经标记 `dispatched` 的外部请求
-不按本地超时重放，而是在租约过期后进入 `outcome_unknown`。
+不按纯本地超时处理或自动重放，而是按上述两条路径进入 `outcome_unknown`。
 
 PostgreSQL 中的恢复事实分工：
 
@@ -189,22 +194,27 @@ PostgreSQL 中的恢复事实分工：
 - `agent_run_inputs`：`resume`/`cancel`/`retry-unknown` 用户输入，由
   `(run_id, client_request_id)` 唯一约束保证幂等。
 - `agent_run_authorizations`：每个 run 的文本/视觉外发授权，两者不能互相替代。
-- `agent_run_candidates`：Phase B 搜索后冻结 `file_generation` 等候选身份。
+- `agent_run_candidates`：Phase B 搜索后冻结 `file_generation`、Asset/场景身份、边界、
+  RRF 排名和召回证据。提交前重新核对文件版本及 Server 强制范围。
 - `agent_side_effects`：Phase C 使用的唯一副作用幂等键；Phase A 只建协议，不创建导出 job。
 
-Phase A 默认处理器明确报告未就绪：`GET /agent/capabilities` 返回
-`run_creation_available=false`，`POST /agent/runs` 在写数据库前返回 503。因此当前没有外部
-模型调用，也没有真实搜索。Phase B 将注册 RightAPI `qwen3.7-plus` 单次 AgentIntent
-handler；Phase C 才实现候选选择与安全确认导出。
+Phase B 注册了独立、可注入的 RightAPI `qwen3.7-plus` AgentIntent Runner。它使用
+Anthropic Messages 兼容接口、非思考模式和唯一强制 `extract_agent_intent` Tool Call，
+只接收本次用户原文与去标识化能力边界。模型不输出 query，也看不到候选、Caption、转录、
+文件名或路径。HTTP/Tool Call/Zod Schema/原文连续子串/范围任一校验失败时 run 明确失败，
+不会从自由文本猜 JSON 或自动修复。`ALLOW_EXTERNAL_LLM`、RightAPI 配置或执行器未就绪时，
+创建接口仍在数据库写入前拒绝。Phase C 才实现 Web 轮询、候选选择与安全确认导出。
 
 NestJS AgentModule 组织：
 
 ```text
 apps/server/src/agent/
-  agent.controller.ts          Phase A HTTP API
+  agent.controller.ts          run、恢复、取消和能力 HTTP API
   agent.service.ts             输入校验、capabilities 和用例边界
   agent-run.repository.ts      短事务、租约、幂等输入和恢复状态机
   agent-executor.service.ts    定时领取、过期恢复与事务外步骤执行
+  qwen-agent-intent.runner.ts  唯一强制 Tool Call 和严格 AgentIntent 校验
+  agent-v1-step.handler.ts     一次意图识别、一次原文搜索和候选快照
   agent.types.ts               可注入的步骤 handler 协议
 ```
 
