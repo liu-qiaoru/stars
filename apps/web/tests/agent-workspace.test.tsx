@@ -50,6 +50,13 @@ function client(overrides: Record<string, unknown> = {}) {
     confirmAgentExport: vi.fn(),
     getJob: vi.fn(),
     retryUnknownAgentRun: vi.fn(),
+    mediaContentUrl: vi.fn(
+      (
+        id: string,
+        range: { startTimeSeconds?: number | null; endTimeSeconds?: number | null } = {},
+      ) =>
+        `http://media.test/media/${id}/content#t=${range.startTimeSeconds},${range.endTimeSeconds}`,
+    ),
     ...overrides,
   }
 }
@@ -156,7 +163,7 @@ describe('AgentWorkspace', () => {
     )
   })
 
-  test('候选显示 RRF 排名边界、尚未审核和未验证条件，并可用带标签控件选择时间范围', async () => {
+  test('视频候选可预览场景片段，并可用带标签控件选择时间范围', async () => {
     const waitingRun = {
       ...terminalRun(),
       status: 'waiting_for_export_selection',
@@ -216,6 +223,17 @@ describe('AgentWorkspace', () => {
     fireEvent.click(screen.getByRole('button', { name: /启动任务/i }))
 
     const candidateButton = await screen.findByRole('button', { name: /选择候选 1/i })
+    // 回归截图中的 Phase C 缺口：候选已有 file_id 和场景边界时，页面必须提供真实
+    // 视频控件，而不能只显示文字证据。固定字面 URL 同时验证时间片段没有丢失。
+    const video = screen.getByLabelText('播放候选 1，场景 10–30 秒')
+    expect(video).toHaveAttribute('controls')
+    expect(video).toHaveAttribute('src', 'http://media.test/media/file-1/content#t=10,30')
+    expect(apiClient.mediaContentUrl).toHaveBeenCalledWith('file-1', {
+      startTimeSeconds: 10,
+      endTimeSeconds: 30,
+    })
+    candidateButton.focus()
+    expect(candidateButton).toHaveFocus()
     expect(screen.getByText('尚未审核')).toBeInTheDocument()
     expect(screen.getByText('未验证条件')).toBeInTheDocument()
     expect(screen.getByText(/RRF.*只表示排序，不是相关概率/)).toBeInTheDocument()

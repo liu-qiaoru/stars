@@ -30,13 +30,18 @@ type AgentApiClient = Pick<
   | 'confirmAgentExport'
   | 'getJob'
   | 'retryUnknownAgentRun'
+  | 'mediaContentUrl'
 >
 
 /**
  * Phase C 工作台只编排持久化 API。刷新或 Server 重启后，页面读取 PostgreSQL 中已经
  * 提交的 intent、候选和 Job，不会在浏览器重复调用 AgentIntent 或 SearchService。
  */
-export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: AgentApiClient }) {
+export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
+  // Agent 页有配置读取和状态轮询两个 Effect；一次挂载内复用默认 Client，避免状态
+  // 更新时改变依赖对象并重新启动请求。props 注入的 fake Client 仍用于自动化测试。
+  const defaultClient = useMemo(() => createApiClient(), [])
+  const client = apiClient ?? defaultClient
   const [prompt, setPrompt] = useState('')
   const [run, setRun] = useState<AgentRunDetail | null>(null)
   const [job, setJob] = useState<JobSummary | null>(null)
@@ -66,7 +71,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
 
   useEffect(() => {
     const controller = new AbortController()
-    void apiClient
+    void client
       .getAgentSettings({ signal: controller.signal })
       .then((settings) => setPollIntervalMs(settings.editable.web_poll_interval_ms))
       .catch((error: unknown) => {
@@ -77,19 +82,19 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
         }
       })
     return () => controller.abort()
-  }, [apiClient])
+  }, [client])
 
   useEffect(() => {
     const persistedRunId = window.localStorage.getItem('agent:last-run-id')
     if (!persistedRunId) return
     const controller = new AbortController()
-    void apiClient
+    void client
       .getAgentRun(persistedRunId, { signal: controller.signal })
       .then(async (persistedRun) => {
         setRun(persistedRun)
         restoreConfirmation(persistedRun)
         if (persistedRun.export_job?.id) {
-          setJob(await apiClient.getJob(persistedRun.export_job.id, { signal: controller.signal }))
+          setJob(await client.getJob(persistedRun.export_job.id, { signal: controller.signal }))
         }
       })
       .catch((error: unknown) => {
@@ -101,7 +106,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
         }
       })
     return () => controller.abort()
-  }, [apiClient])
+  }, [client])
 
   const refreshPersistedState = useCallback(
     async (signal?: AbortSignal) => {
@@ -110,14 +115,14 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
       // 但 queued/running Job 仍继续轮询，直到 Worker 写入终态。
       const nextRun = terminalRunStatuses.has(run.status)
         ? run
-        : await apiClient.getAgentRun(run.id, { signal })
+        : await client.getAgentRun(run.id, { signal })
       if (nextRun !== run) setRun(nextRun)
       const jobId = nextRun.export_job?.id ?? job?.id
       if (jobId && (!job || !terminalJobStatuses.has(job.status))) {
-        setJob(await apiClient.getJob(jobId, { signal }))
+        setJob(await client.getJob(jobId, { signal }))
       }
     },
-    [apiClient, job, run],
+    [client, job, run],
   )
 
   useEffect(() => {
@@ -167,7 +172,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
     const trimmedPrompt = prompt.trim()
     if (!trimmedPrompt) return
     setStatusMessage('正在创建持久化 run…')
-    const created = await apiClient.createAgentRun({
+    const created = await client.createAgentRun({
       prompt: trimmedPrompt,
       allow_external_text: true,
       allow_external_visual: false,
@@ -175,7 +180,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
       // 让后续导出守卫和页面展示都不依赖隐式默认值。
       media_types: ['image', 'video', 'audio'],
     })
-    const detail = await apiClient.getAgentRun(created.run_id)
+    const detail = await client.getAgentRun(created.run_id)
     window.localStorage.setItem('agent:last-run-id', created.run_id)
     setRun(detail)
     setJob(null)
@@ -193,7 +198,7 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
 
   async function previewExport() {
     if (!run || !selectedCandidate) return
-    const result = await apiClient.selectAgentExport(run.id, {
+    const result = await client.selectAgentExport(run.id, {
       candidate_key: selectedCandidate.candidate_key,
       start_time_seconds: Number(startSeconds),
       end_time_seconds: Number(endSeconds),
@@ -204,20 +209,20 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
       tool_call_id: result.tool_call_id,
       preview: result.preview,
     })
-    setRun(await apiClient.getAgentRun(run.id))
+    setRun(await client.getAgentRun(run.id))
     setStatusMessage('Server 已重新校验候选与时间范围，请确认导出。')
   }
 
   async function confirmExport() {
     if (!run || !confirmation) return
-    const result = await apiClient.confirmAgentExport(run.id, {
+    const result = await client.confirmAgentExport(run.id, {
       waiting_step_id: confirmation.waiting_step_id,
       tool_call_id: confirmation.tool_call_id,
       client_request_id: crypto.randomUUID(),
     })
     const [nextRun, nextJob] = await Promise.all([
-      apiClient.getAgentRun(run.id),
-      apiClient.getJob(result.job_id),
+      client.getAgentRun(run.id),
+      client.getJob(result.job_id),
     ])
     setRun(nextRun)
     setJob(nextJob)
@@ -243,11 +248,11 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
   async function retryUnknown() {
     const stepAttemptId = run?.steps?.at(-1)?.step_attempt_id
     if (!run || !stepAttemptId) return
-    await apiClient.retryUnknownAgentRun(run.id, {
+    await client.retryUnknownAgentRun(run.id, {
       step_attempt_id: stepAttemptId,
       client_request_id: crypto.randomUUID(),
     })
-    setRun(await apiClient.getAgentRun(run.id))
+    setRun(await client.getAgentRun(run.id))
   }
 
   return (
@@ -354,32 +359,61 @@ export function AgentWorkspace({ apiClient = createApiClient() }: { apiClient?: 
             </CardHeader>
             <CardContent className="grid gap-3">
               {run.candidates?.length ? (
-                run.candidates.map((candidate) => (
-                  <button
-                    type="button"
-                    key={candidate.candidate_key}
-                    onClick={() => chooseCandidate(candidate)}
-                    aria-pressed={selectedKey === candidate.candidate_key}
-                    className="rounded-lg border border-[var(--hairline)] p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <strong>候选 {candidate.rank}</strong>
-                      <Badge>尚未审核</Badge>
-                    </div>
-                    <p className="mt-2 text-sm text-[var(--mute)]">
-                      场景 {candidate.scene_start_seconds}–{candidate.scene_end_seconds} 秒 ·
-                      generation {candidate.file_generation}
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--mute)]">
-                      召回证据：{candidate.retrieval.reasons?.join('、') || '未提供'}；RRF{' '}
-                      {candidate.retrieval.score ?? '—'}
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--mute)]">
-                      未验证条件：{candidate.unverified_condition_ids?.length ?? 0} 项
-                    </p>
-                    <span className="sr-only">选择候选 {candidate.rank}</span>
-                  </button>
-                ))
+                run.candidates.map((candidate) => {
+                  const isSelected = selectedKey === candidate.candidate_key
+                  // 媒体时间片段放在 URL fragment（#t=start,end）中，由浏览器把同一个
+                  // 原视频定位到候选场景；Server 仍通过支持 Range 的 content API 分段供流。
+                  const mediaUrl = client.mediaContentUrl(candidate.file_id, {
+                    startTimeSeconds: candidate.scene_start_seconds,
+                    endTimeSeconds: candidate.scene_end_seconds,
+                  })
+
+                  return (
+                    <article
+                      key={candidate.candidate_key}
+                      className={`overflow-hidden rounded-lg border bg-white ${
+                        isSelected
+                          ? 'border-[var(--primary)] ring-2 ring-[var(--ring)]'
+                          : 'border-[var(--hairline)]'
+                      }`}
+                    >
+                      <video
+                        aria-label={`播放候选 ${candidate.rank}，场景 ${candidate.scene_start_seconds}–${candidate.scene_end_seconds} 秒`}
+                        className="aspect-video w-full bg-black object-contain"
+                        controls
+                        playsInline
+                        preload="metadata"
+                        src={mediaUrl}
+                      />
+                      <div className="space-y-2 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <strong>候选 {candidate.rank}</strong>
+                          <Badge>尚未审核</Badge>
+                        </div>
+                        <p className="text-sm text-[var(--mute)]">
+                          场景 {candidate.scene_start_seconds}–{candidate.scene_end_seconds} 秒 ·
+                          generation {candidate.file_generation}
+                        </p>
+                        <p className="text-sm text-[var(--mute)]">
+                          召回证据：{candidate.retrieval.reasons?.join('、') || '未提供'}；RRF{' '}
+                          {candidate.retrieval.score ?? '—'}
+                        </p>
+                        <p className="text-sm text-[var(--mute)]">
+                          未验证条件：{candidate.unverified_condition_ids?.length ?? 0} 项
+                        </p>
+                        <Button
+                          type="button"
+                          variant={isSelected ? 'default' : 'outline'}
+                          aria-pressed={isSelected}
+                          aria-label={`选择候选 ${candidate.rank}，场景 ${candidate.scene_start_seconds}–${candidate.scene_end_seconds} 秒`}
+                          onClick={() => chooseCandidate(candidate)}
+                        >
+                          {isSelected ? '已选择此片段' : '选择此片段'}
+                        </Button>
+                      </div>
+                    </article>
+                  )
+                })
               ) : (
                 <p className="text-sm text-[var(--mute)]">等待候选或没有命中。</p>
               )}

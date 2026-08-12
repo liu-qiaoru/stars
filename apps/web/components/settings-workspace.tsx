@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { KeyRound, Save, Settings2 } from 'lucide-react'
 import { createApiClient, type AgentSettingsResponse } from '../lib/api-client'
 import { Alert } from './ui/alert'
@@ -33,11 +33,11 @@ const numberFields: Array<{
 ]
 
 /** 设置页只编辑 Server 明确允许的数字和开关；凭证与 URL 从不写入 DOM。 */
-export function SettingsWorkspace({
-  apiClient = createApiClient(),
-}: {
-  apiClient?: SettingsClient
-}) {
+export function SettingsWorkspace({ apiClient }: { apiClient?: SettingsClient }) {
+  // 每次页面挂载只创建一个默认 Client。状态更新造成的重新渲染会继续复用它，
+  // 因而依赖 client 的 Effect 不会把一次 GET 变成无限请求循环。
+  const defaultClient = useMemo(() => createApiClient(), [])
+  const client = apiClient ?? defaultClient
   const [settings, setSettings] = useState<AgentSettingsResponse | null>(null)
   const [draft, setDraft] = useState<AgentSettingsResponse['editable'] | null>(null)
   const [notice, setNotice] = useState('正在读取 Server 配置…')
@@ -45,7 +45,7 @@ export function SettingsWorkspace({
 
   useEffect(() => {
     const controller = new AbortController()
-    void apiClient
+    void client
       .getAgentSettings({ signal: controller.signal })
       .then((value) => {
         setSettings(value)
@@ -59,7 +59,7 @@ export function SettingsWorkspace({
         }
       })
     return () => controller.abort()
-  }, [apiClient])
+  }, [client])
 
   async function save() {
     if (!draft) return
@@ -80,7 +80,7 @@ export function SettingsWorkspace({
     }
     setError(null)
     try {
-      const saved = await apiClient.saveAgentSettings(draft)
+      const saved = await client.saveAgentSettings(draft)
       setSettings(saved)
       setDraft(saved.editable)
       setNotice('配置已保存；allowlist 中的运行参数均在当前 Server 进程立即生效。')

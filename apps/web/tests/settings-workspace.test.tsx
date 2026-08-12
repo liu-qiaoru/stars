@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, test, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { SettingsWorkspace } from '../components/settings-workspace'
 
 const response = {
@@ -38,6 +38,28 @@ const response = {
 }
 
 describe('SettingsWorkspace', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  test('使用默认 API Client 时一次挂载只读取一次 Server 设置', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        // Response.json() 每次返回新对象；这是浏览器触发重新渲染的真实边界。
+        json: async () => structuredClone(response),
+      })
+      // 第二次请求保持 pending，既能证明发生了重复调用，也避免失败测试无限刷请求。
+      .mockImplementation(() => new Promise(() => undefined))
+    vi.stubGlobal('fetch', fetcher)
+
+    render(<SettingsWorkspace />)
+    expect(await screen.findByDisplayValue('qwen3.7-plus')).toBeInTheDocument()
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 10)))
+
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   test('展示只读协议、脱敏 Key 状态和生效方式，保存前校验租约关系', async () => {
     const apiClient = {
       getAgentSettings: vi.fn().mockResolvedValue(response),
