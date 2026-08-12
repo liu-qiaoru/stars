@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  Optional,
   type OnApplicationBootstrap,
   type OnApplicationShutdown,
 } from '@nestjs/common'
@@ -25,6 +26,7 @@ import {
   type AgentRunStatus,
   type AgentStepHandler,
 } from './agent.types.js'
+import { AgentRuntimeConfigService } from './agent-runtime-config.service.js'
 
 /**
  * NestJS 内的 Agent run 执行器。它定时扫描 PostgreSQL，一次最多领取一个 run；
@@ -37,27 +39,35 @@ import {
 export class AgentExecutorService implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger(AgentExecutorService.name)
   private readonly leaseOwner = `server-${randomUUID()}`
-  private timer: ReturnType<typeof setInterval> | undefined
+  private timer: ReturnType<typeof setTimeout> | undefined
+  private unsubscribeRuntimeConfig: (() => void) | undefined
   private isRunning = false
+  private isShuttingDown = false
 
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(SETTINGS) private readonly settings: Settings,
     @Inject(AGENT_STEP_HANDLER) private readonly stepHandler: AgentStepHandler,
+    @Optional() private readonly runtimeConfig?: AgentRuntimeConfigService,
   ) {}
 
   onApplicationBootstrap() {
-    if (!this.settings.agentExecutorEnabled) return
-    void this.runOnce()
-    this.timer = setInterval(() => void this.runOnce(), this.settings.agentExecutorIntervalMs)
+    this.unsubscribeRuntimeConfig = this.runtimeConfig?.subscribe(() => this.scheduleNext())
+    if (this.runtimeValues().enabled) void this.runOnce()
+    this.scheduleNext()
   }
 
   onApplicationShutdown() {
-    if (this.timer) clearInterval(this.timer)
+    this.isShuttingDown = true
+    if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
+    this.unsubscribeRuntimeConfig?.()
+    this.unsubscribeRuntimeConfig = undefined
   }
 
   async runOnce(now = new Date()) {
+    const runtime = this.runtimeValues()
+    if (!runtime.enabled) return
     if (this.isRunning) return
     this.isRunning = true
     let activeContext:
@@ -72,7 +82,7 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
       await expireWaitingAgentRuns(this.db, now)
       await finalizeCancelledAgentRuns(this.db, now)
       await timeoutActiveAgentRuns(this.db, {
-        activityTimeoutMs: this.settings.agentActivityTimeoutMs,
+        activityTimeoutMs: runtime.activity_timeout_ms,
         now,
       })
       await recoverExpiredAgentRuns(this.db, now)
@@ -80,7 +90,7 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
 
       const claim = await claimNextAgentRun(this.db, {
         leaseOwner: this.leaseOwner,
-        leaseDurationMs: this.settings.agentLeaseDurationMs,
+        leaseDurationMs: runtime.lease_duration_ms,
         now,
       })
       if (!claim) return
@@ -129,7 +139,7 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
         new Promise<{ kind: 'timed_out' }>((resolve) => {
           timeoutHandle = setTimeout(
             () => resolve({ kind: 'timed_out' }),
-            this.settings.agentActivityTimeoutMs,
+            runtime.activity_timeout_ms,
           )
         }),
       ])
@@ -145,12 +155,12 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
               errorMessage: '外部请求已派发，但活动硬超时前未收到可确认的响应。',
               outcomeUnknown: true,
             },
-            new Date(now.getTime() + this.settings.agentActivityTimeoutMs),
+            new Date(now.getTime() + runtime.activity_timeout_ms),
           )
         } else {
           await timeoutActiveAgentRuns(this.db, {
-            activityTimeoutMs: this.settings.agentActivityTimeoutMs,
-            now: new Date(now.getTime() + this.settings.agentActivityTimeoutMs),
+            activityTimeoutMs: runtime.activity_timeout_ms,
+            now: new Date(now.getTime() + runtime.activity_timeout_ms),
           })
         }
         // JavaScript Promise 不能强制终止任意底层调用。这里明确不再 await，也不提交其
@@ -207,5 +217,34 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
     } finally {
       this.isRunning = false
     }
+  }
+
+  private runtimeValues() {
+    return (
+      this.runtimeConfig?.values() ?? {
+        enabled: this.settings.agentExecutorEnabled,
+        lease_duration_ms: this.settings.agentLeaseDurationMs,
+        activity_timeout_ms: this.settings.agentActivityTimeoutMs,
+        executor_interval_ms: this.settings.agentExecutorIntervalMs,
+      }
+    )
+  }
+
+  private scheduleNext() {
+    if (this.isShuttingDown) return
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = setTimeout(async () => {
+      try {
+        await this.runOnce()
+      } catch (error) {
+        // runOnce 已负责普通步骤错误；这里只兜住数据库/基础设施级异常，确保一次失败
+        // 不会永久停掉执行器。日志不得带 Provider 响应、凭证或本地媒体内容。
+        this.logger.error(
+          `Agent executor scheduling boundary failed: ${error instanceof Error ? error.name : 'UnknownError'}`,
+        )
+      } finally {
+        this.scheduleNext()
+      }
+    }, this.runtimeValues().executor_interval_ms)
   }
 }

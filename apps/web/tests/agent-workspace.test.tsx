@@ -1,46 +1,292 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, test, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { AgentWorkspace } from '../components/agent-workspace'
 
-describe('AgentWorkspace', () => {
-  test('提交任务后展示 run 状态和 tool-call summary', async () => {
-    const apiClient = {
-      createAgentRun: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'succeeded' }),
-      getAgentRun: vi.fn().mockResolvedValue({
-        id: 'run-1',
-        status: 'succeeded',
-        prompt: '查找片段',
-        summary: '找到候选视频片段',
-        tool_calls: [
-          {
-            tool_call_id: 'search-1',
-            name: 'search_media',
-            status: 'succeeded',
-            summary: '完成搜索',
-            requires_confirmation: false,
-          },
-        ],
-        events: [],
-        results: [],
-      }),
-      confirmAgentToolCall: vi.fn(),
-    }
+const settings = {
+  provider: 'rightapi' as const,
+  model: 'qwen3.7-plus' as const,
+  prompt_version: 'agent-intent-v1',
+  schema_version: 'agent-intent-schema-v1',
+  api_key: { configured: true },
+  capabilities: {
+    external_text_available: true,
+    external_visual_available: false as const,
+    rerank_available: false as const,
+    vlm_review_available: false as const,
+    unavailable_reasons: [],
+  },
+  editable: {
+    enabled: true,
+    tool_timeout_ms: 10_000,
+    lease_duration_ms: 130_000,
+    activity_timeout_ms: 120_000,
+    waiting_ttl_seconds: 604_800,
+    executor_interval_ms: 2_000,
+    web_poll_interval_ms: 2_000,
+  },
+  apply_behavior: {},
+  frozen: {},
+  persistence: 'process' as const,
+}
 
+function terminalRun() {
+  return {
+    id: 'run-1',
+    status: 'succeeded',
+    prompt: '查找片段',
+    summary: '找到候选视频片段',
+    tool_calls: [],
+    events: [],
+    candidates: [],
+  }
+}
+
+function client(overrides: Record<string, unknown> = {}) {
+  return {
+    getAgentSettings: vi.fn().mockResolvedValue(settings),
+    createAgentRun: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'queued' }),
+    getAgentRun: vi.fn().mockResolvedValue(terminalRun()),
+    selectAgentExport: vi.fn(),
+    confirmAgentExport: vi.fn(),
+    getJob: vi.fn(),
+    retryUnknownAgentRun: vi.fn(),
+    ...overrides,
+  }
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+  window.localStorage.clear()
+})
+
+describe('AgentWorkspace', () => {
+  test('创建 run 时明确授权本次文本外发，并展示独立 run 状态', async () => {
+    const apiClient = client()
     render(<AgentWorkspace apiClient={apiClient} />)
 
-    fireEvent.change(screen.getByPlaceholderText(/查找包含清晰产品镜头/i), {
-      target: { value: '查找片段' },
-    })
+    fireEvent.change(screen.getByLabelText('完整用户请求'), { target: { value: '查找片段' } })
     fireEvent.click(screen.getByRole('button', { name: /启动任务/i }))
 
     await waitFor(() => {
       expect(apiClient.createAgentRun).toHaveBeenCalledWith({
         prompt: '查找片段',
-        allow_external_vlm: false,
+        allow_external_text: true,
+        allow_external_visual: false,
+        media_types: ['image', 'video', 'audio'],
       })
     })
-    expect(await screen.findByText(/找到候选视频片段/i)).toBeInTheDocument()
-    expect(screen.getByText(/search_media/)).toBeInTheDocument()
-    expect(screen.getByText(/完成搜索/)).toBeInTheDocument()
+    expect(await screen.findByText('succeeded')).toBeInTheDocument()
+    expect(screen.getByText(/固定流程，不包含 Rerank、VLM/i)).toBeInTheDocument()
+  })
+
+  test('页面重新挂载只用持久化 run_id 读取 Server 状态，不重新创建 run', async () => {
+    window.localStorage.setItem('agent:last-run-id', 'run-persisted')
+    const apiClient = client({
+      getAgentRun: vi.fn().mockResolvedValue({ ...terminalRun(), id: 'run-persisted' }),
+    })
+
+    render(<AgentWorkspace apiClient={apiClient} />)
+
+    expect(await screen.findByText('run_id: run-persisted')).toBeInTheDocument()
+    expect(apiClient.getAgentRun).toHaveBeenCalledWith(
+      'run-persisted',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(apiClient.createAgentRun).not.toHaveBeenCalled()
+  })
+
+  test('刷新后从持久化 tool call 恢复 Server 冻结预览和确认入口', async () => {
+    window.localStorage.setItem('agent:last-run-id', 'run-confirming')
+    const apiClient = client({
+      confirmAgentExport: vi.fn().mockResolvedValue({ job_id: 'job-1' }),
+      getJob: vi.fn().mockResolvedValue({ id: 'job-1', status: 'queued', progress: 0 }),
+      getAgentRun: vi.fn().mockResolvedValue({
+        ...terminalRun(),
+        id: 'run-confirming',
+        status: 'waiting_for_confirmation',
+        waiting_step_id: 'wait-1',
+        candidates: [
+          {
+            candidate_key: 'video:scene-1',
+            file_id: 'file-1',
+            file_generation: 3,
+            asset_id: 'asset-1',
+            scene_id: 'scene-1',
+            scene_start_seconds: 10,
+            scene_end_seconds: 30,
+            rank: 1,
+            retrieval: {},
+            review_status: 'not_run',
+          },
+        ],
+        tool_calls: [
+          {
+            tool_call_id: 'export-1',
+            name: 'export_clip',
+            status: 'waiting_for_confirmation',
+            summary: 'preview',
+            requires_confirmation: true,
+            preview: {
+              candidate_key: 'video:scene-1',
+              file_id: 'file-1',
+              file_generation: 3,
+              scene_id: 'scene-1',
+              scene_start_seconds: 10,
+              scene_end_seconds: 30,
+              start_time_seconds: 12,
+              end_time_seconds: 18,
+              output_format: 'mp4',
+              requires_confirmation: true,
+            },
+          },
+        ],
+      }),
+    })
+
+    render(<AgentWorkspace apiClient={apiClient} />)
+
+    expect(await screen.findByText(/Server 冻结预览：12–18 秒/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /确认并创建导出 Job/i }))
+    await waitFor(() =>
+      expect(apiClient.confirmAgentExport).toHaveBeenCalledWith('run-confirming', {
+        waiting_step_id: 'wait-1',
+        tool_call_id: 'export-1',
+        client_request_id: expect.any(String),
+      }),
+    )
+  })
+
+  test('候选显示 RRF 排名边界、尚未审核和未验证条件，并可用带标签控件选择时间范围', async () => {
+    const waitingRun = {
+      ...terminalRun(),
+      status: 'waiting_for_export_selection',
+      intent: {
+        goal: 'export_clip',
+        search_scope: 'visual',
+        media_types: ['video'],
+        conditions: [],
+      },
+      resolved_scope: { search_scope: 'visual', media_types: ['video'], library_ids: ['lib-1'] },
+      conditions: [
+        {
+          condition_id: 'condition-1',
+          source_text: '红色汽车',
+          kind: 'must_have',
+          evidence_type: 'visual',
+        },
+      ],
+      candidates: [
+        {
+          candidate_key: 'video:scene-1',
+          file_id: 'file-1',
+          file_generation: 3,
+          asset_id: 'asset-1',
+          scene_id: 'scene-1',
+          scene_start_seconds: 10,
+          scene_end_seconds: 30,
+          rank: 1,
+          retrieval: { score: 0.031, score_kind: 'rrf_score', reasons: ['vector_match'] },
+          review_status: 'not_run' as const,
+        },
+      ],
+    }
+    const confirmationRun = { ...waitingRun, status: 'waiting_for_confirmation' }
+    const apiClient = client({
+      getAgentRun: vi.fn().mockResolvedValueOnce(waitingRun).mockResolvedValue(confirmationRun),
+      selectAgentExport: vi.fn().mockResolvedValue({
+        waiting_step_id: 'wait-1',
+        tool_call_id: 'export-1',
+        status: 'waiting_for_confirmation',
+        preview: {
+          candidate_key: 'video:scene-1',
+          file_id: 'file-1',
+          file_generation: 3,
+          scene_id: 'scene-1',
+          scene_start_seconds: 10,
+          scene_end_seconds: 30,
+          start_time_seconds: 12,
+          end_time_seconds: 18,
+          output_format: 'mp4',
+          requires_confirmation: true,
+        },
+      }),
+    })
+    render(<AgentWorkspace apiClient={apiClient} />)
+    fireEvent.change(screen.getByLabelText('完整用户请求'), { target: { value: '导出红车片段' } })
+    fireEvent.click(screen.getByRole('button', { name: /启动任务/i }))
+
+    const candidateButton = await screen.findByRole('button', { name: /选择候选 1/i })
+    expect(screen.getByText('尚未审核')).toBeInTheDocument()
+    expect(screen.getByText('未验证条件')).toBeInTheDocument()
+    expect(screen.getByText(/RRF.*只表示排序，不是相关概率/)).toBeInTheDocument()
+    fireEvent.click(candidateButton)
+    expect(screen.getByLabelText('开始时间（秒）')).toHaveValue(10)
+    expect(screen.getByLabelText('结束时间（秒）')).toHaveValue(30)
+    fireEvent.change(screen.getByLabelText('开始时间（秒）'), { target: { value: '12' } })
+    fireEvent.change(screen.getByLabelText('结束时间（秒）'), { target: { value: '18' } })
+    fireEvent.click(screen.getByRole('button', { name: /生成确认预览/i }))
+
+    await waitFor(() =>
+      expect(apiClient.selectAgentExport).toHaveBeenCalledWith('run-1', {
+        candidate_key: 'video:scene-1',
+        start_time_seconds: 12,
+        end_time_seconds: 18,
+        output_format: 'mp4',
+      }),
+    )
+    expect(await screen.findByText(/Server 冻结预览：12–18 秒/)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /确认并创建导出 Job/i })).toBeEnabled()
+    fireEvent.change(screen.getByLabelText('结束时间（秒）'), { target: { value: '19' } })
+    expect(screen.queryByRole('button', { name: /确认并创建导出 Job/i })).not.toBeInTheDocument()
+  })
+
+  test('约 2 秒轮询；页面隐藏时暂停，恢复可见立即刷新，终态停止', async () => {
+    vi.useFakeTimers()
+    let visibility: DocumentVisibilityState = 'visible'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
+    const queued = { ...terminalRun(), status: 'queued' }
+    const searching = { ...terminalRun(), status: 'searching' }
+    const apiClient = client({
+      getAgentRun: vi
+        .fn()
+        .mockResolvedValueOnce(queued)
+        .mockResolvedValueOnce(searching)
+        .mockResolvedValue(terminalRun()),
+    })
+    render(<AgentWorkspace apiClient={apiClient} />)
+    fireEvent.change(screen.getByLabelText('完整用户请求'), { target: { value: '找视频' } })
+    fireEvent.click(screen.getByRole('button', { name: /启动任务/i }))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(apiClient.getAgentRun).toHaveBeenCalledTimes(1)
+
+    visibility = 'hidden'
+    fireEvent(document, new Event('visibilitychange'))
+    await act(async () => {
+      vi.advanceTimersByTime(4_000)
+      await Promise.resolve()
+    })
+    expect(apiClient.getAgentRun).toHaveBeenCalledTimes(1)
+
+    visibility = 'visible'
+    fireEvent(document, new Event('visibilitychange'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(apiClient.getAgentRun).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      vi.advanceTimersByTime(2_000)
+      await Promise.resolve()
+    })
+    expect(apiClient.getAgentRun).toHaveBeenCalledTimes(3)
+    await act(async () => {
+      vi.advanceTimersByTime(6_000)
+      await Promise.resolve()
+    })
+    expect(apiClient.getAgentRun).toHaveBeenCalledTimes(3)
   })
 })

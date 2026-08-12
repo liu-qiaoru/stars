@@ -284,10 +284,7 @@ Response：
   "results": [
     {
       "asset_id": "75c1157b-21b7-4a90-8c2f-2aa4ae7c9331",
-      "merged_asset_ids": [
-        "75c1157b-21b7-4a90-8c2f-2aa4ae7c9331",
-        "asset-uuid"
-      ],
+      "merged_asset_ids": ["75c1157b-21b7-4a90-8c2f-2aa4ae7c9331", "asset-uuid"],
       "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
       "media_type": "video",
       "path": "video.mp4",
@@ -470,12 +467,12 @@ Completed job result：
 
 返回 Agent V1 的部署开关、RightAPI 配置和步骤处理器可用性。响应不包含 API Key。
 
-Phase B 只有在外部文本部署开关、RightAPI URL/Key、后台执行器和 AgentIntent Runner
+Phase C 只有在外部文本部署开关、RightAPI URL/Key、后台执行器和 AgentIntent Runner
 同时就绪时才返回 `run_creation_available=true`。任一条件缺失都会阻止创建假成功 run。
 
 ```json
 {
-  "phase": "B",
+  "phase": "C",
   "provider": "rightapi",
   "model": "qwen3.7-plus",
   "run_creation_available": false,
@@ -495,7 +492,7 @@ Phase B 只有在外部文本部署开关、RightAPI URL/Key、后台执行器�
   "unavailable_reasons": [
     "external_text_deployment_disabled",
     "rightapi_not_configured",
-    "phase_b_step_handler_not_ready"
+    "agent_executor_or_step_handler_not_ready"
   ]
 }
 ```
@@ -527,7 +524,7 @@ Phase B 只有在外部文本部署开关、RightAPI URL/Key、后台执行器�
 }
 ```
 
-Provider 部署开关、RightAPI 配置、Phase B handler 或本 run 文本授权不满足时，
+Provider 部署开关、RightAPI 配置、Server handler 或本 run 文本授权不满足时，
 Server 在写数据库前返回 503/400，不创建假成功 run。
 
 ## GET /agent/runs/{id}
@@ -579,6 +576,21 @@ Server 在写数据库前返回 503/400，不创建假成功 run。
 返回 Server 本地解析后的 `search_scope`、媒体类型和素材库 UUID。候选还会返回
 `file_id`、`file_generation`、`asset_id`、`scene_id`、场景秒数、`rank` 和 `retrieval`。
 `retrieval` 只保存 RRF 排名证据，不包含文件路径、Caption 或转录原文。
+每个候选还固定返回 `review_status="not_run"`，页面必须显示“尚未审核”；RRF 分数只表示
+来源名次融合后的排序值，不是相关概率。确认创建 Job 后另返回 `export_job`，其状态独立于 run。
+
+## GET /agent/settings
+
+返回 Provider、固定模型、Prompt/Schema 版本、能力/禁用原因、Key 是否配置，以及 Server
+allowlist 的非敏感运行参数。响应不包含 Key、Provider URL或任意环境变量值。
+
+## PUT /agent/settings
+
+请求必须完整且只能包含：`enabled`、`tool_timeout_ms`、`lease_duration_ms`、
+`activity_timeout_ms`、`waiting_ttl_seconds`、`executor_interval_ms`、`web_poll_interval_ms`。
+未知字段返回 400。Server 强制 `lease_duration_ms >= max(activity_timeout_ms,
+tool_timeout_ms) + 5000`。响应的 `apply_behavior` 标注当前字段均立即生效；当前实现只在
+本 Server 进程保存覆盖值，进程重启后重新读取环境变量。
 
 ## POST /agent/runs/{id}/resume
 
@@ -611,7 +623,7 @@ Phase B 只接受固定动作 `continue_as_read_only_search_with_resolved_scope`
 
 `queued` 和等待态没有正在提交的步骤，可直接进入 `cancelled`。
 `extracting_intent` / `searching` 先进入 `cancel_requested`，立即使旧结果的状态条件失效；
-租约安全到期后由 Server 转成 `cancelled`。已创建的独立导出 job 不属于 Phase B。
+租约安全到期后由 Server 转成 `cancelled`。已经创建的导出 Job 是独立事实，不随 run 取消。
 
 ## POST /agent/runs/{id}/retry-unknown
 
@@ -626,11 +638,22 @@ Phase B 只接受固定动作 `continue_as_read_only_search_with_resolved_scope`
 接受后创建新的用户授权输入并回到 `queued`；下次领取会生成新
 `step_attempt_id`。普通 `/resume` 不得代替该授权。
 
-## Phase B 暂不提供的 Agent API
+## POST /agent/runs/{id}/export-selection
 
-`/export-selection` 和 `/confirm` 属于 Phase C 安全导出闭环。Phase B 不保留旧的非事务确认路由，
-也不创建 `export_clip` / `index_media` 副作用 job。Web 轮询、候选选择、Rerank 和 VLM
-复核同样不属于 Phase B。
+只允许 `waiting_for_export_selection`。请求包含 `candidate_key`、开始/结束秒数和固定 `mp4`。
+Server 在响应预览前重新校验候选属于当前 run、`file_generation`、enforced scope、当前视频场景
+及文件时长；过期 generation 返回 409，场景外范围返回 400。成功进入
+`waiting_for_confirmation`，返回新的 `waiting_step_id`、`tool_call_id` 和
+`requires_confirmation=true` 预览。
+
+## POST /agent/runs/{id}/confirm
+
+请求包含 `waiting_step_id`、`tool_call_id` 和幂等 `client_request_id`。Server 在一个 PostgreSQL
+事务中完成等待态和 `requires_confirmation=true` 条件守卫、确认记录、唯一副作用、Job 创建或
+复用、run 与事件更新。重复/并发确认最多创建一个 `export_clip` Job，并始终返回同一 `job_id`。
+run 进入 `succeeded` 只表示确认事实完成；导出是否完成必须读取独立 Job 状态。
+
+Phase C 仍不提供 Rerank、VLM 复核或 Agent 自主循环。
 
 ## 单视频重索引接口
 

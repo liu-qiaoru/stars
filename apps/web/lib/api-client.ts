@@ -302,13 +302,54 @@ export interface AgentToolCallSummary {
   status: string
   summary: string
   requires_confirmation?: boolean
+  preview?: {
+    candidate_key: string
+    file_id: string
+    file_generation: number
+    scene_id: string
+    scene_start_seconds: number
+    scene_end_seconds: number
+    start_time_seconds: number
+    end_time_seconds: number
+    output_format: 'mp4'
+    requires_confirmation: true
+  }
 }
 
 export interface AgentRunDetail {
   id: string
   status: string
+  next_step?: string
   prompt: string
   summary: string | null
+  waiting_step_id?: string | null
+  error?: { code: string; message: string } | null
+  intent?: {
+    goal: string
+    search_scope: SearchScope
+    media_types: MediaType[]
+    conditions: Array<{
+      source_text: string
+      kind: 'must_have' | 'optional' | 'exclusion'
+      evidence_type: string
+    }>
+  } | null
+  resolved_scope?: {
+    search_scope: SearchScope
+    media_types: MediaType[]
+    library_ids: string[]
+  } | null
+  conditions?: Array<{
+    condition_id: string
+    source_text: string
+    kind: 'must_have' | 'optional' | 'exclusion'
+    evidence_type: string
+  }>
+  steps?: Array<{
+    step_attempt_id: string
+    step: string
+    status: string
+  }>
   tool_calls: AgentToolCallSummary[]
   events: Array<{
     event_id: string
@@ -317,14 +358,59 @@ export interface AgentRunDetail {
     created_at: string
     payload: unknown
   }>
-  results: Array<{
+  candidates?: Array<{
+    candidate_key: string
     file_id: string
+    file_generation: number
     asset_id: string
-    start_time_seconds: number | null
-    end_time_seconds: number | null
-    score: number
-    summary: string
+    scene_id: string | null
+    scene_start_seconds: number | null
+    scene_end_seconds: number | null
+    rank: number
+    retrieval: {
+      score?: number
+      score_kind?: string
+      primary_reason?: string
+      reasons?: string[]
+      source_scores?: Record<string, number>
+    }
+    review_status: 'not_run'
+    unverified_condition_ids?: string[]
   }>
+  export_job?: {
+    id: string
+    status: string
+    progress: number
+    result: unknown
+    error_message: string | null
+  } | null
+}
+
+export interface AgentSettingsResponse {
+  provider: 'rightapi'
+  model: 'qwen3.7-plus'
+  prompt_version: string
+  schema_version: string
+  api_key: { configured: boolean }
+  capabilities: {
+    external_text_available: boolean
+    external_visual_available: false
+    rerank_available: false
+    vlm_review_available: false
+    unavailable_reasons: string[]
+  }
+  editable: {
+    enabled: boolean
+    tool_timeout_ms: number
+    lease_duration_ms: number
+    activity_timeout_ms: number
+    waiting_ttl_seconds: number
+    executor_interval_ms: number
+    web_poll_interval_ms: number
+  }
+  apply_behavior: Record<string, 'immediate' | 'restart_required'>
+  frozen: Record<string, boolean>
+  persistence: 'process'
 }
 
 interface ApiClientOptions {
@@ -383,6 +469,8 @@ export function createApiClient(options: ApiClientOptions = {}) {
       }),
     listJobs: (input: { limit?: number; offset?: number } = {}) =>
       request<JobListResponse>(withQuery('/jobs', input), { method: 'GET' }),
+    getJob: (id: string, options: { signal?: AbortSignal } = {}) =>
+      request<JobSummary>(`/jobs/${id}`, { method: 'GET', signal: options.signal }),
     retryJob: (id: string) =>
       request<{ job_id: string; status: string }>(`/jobs/${id}/retry`, { method: 'POST' }),
     mediaContentUrl: (
@@ -472,19 +560,74 @@ export function createApiClient(options: ApiClientOptions = {}) {
         method: 'POST',
         body: JSON.stringify(input),
       }),
-    createAgentRun: (input: { prompt: string; allow_external_vlm: boolean }) =>
+    getAgentSettings: (options: { signal?: AbortSignal } = {}) =>
+      request<AgentSettingsResponse>('/agent/settings', { method: 'GET', signal: options.signal }),
+    saveAgentSettings: (input: AgentSettingsResponse['editable']) =>
+      request<AgentSettingsResponse>('/agent/settings', {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      }),
+    createAgentRun: (input: {
+      prompt: string
+      allow_external_text: boolean
+      allow_external_visual?: boolean
+      media_types?: MediaType[]
+      library_ids?: string[]
+    }) =>
       request<{ run_id: string; status: string; message?: string }>('/agent/runs', {
         method: 'POST',
         body: JSON.stringify(input),
       }),
-    getAgentRun: (id: string) =>
+    getAgentRun: (id: string, options: { signal?: AbortSignal } = {}) =>
       request<AgentRunDetail>(`/agent/runs/${id}`, {
         method: 'GET',
+        signal: options.signal,
       }),
-    confirmAgentToolCall: (id: string, toolCallId: string) =>
-      request<{ job_id: string; status: string }>(`/agent/runs/${id}/confirm`, {
+    selectAgentExport: (
+      id: string,
+      input: {
+        candidate_key: string
+        start_time_seconds: number
+        end_time_seconds: number
+        output_format: 'mp4'
+      },
+    ) =>
+      request<{
+        run_id: string
+        status: string
+        waiting_step_id: string
+        tool_call_id: string
+        preview: {
+          candidate_key: string
+          file_id: string
+          file_generation: number
+          scene_id: string
+          scene_start_seconds: number
+          scene_end_seconds: number
+          start_time_seconds: number
+          end_time_seconds: number
+          output_format: 'mp4'
+          requires_confirmation: true
+        }
+      }>(`/agent/runs/${id}/export-selection`, {
         method: 'POST',
-        body: JSON.stringify({ tool_call_id: toolCallId }),
+        body: JSON.stringify(input),
+      }),
+    confirmAgentExport: (
+      id: string,
+      input: { waiting_step_id: string; tool_call_id: string; client_request_id: string },
+    ) =>
+      request<{ job_id: string; status: string; run_status: string }>(`/agent/runs/${id}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    retryUnknownAgentRun: (
+      id: string,
+      input: { step_attempt_id: string; client_request_id: string },
+    ) =>
+      request<{ run_id: string; status: string }>(`/agent/runs/${id}/retry-unknown`, {
+        method: 'POST',
+        body: JSON.stringify(input),
       }),
   }
 }

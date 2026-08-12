@@ -5,10 +5,13 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common'
 import {
+  agentExportSelectionInputSchema,
   cancelAgentRunInputSchema,
+  confirmAgentExportInputSchema,
   createAgentRunInputSchema,
   resumeAgentRunInputSchema,
   retryUnknownAgentRunInputSchema,
@@ -20,12 +23,17 @@ import { DATABASE } from '../database/database.module.js'
 import type { Database } from '../database/repositories.js'
 import {
   cancelDurableAgentRun,
+  confirmAgentExport,
   createDurableAgentRun,
   getDurableAgentRun,
   resumeWaitingAgentRun,
   retryUnknownAgentRun,
+  selectAgentExport,
 } from './agent-run.repository.js'
+import { agentSideEffects, agentToolCalls, jobs } from '../database/schema.js'
+import { eq } from 'drizzle-orm'
 import { AGENT_STEP_HANDLER, type AgentStepHandler } from './agent.types.js'
+import { AgentRuntimeConfigService } from './agent-runtime-config.service.js'
 
 const persistedAgentConditionSchema = z
   .object({
@@ -55,20 +63,23 @@ export class AgentService {
     @Inject(DATABASE) private readonly db: Database,
     @Inject(SETTINGS) private readonly settings: Settings,
     @Inject(AGENT_STEP_HANDLER) private readonly stepHandler: AgentStepHandler,
+    @Optional() private readonly runtimeConfig?: AgentRuntimeConfigService,
   ) {}
 
   getCapabilities() {
     const deploymentEnabled = this.settings.allowExternalLlm
     const configured = Boolean(this.settings.rightCodeBaseUrl && this.settings.rightCodeApiKey)
-    const stepHandlerReady = this.settings.agentExecutorEnabled && this.stepHandler.isReady()
+    const runtimeEnabled =
+      this.runtimeConfig?.values().enabled ?? this.settings.agentExecutorEnabled
+    const stepHandlerReady = runtimeEnabled && this.stepHandler.isReady()
     const runCreationAvailable = deploymentEnabled && configured && stepHandlerReady
     const unavailableReasons: string[] = []
     if (!deploymentEnabled) unavailableReasons.push('external_text_deployment_disabled')
     if (!configured) unavailableReasons.push('rightapi_not_configured')
-    if (!stepHandlerReady) unavailableReasons.push('phase_b_step_handler_not_ready')
+    if (!stepHandlerReady) unavailableReasons.push('agent_executor_or_step_handler_not_ready')
 
     return {
-      phase: 'B',
+      phase: 'C',
       provider: 'rightapi',
       model: 'qwen3.7-plus',
       run_creation_available: runCreationAvailable,
@@ -96,7 +107,7 @@ export class AgentService {
     if (!capabilities.run_creation_available) {
       throw new ServiceUnavailableException({
         code: 'AGENT_V1_UNAVAILABLE',
-        message: 'Agent V1 外部文本能力或 Phase B 步骤处理器未就绪。',
+        message: 'Agent V1 外部文本能力或 Server 执行器未就绪。',
         reasons: capabilities.unavailable_reasons,
       })
     }
@@ -147,6 +158,24 @@ export class AgentService {
       .array(persistedAgentConditionSchema)
       .safeParse(intentRecord?.conditions)
     const parsedResolvedScope = persistedResolvedScopeSchema.safeParse(intentRecord?.enforced_scope)
+    const toolCalls = await this.db
+      .select()
+      .from(agentToolCalls)
+      .where(eq(agentToolCalls.runId, runId))
+    const [exportFact] = await this.db
+      .select({
+        jobId: agentSideEffects.jobId,
+        status: agentSideEffects.status,
+        confirmation: agentSideEffects.confirmationJson,
+        jobStatus: jobs.status,
+        jobProgress: jobs.progress,
+        jobResult: jobs.resultJson,
+        jobError: jobs.errorMessage,
+      })
+      .from(agentSideEffects)
+      .leftJoin(jobs, eq(agentSideEffects.jobId, jobs.id))
+      .where(eq(agentSideEffects.runId, runId))
+      .limit(1)
     return {
       id: run.id,
       status: run.status,
@@ -193,7 +222,32 @@ export class AgentService {
           candidate.sceneEndSeconds !== null ? Number(candidate.sceneEndSeconds) : null,
         rank: candidate.rank,
         retrieval: candidate.retrievalJson,
+        review_status: 'not_run',
+        // Phase C 没有 VLM 条件复核；检索召回不能证明 must-have/exclusion 成立。
+        unverified_condition_ids: parsedConditions.success
+          ? parsedConditions.data.map((condition) => condition.condition_id)
+          : [],
       })),
+      tool_calls: toolCalls.map((toolCall) => ({
+        tool_call_id: toolCall.toolCallId,
+        name: toolCall.toolName,
+        status: toolCall.status,
+        summary:
+          toolCall.toolName === 'export_clip'
+            ? '已由 Server 校验的剪辑导出预览'
+            : toolCall.toolName,
+        requires_confirmation: toolCall.requiresConfirmation && !toolCall.confirmedAt,
+        preview: toolCall.inputJson,
+      })),
+      export_job: exportFact?.jobId
+        ? {
+            id: exportFact.jobId,
+            status: exportFact.jobStatus,
+            progress: exportFact.jobProgress,
+            result: exportFact.jobResult,
+            error_message: exportFact.jobError,
+          }
+        : null,
       events: events.map((event) => ({
         event_id: event.id,
         type: event.eventType,
@@ -236,6 +290,81 @@ export class AgentService {
       clientRequestId: parsed.client_request_id,
     })
     return this.userInputResult(runId, result, 'AGENT_UNKNOWN_RETRY_REJECTED')
+  }
+
+  async exportSelection(runId: string, input: z.input<typeof agentExportSelectionInputSchema>) {
+    const parsed = this.parseInput(agentExportSelectionInputSchema, input)
+    const result = await selectAgentExport(this.db, {
+      runId,
+      candidateKey: parsed.candidate_key,
+      startTimeSeconds: parsed.start_time_seconds,
+      endTimeSeconds: parsed.end_time_seconds,
+      outputFormat: parsed.output_format,
+      waitingTtlSeconds:
+        this.runtimeConfig?.values().waiting_ttl_seconds ?? this.settings.agentWaitingTtlSeconds,
+    })
+    if (result.kind === 'not_found') throw new NotFoundException('Agent run not found')
+    if (result.kind === 'expired') {
+      throw new GoneException({ code: 'AGENT_WAITING_EXPIRED', message: '候选选择已过期。' })
+    }
+    if (result.kind === 'stale') {
+      throw new ConflictException({
+        code: 'AGENT_CANDIDATE_STALE',
+        message: '候选 generation 已过期。',
+      })
+    }
+    if (result.kind === 'scope_invalid') {
+      throw new ConflictException({
+        code: 'AGENT_ENFORCED_SCOPE_INVALID',
+        message: '候选不再属于 Server 范围。',
+      })
+    }
+    if (result.kind === 'range_invalid' || result.kind === 'candidate_invalid') {
+      throw new BadRequestException({
+        code: 'AGENT_EXPORT_SELECTION_INVALID',
+        message: '导出候选或时间范围无效。',
+      })
+    }
+    if (result.kind === 'invalid_state') {
+      throw new ConflictException({
+        code: 'AGENT_EXPORT_SELECTION_REJECTED',
+        message: 'run 当前不能选择导出候选。',
+      })
+    }
+    return {
+      run_id: runId,
+      status: result.run.status,
+      waiting_step_id: result.waitingStepId,
+      tool_call_id: result.toolCallId,
+      preview: result.preview,
+    }
+  }
+
+  async confirmExport(runId: string, input: z.input<typeof confirmAgentExportInputSchema>) {
+    const parsed = this.parseInput(confirmAgentExportInputSchema, input)
+    const result = await confirmAgentExport(this.db, {
+      runId,
+      waitingStepId: parsed.waiting_step_id,
+      toolCallId: parsed.tool_call_id,
+      clientRequestId: parsed.client_request_id,
+    })
+    if (result.kind === 'not_found') throw new NotFoundException('Agent run not found')
+    if (result.kind === 'expired') {
+      throw new GoneException({ code: 'AGENT_WAITING_EXPIRED', message: '导出确认已过期。' })
+    }
+    if (result.kind === 'stale') {
+      throw new ConflictException({
+        code: 'AGENT_CANDIDATE_STALE',
+        message: '候选 generation 已过期。',
+      })
+    }
+    if (result.kind === 'scope_invalid' || result.kind === 'invalid_state') {
+      throw new ConflictException({
+        code: 'AGENT_CONFIRM_REJECTED',
+        message: '确认条件守卫未通过。',
+      })
+    }
+    return { job_id: result.job.id, status: result.job.status, run_status: 'succeeded' }
   }
 
   private userInputResult(

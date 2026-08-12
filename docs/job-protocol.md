@@ -351,7 +351,8 @@ Input：
   "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
   "start_time_seconds": 120.0,
   "end_time_seconds": 150.0,
-  "output_format": "mp4"
+  "output_format": "mp4",
+  "export_request_id": "agent-side-effect-uuid（仅 Agent 确认导出提供）"
 }
 ```
 
@@ -361,12 +362,15 @@ Input：
 - Phase 8 只支持视频文件导出。
 - TypeScript server 只创建 `export_clip` job，不读取源媒体，也不运行 FFmpeg。
 - Python worker 根据 `file_id` 回 PostgreSQL 查询源文件路径，然后用 FFmpeg stream copy 导出。
+- `export_request_id` 可选；Agent 确认必须提供，用于生成唯一最终文件名。Media Detail 旧入口不提供。
+- Worker 使用 FFmpeg `-n` 写唯一 `.partial` 文件；成功后在同一文件系统原子发布，目标已存在时
+  明确失败，不使用 `-y`。失败、冲突和成功后都清理 `.partial`。
 
 Result：
 
 ```json
 {
-  "export_path": ".media-agent/exports/clips/54b83d84-7ff5-4b9a-8d11-fb27fbaf44db-120-150.mp4",
+  "export_path": ".media-agent/exports/clips/agent-side-effect-uuid.mp4",
   "duration_seconds": 30.0
 }
 ```

@@ -70,15 +70,15 @@
 
 ### 技术栈
 
-| 层 | 技术 |
-| --- | --- |
-| 前端 | Next.js 16 / React 19 / Tailwind 4 / TypeScript |
-| 后端 API | NestJS（Express adapter）/ Zod；Agent V1 Phase B 使用一次 qwen3.7-plus 意图分类和一次本地原文搜索 |
-| 数据库 | PostgreSQL 16（Drizzle ORM + node-postgres） |
-| 向量库 | Qdrant（JS client + Python HTTP client） |
-| Python worker | FFmpeg、ffprobe、PySceneDetect、SigLIP2（torch/transformers）、faster-whisper、Qwen2.5-VL（可选 Caption） |
-| 任务队列 | PostgreSQL-backed jobs（`SELECT ... FOR UPDATE SKIP LOCKED`，无 Celery/BullMQ） |
-| 测试 | Vitest（TS）/ unittest（Python）/ PGlite（无依赖 PostgreSQL 的单测） |
+| 层            | 技术                                                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 前端          | Next.js 16 / React 19 / Tailwind 4 / TypeScript                                                                       |
+| 后端 API      | NestJS（Express adapter）/ Zod；Agent V1 Phase C 使用一次 qwen3.7-plus 意图分类、一次本地原文搜索和事务性安全导出确认 |
+| 数据库        | PostgreSQL 16（Drizzle ORM + node-postgres）                                                                          |
+| 向量库        | Qdrant（JS client + Python HTTP client）                                                                              |
+| Python worker | FFmpeg、ffprobe、PySceneDetect、SigLIP2（torch/transformers）、faster-whisper、Qwen2.5-VL（可选 Caption）             |
+| 任务队列      | PostgreSQL-backed jobs（`SELECT ... FOR UPDATE SKIP LOCKED`，无 Celery/BullMQ）                                       |
+| 测试          | Vitest（TS）/ unittest（Python）/ PGlite（无依赖 PostgreSQL 的单测）                                                  |
 
 ### 核心设计原则
 
@@ -253,15 +253,15 @@ pnpm dev:web
 
 ### 快速启动清单
 
-| 进程 | 命令 | 地址 |
-| --- | --- | --- |
-| PostgreSQL + Qdrant | `pnpm infra:up` | `:5432` / `:6333` |
-| 数据库迁移 | `pnpm db:migrate` | — |
-| 后端 API | `pnpm dev:server` | `http://127.0.0.1:4000` |
-| 本地模型服务 | `pnpm dev:model` | `http://127.0.0.1:4020` |
-| 本地 VLM 服务（可选） | `pnpm dev:vlm` | `http://127.0.0.1:4030` |
-| Python worker | `pnpm dev:worker` | — |
-| 前端 | `pnpm dev:web` | `http://127.0.0.1:3000` |
+| 进程                  | 命令              | 地址                    |
+| --------------------- | ----------------- | ----------------------- |
+| PostgreSQL + Qdrant   | `pnpm infra:up`   | `:5432` / `:6333`       |
+| 数据库迁移            | `pnpm db:migrate` | —                       |
+| 后端 API              | `pnpm dev:server` | `http://127.0.0.1:4000` |
+| 本地模型服务          | `pnpm dev:model`  | `http://127.0.0.1:4020` |
+| 本地 VLM 服务（可选） | `pnpm dev:vlm`    | `http://127.0.0.1:4030` |
+| Python worker         | `pnpm dev:worker` | —                       |
+| 前端                  | `pnpm dev:web`    | `http://127.0.0.1:3000` |
 
 > `pnpm dev` 只会并行启动后端 API 和前端；Python model service、Python worker、PostgreSQL、Qdrant 仍需按上面的顺序单独启动。
 > Python model service 和 Python worker 会通过 `python-dotenv` 读取仓库根目录 `.env`，因此 `DATABASE_URL`、`QDRANT_URL`、`SIGLIP_DEVICE` 等配置不用在终端里手动 export。
@@ -285,13 +285,13 @@ brew install --cask dbeaver-community
 2. 选择数据库类型 **PostgreSQL**。
 3. 在 **Main** 选项卡填入连接参数（与 `.env` 中保持一致）：
 
-   | 参数 | 值 | 说明 |
-   | --- | --- | --- |
-   | Host | `127.0.0.1` | 本地容器 |
-   | Port | `5432` | 对应 `.env` 的 `POSTGRES_PORT` |
-   | Database | `media_agent` | 对应 `POSTGRES_DB` |
-   | Username | `media_agent` | 对应 `POSTGRES_USER` |
-   | Password | `media_agent_dev` | 对应 `POSTGRES_PASSWORD` |
+   | 参数     | 值                | 说明                           |
+   | -------- | ----------------- | ------------------------------ |
+   | Host     | `127.0.0.1`       | 本地容器                       |
+   | Port     | `5432`            | 对应 `.env` 的 `POSTGRES_PORT` |
+   | Database | `media_agent`     | 对应 `POSTGRES_DB`             |
+   | Username | `media_agent`     | 对应 `POSTGRES_USER`           |
+   | Password | `media_agent_dev` | 对应 `POSTGRES_PASSWORD`       |
 
 4. 在 **SSL** 选项卡把 SSL Mode 设为 `Disable`（本地连接无需 SSL）。
 5. 点击 **Test Connection**。首次连接 DBeaver 会提示下载 PostgreSQL JDBC 驱动，按提示下载即可。
@@ -303,21 +303,21 @@ brew install --cask dbeaver-community
 
 连接后展开 `media_agent` → `Schemas` → `public` → `Tables` 即可看到所有表。核心表如下：
 
-| 表名 | 作用 | 关键字段 |
-| --- | --- | --- |
-| `libraries` | 素材库（一个本地根目录） | `name`、`root_path`、`status` |
-| `media_files` | 扫描到的媒体文件 | `path`、`media_type`、`index_status`、`duration_seconds` |
-| `media_assets` | 媒体资产（image / video_segment / video_frame / text_chunk / caption） | `asset_type`、`text_content`、`start/end_time_seconds`、`metadata_json` |
-| `vector_refs` | 向量引用，指向 Qdrant 中的 point | `collection_name`、`point_id`、`status`（pending/indexed）、`vector_dim` |
-| `jobs` | 后台任务队列 | `job_type`、`status`、`progress`、`input_json`、`result_json`、`error_message` |
-| `agent_runs` | Agent V1 可恢复 run 主状态 | `status`、`next_step`、`lease_version`、`waiting_expires_at` |
-| `agent_run_authorizations` | 逐 run 外发授权 | `allow_external_text`、`allow_external_visual`、`granted_at` |
-| `agent_run_steps` | 步骤尝试与外部派发审计 | `step_attempt_id`、`input_fingerprint`、`external_call_status` |
-| `agent_run_inputs` | 澄清、取消和未知结果重试输入 | `client_request_id`、`input_type`、`response_json` |
-| `agent_run_candidates` | 冻结候选身份 | `file_generation`、`asset_id`、`scene_id`、`rank` |
-| `agent_side_effects` | Phase C 预留的副作用幂等事实 | `effect_key`、`status`、`job_id` |
-| `agent_run_events` | Agent 事件流 | `event_type`、`tool_call_id`、`payload_json` |
-| `agent_tool_calls` | 旧 Agent MVP 工具调用审计（Phase B 固定工作流不再写入） | `tool_name`、`status`、`requires_confirmation` |
+| 表名                       | 作用                                                                   | 关键字段                                                                       |
+| -------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `libraries`                | 素材库（一个本地根目录）                                               | `name`、`root_path`、`status`                                                  |
+| `media_files`              | 扫描到的媒体文件                                                       | `path`、`media_type`、`index_status`、`duration_seconds`                       |
+| `media_assets`             | 媒体资产（image / video_segment / video_frame / text_chunk / caption） | `asset_type`、`text_content`、`start/end_time_seconds`、`metadata_json`        |
+| `vector_refs`              | 向量引用，指向 Qdrant 中的 point                                       | `collection_name`、`point_id`、`status`（pending/indexed）、`vector_dim`       |
+| `jobs`                     | 后台任务队列                                                           | `job_type`、`status`、`progress`、`input_json`、`result_json`、`error_message` |
+| `agent_runs`               | Agent V1 可恢复 run 主状态                                             | `status`、`next_step`、`lease_version`、`waiting_expires_at`                   |
+| `agent_run_authorizations` | 逐 run 外发授权                                                        | `allow_external_text`、`allow_external_visual`、`granted_at`                   |
+| `agent_run_steps`          | 步骤尝试与外部派发审计                                                 | `step_attempt_id`、`input_fingerprint`、`external_call_status`                 |
+| `agent_run_inputs`         | 澄清、取消和未知结果重试输入                                           | `client_request_id`、`input_type`、`response_json`                             |
+| `agent_run_candidates`     | 冻结候选身份                                                           | `file_generation`、`asset_id`、`scene_id`、`rank`                              |
+| `agent_side_effects`       | Phase C 导出副作用的唯一幂等事实                                       | `effect_key`、`status`、`job_id`                                               |
+| `agent_run_events`         | Agent 事件流                                                           | `event_type`、`tool_call_id`、`payload_json`                                   |
+| `agent_tool_calls`         | Phase C 导出预览、确认状态与工具调用审计                               | `tool_name`、`status`、`requires_confirmation`                                 |
 
 ### 常用查看 SQL
 

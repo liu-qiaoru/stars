@@ -9,6 +9,11 @@ import {
   agentRunInputs,
   agentRunSteps,
   agentRuns,
+  agentSideEffects,
+  agentToolCalls,
+  jobs,
+  mediaFiles,
+  videoScenes,
 } from '../database/schema.js'
 
 const CLAIMABLE_STATUSES: AgentRunStatus[] = ['queued', 'extracting_intent', 'searching']
@@ -27,6 +32,56 @@ const ALLOWED_EXECUTOR_TRANSITIONS: Partial<Record<AgentRunStatus, AgentRunStatu
 export interface AgentLeaseClaim {
   run: typeof agentRuns.$inferSelect
   step: typeof agentRunSteps.$inferSelect
+}
+
+type ExportPreview = {
+  candidate_key: string
+  file_id: string
+  file_generation: number
+  scene_id: string
+  scene_start_seconds: number
+  scene_end_seconds: number
+  start_time_seconds: number
+  end_time_seconds: number
+  output_format: 'mp4'
+  requires_confirmation: true
+}
+
+function parseScope(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (!Array.isArray(record.library_ids) || !Array.isArray(record.media_types)) return undefined
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  const allowedMediaTypes = new Set(['image', 'video', 'audio', 'document'])
+  if (
+    record.library_ids.some((item) => typeof item !== 'string' || !uuidPattern.test(item)) ||
+    record.media_types.some((item) => typeof item !== 'string' || !allowedMediaTypes.has(item))
+  ) {
+    // 空数组明确表示“没有额外限制”，但脏元素绝不能通过 filter 变成空数组，
+    // 否则损坏的窄范围会被静默放宽成所有素材库或媒体类型。
+    return undefined
+  }
+  return {
+    libraryIds: record.library_ids as string[],
+    mediaTypes: record.media_types as string[],
+  }
+}
+
+function parseExportPreview(value: unknown): ExportPreview | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const preview = value as Partial<ExportPreview>
+  return typeof preview.candidate_key === 'string' &&
+    typeof preview.file_id === 'string' &&
+    typeof preview.file_generation === 'number' &&
+    typeof preview.scene_id === 'string' &&
+    typeof preview.scene_start_seconds === 'number' &&
+    typeof preview.scene_end_seconds === 'number' &&
+    typeof preview.start_time_seconds === 'number' &&
+    typeof preview.end_time_seconds === 'number' &&
+    preview.output_format === 'mp4' &&
+    preview.requires_confirmation === true
+    ? (preview as ExportPreview)
+    : undefined
 }
 
 /**
@@ -1036,6 +1091,385 @@ export async function retryUnknownAgentRun(
       createdAt: now,
     })
     return { kind: 'accepted', run }
+  })
+}
+
+/**
+ * 将一个冻结视频候选变成只读导出预览。这里重新读取 PostgreSQL 当前 generation、
+ * Server enforced scope 和正式场景边界；任何事实已变化都不会进入确认态。
+ */
+export async function selectAgentExport(
+  db: Database,
+  input: {
+    runId: string
+    candidateKey: string
+    startTimeSeconds: number
+    endTimeSeconds: number
+    outputFormat: 'mp4'
+    waitingTtlSeconds: number
+  },
+  now = new Date(),
+) {
+  return db.transaction(async (transaction) => {
+    const tx = transaction as Database
+    const [run] = await tx.select().from(agentRuns).where(eq(agentRuns.id, input.runId)).limit(1)
+    if (!run) return { kind: 'not_found' as const }
+    if (run.status !== 'waiting_for_export_selection') return { kind: 'invalid_state' as const }
+    if (!run.waitingExpiresAt || run.waitingExpiresAt <= now) return { kind: 'expired' as const }
+
+    const [candidate] = await tx
+      .select()
+      .from(agentRunCandidates)
+      .where(
+        and(
+          eq(agentRunCandidates.runId, input.runId),
+          eq(agentRunCandidates.candidateKey, input.candidateKey),
+        ),
+      )
+      .limit(1)
+    if (!candidate) return { kind: 'candidate_invalid' as const }
+    if (
+      !candidate.sceneId ||
+      candidate.sceneStartSeconds === null ||
+      candidate.sceneEndSeconds === null
+    ) {
+      return { kind: 'candidate_invalid' as const }
+    }
+    const [file] = await tx
+      .select()
+      .from(mediaFiles)
+      .where(and(eq(mediaFiles.id, candidate.fileId), isNull(mediaFiles.deletedAt)))
+      .limit(1)
+    const [scene] = await tx
+      .select()
+      .from(videoScenes)
+      .where(eq(videoScenes.id, candidate.sceneId))
+      .limit(1)
+    const scope = parseScope(run.enforcedScopeJson)
+    const sceneStart = Number(candidate.sceneStartSeconds)
+    const sceneEnd = Number(candidate.sceneEndSeconds)
+    if (
+      !file ||
+      file.mediaType !== 'video' ||
+      file.indexGeneration !== candidate.fileGeneration ||
+      !scene ||
+      scene.fileId !== file.id ||
+      scene.indexGeneration !== candidate.fileGeneration ||
+      Number(scene.startTimeSeconds) !== sceneStart ||
+      Number(scene.endTimeSeconds) !== sceneEnd
+    ) {
+      return { kind: 'stale' as const }
+    }
+    if (
+      !scope ||
+      (scope.mediaTypes.length > 0 && !scope.mediaTypes.includes('video')) ||
+      (scope.libraryIds.length > 0 && !scope.libraryIds.includes(file.libraryId))
+    ) {
+      return { kind: 'scope_invalid' as const }
+    }
+    const fileEnd = file.durationSeconds === null ? sceneEnd : Number(file.durationSeconds)
+    if (
+      input.startTimeSeconds < sceneStart ||
+      input.endTimeSeconds > sceneEnd ||
+      input.endTimeSeconds > fileEnd ||
+      input.endTimeSeconds <= input.startTimeSeconds
+    ) {
+      return { kind: 'range_invalid' as const }
+    }
+
+    const toolCallId = `export-${randomUUID()}`
+    const waitingStepId = randomUUID()
+    const effectId = randomUUID()
+    const preview: ExportPreview = {
+      candidate_key: candidate.candidateKey,
+      file_id: file.id,
+      file_generation: file.indexGeneration,
+      scene_id: scene.id,
+      scene_start_seconds: sceneStart,
+      scene_end_seconds: sceneEnd,
+      start_time_seconds: input.startTimeSeconds,
+      end_time_seconds: input.endTimeSeconds,
+      output_format: input.outputFormat,
+      requires_confirmation: true,
+    }
+    await tx.insert(agentToolCalls).values({
+      id: randomUUID(),
+      runId: input.runId,
+      toolCallId,
+      toolName: 'export_clip',
+      status: 'waiting_for_confirmation',
+      inputJson: preview,
+      requiresConfirmation: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    await tx.insert(agentSideEffects).values({
+      id: effectId,
+      runId: input.runId,
+      effectKey: 'export_clip_v1',
+      toolCallId,
+      status: 'pending',
+      confirmationJson: preview,
+      createdAt: now,
+      updatedAt: now,
+    })
+    const [updatedRun] = await tx
+      .update(agentRuns)
+      .set({
+        status: 'waiting_for_confirmation',
+        waitingStepId,
+        waitingExpiresAt: new Date(now.getTime() + input.waitingTtlSeconds * 1000),
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(agentRuns.id, input.runId),
+          eq(agentRuns.status, 'waiting_for_export_selection'),
+          eq(agentRuns.waitingStepId, run.waitingStepId!),
+        ),
+      )
+      .returning()
+    if (!updatedRun) throw new Error('Agent export selection state changed during transaction')
+    await tx.insert(agentRunEvents).values({
+      id: randomUUID(),
+      runId: input.runId,
+      eventType: 'export_selection_saved',
+      toolCallId,
+      payloadJson: { waiting_step_id: waitingStepId, candidate_key: candidate.candidateKey },
+      createdAt: now,
+    })
+    return { kind: 'accepted' as const, run: updatedRun, toolCallId, waitingStepId, preview }
+  })
+}
+
+/**
+ * 确认事务把条件守卫、确认输入、唯一副作用、Job 和 run/event 更新绑在一起。
+ * 因此重复或并发请求只能取得同一个 agent_side_effects.job_id。
+ */
+export async function confirmAgentExport(
+  db: Database,
+  input: {
+    runId: string
+    waitingStepId: string
+    toolCallId: string
+    clientRequestId: string
+  },
+  now = new Date(),
+) {
+  return db.transaction(async (transaction) => {
+    const tx = transaction as Database
+    const replayExisting = async () => {
+      const [savedConfirmation] = await tx
+        .select()
+        .from(agentRunInputs)
+        .where(
+          and(
+            eq(agentRunInputs.runId, input.runId),
+            eq(agentRunInputs.waitingStepId, input.waitingStepId),
+            eq(agentRunInputs.inputType, 'confirm_export'),
+          ),
+        )
+        .limit(1)
+      const savedResponse = savedConfirmation?.responseJson as Record<string, unknown> | undefined
+      if (savedResponse?.tool_call_id !== input.toolCallId) return undefined
+      const [effect] = await tx
+        .select()
+        .from(agentSideEffects)
+        .where(
+          and(
+            eq(agentSideEffects.runId, input.runId),
+            eq(agentSideEffects.toolCallId, input.toolCallId),
+          ),
+        )
+        .limit(1)
+      if (!effect?.jobId) return undefined
+      const [job] = await tx.select().from(jobs).where(eq(jobs.id, effect.jobId)).limit(1)
+      return job
+    }
+    const [existingInput] = await tx
+      .select()
+      .from(agentRunInputs)
+      .where(
+        and(
+          eq(agentRunInputs.runId, input.runId),
+          eq(agentRunInputs.clientRequestId, input.clientRequestId),
+        ),
+      )
+      .limit(1)
+    if (existingInput) {
+      const stored = existingInput.responseJson as Record<string, unknown>
+      if (
+        existingInput.inputType !== 'confirm_export' ||
+        existingInput.waitingStepId !== input.waitingStepId ||
+        stored.tool_call_id !== input.toolCallId
+      ) {
+        return { kind: 'invalid_state' as const }
+      }
+      const job = await replayExisting()
+      return job ? { kind: 'duplicate' as const, job } : { kind: 'invalid_state' as const }
+    }
+
+    const [run] = await tx.select().from(agentRuns).where(eq(agentRuns.id, input.runId)).limit(1)
+    if (!run) return { kind: 'not_found' as const }
+    if (run.status !== 'waiting_for_confirmation' || run.waitingStepId !== input.waitingStepId) {
+      const job = await replayExisting()
+      return job ? { kind: 'duplicate' as const, job } : { kind: 'invalid_state' as const }
+    }
+    if (!run.waitingExpiresAt || run.waitingExpiresAt <= now) return { kind: 'expired' as const }
+    const [toolCall] = await tx
+      .select()
+      .from(agentToolCalls)
+      .where(
+        and(eq(agentToolCalls.runId, input.runId), eq(agentToolCalls.toolCallId, input.toolCallId)),
+      )
+      .limit(1)
+    const [effect] = await tx
+      .select()
+      .from(agentSideEffects)
+      .where(
+        and(
+          eq(agentSideEffects.runId, input.runId),
+          eq(agentSideEffects.toolCallId, input.toolCallId),
+        ),
+      )
+      .limit(1)
+    const preview = parseExportPreview(effect?.confirmationJson)
+    if (
+      !toolCall ||
+      !toolCall.requiresConfirmation ||
+      toolCall.status !== 'waiting_for_confirmation' ||
+      !effect ||
+      effect.status !== 'pending' ||
+      !preview
+    ) {
+      return { kind: 'invalid_state' as const }
+    }
+    const [candidate] = await tx
+      .select()
+      .from(agentRunCandidates)
+      .where(
+        and(
+          eq(agentRunCandidates.runId, input.runId),
+          eq(agentRunCandidates.candidateKey, preview.candidate_key),
+        ),
+      )
+      .limit(1)
+    const [file] = await tx
+      .select()
+      .from(mediaFiles)
+      .where(eq(mediaFiles.id, preview.file_id))
+      .limit(1)
+    const [scene] = await tx
+      .select()
+      .from(videoScenes)
+      .where(eq(videoScenes.id, preview.scene_id))
+      .limit(1)
+    const scope = parseScope(run.enforcedScopeJson)
+    if (
+      !candidate ||
+      !file ||
+      file.deletedAt ||
+      file.mediaType !== 'video' ||
+      file.indexGeneration !== preview.file_generation ||
+      candidate.fileId !== preview.file_id ||
+      candidate.fileGeneration !== preview.file_generation ||
+      candidate.sceneId !== preview.scene_id ||
+      Number(candidate.sceneStartSeconds) !== preview.scene_start_seconds ||
+      Number(candidate.sceneEndSeconds) !== preview.scene_end_seconds ||
+      !scene ||
+      scene.fileId !== file.id ||
+      scene.indexGeneration !== preview.file_generation ||
+      Number(scene.startTimeSeconds) !== preview.scene_start_seconds ||
+      Number(scene.endTimeSeconds) !== preview.scene_end_seconds ||
+      preview.start_time_seconds < preview.scene_start_seconds ||
+      preview.end_time_seconds > preview.scene_end_seconds ||
+      preview.end_time_seconds <= preview.start_time_seconds ||
+      (file.durationSeconds !== null && preview.end_time_seconds > Number(file.durationSeconds))
+    ) {
+      return { kind: 'stale' as const }
+    }
+    if (
+      !scope ||
+      (scope.mediaTypes.length > 0 && !scope.mediaTypes.includes('video')) ||
+      (scope.libraryIds.length > 0 && !scope.libraryIds.includes(file.libraryId))
+    ) {
+      return { kind: 'scope_invalid' as const }
+    }
+
+    const [claimedTool] = await tx
+      .update(agentToolCalls)
+      .set({ status: 'confirmed', confirmedAt: now, updatedAt: now })
+      .where(
+        and(
+          eq(agentToolCalls.id, toolCall.id),
+          eq(agentToolCalls.status, 'waiting_for_confirmation'),
+          eq(agentToolCalls.requiresConfirmation, true),
+        ),
+      )
+      .returning()
+    if (!claimedTool) {
+      const job = await replayExisting()
+      return job ? { kind: 'duplicate' as const, job } : { kind: 'invalid_state' as const }
+    }
+    await tx.insert(agentRunInputs).values({
+      id: randomUUID(),
+      runId: input.runId,
+      waitingStepId: input.waitingStepId,
+      clientRequestId: input.clientRequestId,
+      inputType: 'confirm_export',
+      responseJson: { tool_call_id: input.toolCallId },
+      createdAt: now,
+    })
+    const jobId = randomUUID()
+    const [job] = await tx
+      .insert(jobs)
+      .values({
+        id: jobId,
+        jobType: 'export_clip',
+        fileId: file.id,
+        inputJson: {
+          file_id: file.id,
+          start_time_seconds: preview.start_time_seconds,
+          end_time_seconds: preview.end_time_seconds,
+          output_format: preview.output_format,
+          export_request_id: effect.id,
+        },
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+    await tx
+      .update(agentSideEffects)
+      .set({ status: 'confirmed', jobId, updatedAt: now })
+      .where(eq(agentSideEffects.id, effect.id))
+    const [updatedRun] = await tx
+      .update(agentRuns)
+      .set({
+        status: 'succeeded',
+        waitingStepId: null,
+        waitingExpiresAt: null,
+        summary: '导出请求已确认，后台 Job 已创建。',
+        finishedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(agentRuns.id, input.runId),
+          eq(agentRuns.status, 'waiting_for_confirmation'),
+          eq(agentRuns.waitingStepId, input.waitingStepId),
+        ),
+      )
+      .returning()
+    if (!updatedRun) throw new Error('Agent confirmation state changed during transaction')
+    await tx.insert(agentRunEvents).values({
+      id: randomUUID(),
+      runId: input.runId,
+      eventType: 'export_job_created',
+      toolCallId: input.toolCallId,
+      payloadJson: { job_id: jobId },
+      createdAt: now,
+    })
+    return { kind: 'created' as const, job }
   })
 }
 

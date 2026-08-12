@@ -29,6 +29,7 @@ describe('createSettings', () => {
       agentLeaseDurationMs: 130000,
       agentActivityTimeoutMs: 120000,
       agentWaitingTtlSeconds: 604800,
+      agentWebPollIntervalMs: 2000,
       jobCoordinatorEnabled: true,
       jobCoordinatorIntervalMs: 5000,
       jobCoordinatorEmbeddingLimit: 100,
@@ -118,6 +119,7 @@ describe('createSettings', () => {
       agentLeaseDurationMs: 130000,
       agentActivityTimeoutMs: 120000,
       agentWaitingTtlSeconds: 604800,
+      agentWebPollIntervalMs: 2000,
     })
 
     expect(
@@ -136,6 +138,7 @@ describe('createSettings', () => {
         AGENT_LEASE_DURATION_MS: '150000',
         AGENT_ACTIVITY_TIMEOUT_MS: '90000',
         AGENT_WAITING_TTL_SECONDS: '86400',
+        AGENT_WEB_POLL_INTERVAL_MS: '2500',
       }),
     ).toMatchObject({
       allowExternalLlm: true,
@@ -150,6 +153,7 @@ describe('createSettings', () => {
       agentLeaseDurationMs: 150000,
       agentActivityTimeoutMs: 90000,
       agentWaitingTtlSeconds: 86400,
+      agentWebPollIntervalMs: 2500,
     })
   })
 

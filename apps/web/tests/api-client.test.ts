@@ -162,10 +162,16 @@ describe('typed API client', () => {
     )
   })
 
-  test('creates, fetches, and confirms agent runs', async () => {
+  test('reads settings and completes Agent export selection and confirmation with stable routes', async () => {
     fetchMock
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ run_id: 'run-1', status: 'succeeded' }), { status: 200 }),
+        new Response(
+          JSON.stringify({ provider: 'rightapi', model: 'qwen3.7-plus', editable: {} }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ run_id: 'run-1', status: 'queued' }), { status: 200 }),
       )
       .mockResolvedValueOnce(
         new Response(
@@ -188,41 +194,79 @@ describe('typed API client', () => {
         ),
       )
       .mockResolvedValueOnce(
+        new Response(JSON.stringify({ waiting_step_id: 'wait-1', tool_call_id: 'export-1' }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
         new Response(JSON.stringify({ job_id: 'job-1', status: 'queued' }), { status: 200 }),
       )
     const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })
 
+    await expect(client.getAgentSettings()).resolves.toMatchObject({ model: 'qwen3.7-plus' })
     await expect(
-      client.createAgentRun({ prompt: '查找片段', allow_external_vlm: false }),
+      client.createAgentRun({
+        prompt: '查找片段',
+        allow_external_text: true,
+        allow_external_visual: false,
+      }),
     ).resolves.toEqual({
       run_id: 'run-1',
-      status: 'succeeded',
+      status: 'queued',
     })
     await expect(client.getAgentRun('run-1')).resolves.toMatchObject({
       id: 'run-1',
       tool_calls: [{ name: 'search_media' }],
     })
-    await expect(client.confirmAgentToolCall('run-1', 'export-1')).resolves.toEqual({
+    await expect(
+      client.selectAgentExport('run-1', {
+        candidate_key: 'video:scene-1',
+        start_time_seconds: 10,
+        end_time_seconds: 20,
+        output_format: 'mp4',
+      }),
+    ).resolves.toMatchObject({ tool_call_id: 'export-1' })
+    await expect(
+      client.confirmAgentExport('run-1', {
+        waiting_step_id: 'wait-1',
+        tool_call_id: 'export-1',
+        client_request_id: 'confirm-1',
+      }),
+    ).resolves.toEqual({
       job_id: 'job-1',
       status: 'queued',
     })
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
+      'http://api.local/agent/settings',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       'http://api.local/agent/runs',
       expect.objectContaining({ method: 'POST' }),
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       'http://api.local/agent/runs/run-1',
       expect.objectContaining({ method: 'GET' }),
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      4,
+      'http://api.local/agent/runs/run-1/export-selection',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
       'http://api.local/agent/runs/run-1/confirm',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ tool_call_id: 'export-1' }),
+        body: JSON.stringify({
+          waiting_step_id: 'wait-1',
+          tool_call_id: 'export-1',
+          client_request_id: 'confirm-1',
+        }),
       }),
     )
   })

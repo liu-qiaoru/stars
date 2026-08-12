@@ -108,4 +108,20 @@ describe('job schemas', () => {
       jobInputSchemas.generate_caption.parse({ file_id, prompt_version: 'caption-v3' }),
     ).toThrow()
   })
+
+  it('allows Agent exports to carry a stable request identity without changing legacy clip requests', () => {
+    const legacy = jobInputSchemas.export_clip.parse({
+      file_id: '11111111-1111-4111-8111-111111111111',
+      start_time_seconds: 10,
+      end_time_seconds: 20,
+      output_format: 'mp4',
+    })
+    const agent = jobInputSchemas.export_clip.parse({
+      ...legacy,
+      export_request_id: '22222222-2222-4222-8222-222222222222',
+    })
+
+    expect(legacy).not.toHaveProperty('export_request_id')
+    expect(agent.export_request_id).toBe('22222222-2222-4222-8222-222222222222')
+  })
 })

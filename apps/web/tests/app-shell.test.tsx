@@ -21,6 +21,7 @@ describe('AppShell', () => {
     )
     expect(within(nav).getByRole('link', { name: /搜索/i })).toHaveAttribute('href', '/search')
     expect(within(nav).getByRole('link', { name: /任务/i })).toHaveAttribute('href', '/jobs')
+    expect(within(nav).getByRole('link', { name: /设置/i })).toHaveAttribute('href', '/settings')
     expect(within(nav).queryByRole('link', { name: /媒体/i })).not.toBeInTheDocument()
     expect(within(nav).queryByRole('link', { name: /助手/i })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Ask' })).toHaveAttribute('href', '/agent')
@@ -31,6 +32,7 @@ describe('AppShell', () => {
     ['/search', '搜索'],
     ['/jobs', '任务'],
     ['/agent', 'Ask'],
+    ['/settings', '设置'],
   ])('highlights %s route', (route, label) => {
     pathname = route
     render(

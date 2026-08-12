@@ -1,16 +1,24 @@
 import { createHash } from 'node:crypto'
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Optional } from '@nestjs/common'
 import { agentIntentSchema } from '@local-media-agent/shared/schemas'
 import { z } from 'zod'
 import { SETTINGS, type Settings } from '../config/settings.js'
+import { AgentRuntimeConfigService } from './agent-runtime-config.service.js'
 import { AgentStepExecutionError } from './agent.types.js'
 
 export const AGENT_INTENT_HTTP_CLIENT = Symbol('AGENT_INTENT_HTTP_CLIENT')
 export const AGENT_INTENT_RUNNER = Symbol('AGENT_INTENT_RUNNER')
 export const AGENT_INTENT_TOOL_NAME = 'extract_agent_intent'
-export const AGENT_INTENT_MODEL = 'qwen3.7-plus'
-export const AGENT_INTENT_PROMPT_VERSION = 'agent-intent-v1'
-export const AGENT_INTENT_SCHEMA_VERSION = 'agent-intent-schema-v1'
+export {
+  AGENT_INTENT_MODEL,
+  AGENT_INTENT_PROMPT_VERSION,
+  AGENT_INTENT_SCHEMA_VERSION,
+} from './agent-protocol.constants.js'
+import {
+  AGENT_INTENT_MODEL,
+  AGENT_INTENT_PROMPT_VERSION,
+  AGENT_INTENT_SCHEMA_VERSION,
+} from './agent-protocol.constants.js'
 export const AGENT_INTENT_MAX_RESPONSE_BYTES = 262_144
 
 type AgentIntent = z.infer<typeof agentIntentSchema>
@@ -155,6 +163,7 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
     @Inject(SETTINGS) private readonly settings: Settings,
     @Inject(AGENT_INTENT_HTTP_CLIENT)
     private readonly request: typeof fetch,
+    @Optional() private readonly runtimeConfig?: AgentRuntimeConfigService,
   ) {}
 
   isReady() {
@@ -195,7 +204,9 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify(this.requestBody(input)),
-        signal: AbortSignal.timeout(this.settings.agentToolTimeoutMs),
+        signal: AbortSignal.timeout(
+          this.runtimeConfig?.values().tool_timeout_ms ?? this.settings.agentToolTimeoutMs,
+        ),
       })
     } catch {
       throw new AgentIntentRunnerError(

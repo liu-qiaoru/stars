@@ -19,6 +19,7 @@ export interface Settings {
   agentLeaseDurationMs: number
   agentActivityTimeoutMs: number
   agentWaitingTtlSeconds: number
+  agentWebPollIntervalMs?: number
   jobCoordinatorEnabled: boolean
   jobCoordinatorIntervalMs: number
   jobCoordinatorEmbeddingLimit: number
@@ -179,6 +180,20 @@ const settingsSchema = z.object({
         return z.NEVER
       }
       return seconds
+    }),
+  AGENT_WEB_POLL_INTERVAL_MS: z
+    .string()
+    .default('2000')
+    .transform((value, context) => {
+      const interval = Number(value)
+      if (!Number.isInteger(interval) || interval < 500 || interval > 60000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'AGENT_WEB_POLL_INTERVAL_MS must be between 500 and 60000',
+        })
+        return z.NEVER
+      }
+      return interval
     }),
   JOB_COORDINATOR_ENABLED: z
     .enum(['true', 'false'])
@@ -358,6 +373,7 @@ export function createSettings(env: Env = process.env): Settings {
     agentLeaseDurationMs: parsed.AGENT_LEASE_DURATION_MS,
     agentActivityTimeoutMs: parsed.AGENT_ACTIVITY_TIMEOUT_MS,
     agentWaitingTtlSeconds: parsed.AGENT_WAITING_TTL_SECONDS,
+    agentWebPollIntervalMs: parsed.AGENT_WEB_POLL_INTERVAL_MS,
     jobCoordinatorEnabled: parsed.JOB_COORDINATOR_ENABLED,
     jobCoordinatorIntervalMs: parsed.JOB_COORDINATOR_INTERVAL_MS,
     jobCoordinatorEmbeddingLimit: parsed.JOB_COORDINATOR_EMBEDDING_LIMIT,

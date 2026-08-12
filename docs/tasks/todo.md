@@ -82,6 +82,44 @@ Review：
   本阶段最终复审记录。真实 RightAPI 调用、费用和数据外发均为 0；所有 Provider 测试使用
   可注入测试桩。
 
+## Agent V1 Phase C：配置页面、Web 生命周期与安全导出闭环
+
+- Start：2026-08-12。目标是把 Phase B 的冻结候选接成可初步使用的完整闭环：Web 轮询
+  持久化 run，用户选择视频场景和时间范围，Server 在单一 PostgreSQL 事务中幂等创建
+  `export_clip` Job，Python Worker 以唯一临时文件安全导出，Web 独立展示 run 与 Job 状态。
+- 范围边界：不进入 Rerank、VLM、证据构建、查询改写、重新扫描、重新索引或重新评测；
+  所有自动化 Provider 测试继续使用 fake，真实 RightAPI 调用次数必须为 0。
+- 验证计划：按 HTTP API、Web 可见行为和 Worker Job handler 三个公共测试缝隙逐条红绿实现；
+  最后运行 Shared/Server/Web/Python 定向和全量检查、lint、format check、迁移与数据完整性核对，
+  再以 `8a615b0` 为固定起点完成 Standards/Spec 双轴 Review 和复审。
+
+- [x] 增加 allowlist 运行配置读取、保存、严格校验、协议只读字段和 API Key 脱敏。
+- [x] 使用 shadcn/ui 更新 `/agent`、新增 `/settings`、AppShell 导航和导出/任务状态区域。
+- [x] 实现约 2 秒轮询、隐藏暂停、恢复立即刷新、终态停止和卸载清理。
+- [x] 展示 intent、Server enforced scope、候选证据、未验证条件和 `review_status=not_run`。
+- [x] 实现冻结候选选择、时间范围预览和 stale generation/scope/场景边界复核。
+- [x] 在单一 PostgreSQL 事务中实现确认条件守卫、唯一副作用、Job 创建/复用和事件更新。
+- [x] Worker 使用唯一 `.partial`、原子 rename、不覆盖目标并在失败时清理临时文件。
+- [x] 独立展示 Agent run 与导出 Job 状态，并保留 `outcome_unknown` 专用重试边界。
+- [x] 同步架构、API、环境变量、Job 协议和本阶段 Review。
+- [x] 完成定向/全量验证、真实数据核对和双轴 Review 后只提交 Phase C 文件。
+
+Review：
+
+- Result：Phase C 已形成可初步使用的闭环。Web 从 PostgreSQL 持久化 run 恢复，按可见性
+  分别轮询 run 与导出 Job；用户选择冻结视频场景后，Server 返回并由页面明确展示只读预览。
+  确认事务重新校验 run/步骤、候选身份、generation、enforced scope、场景和时间范围，并通过
+  唯一副作用记录让重复或并发请求复用同一个 `export_clip` Job。Worker 只写唯一 `.partial`，
+  再用平台原生 no-replace rename 原子发布；已有目标或失败都不会被覆盖或遗留半成品。
+- Notes：本阶段没有新增 migration，也没有修改真实数据库或 Qdrant。只读核对前后均为 35 个
+  活跃且已索引文件、7,940 个 Asset、1,919 个场景、7,564 个已索引 Vector Ref 和 9,910 个
+  Job；Qdrant `image_vectors=8`、`video_frame_vectors=5,629`、`caption_text_vectors=1,927`，
+  合计 7,564 个 Point。最终 `corepack pnpm check` 通过 Shared 12、Web 53、Server 190 项测试及
+  Next 生产构建；`.venv` Python Worker 123 项通过，`cloud_calls=0`。lint 通过并保留 1 个既有
+  未使用 import warning；Phase C 29 个可格式化文件和 `git diff --check` 通过，全仓 format
+  check 仍由 38 个未改动历史文件阻断。Standards/Spec 首轮阻断项已修复，最终双轴复审无
+  阻断项。真实 RightAPI 调用、费用和本地媒体数据外发均为 0。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

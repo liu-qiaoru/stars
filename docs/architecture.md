@@ -31,14 +31,15 @@ docs            架构、API 和实施文档
 
 - 前端：Next.js、React、TypeScript、Tailwind。
 - 主控 API：TypeScript、NestJS、默认 Express adapter、Zod。
-- Agent 持久化执行：NestJS Server + PostgreSQL 租约状态机；Phase B 可按部署开关调用
-  RightAPI `qwen3.7-plus` 做一次文本意图分类。
+- Agent 持久化执行：NestJS Server + PostgreSQL 租约状态机；Phase C 在 Phase B 单次文本
+  意图分类和原文搜索之后，加入候选选择、确认守卫与幂等导出 Job。
 - 数据访问：PostgreSQL、Drizzle、node-postgres。
 - 向量数据库：Qdrant，使用 Qdrant JS client。Collection、point、payload 和 PostgreSQL 引用结构见 `docs/vector-index-design.md`。
 - 后台任务：PostgreSQL-backed jobs。Redis 只作为可选实时事件/pub-sub 通道。
 - Python worker：FFmpeg、ffprobe、PySceneDetect、SigLIP2、faster-whisper、Caption 文本嵌入模型，以及通过 Ollama 调用的 Qwen2.5-VL。
-- Agent 编排：Server 固定状态迁移、租约隔离与逐步持久化。Phase B 已接入独立的
-  RightAPI `qwen3.7-plus` 单次 AgentIntent Runner；Python 不负责 Agent 决策。
+- Agent 编排：Server 固定状态迁移、租约隔离与逐步持久化。RightAPI `qwen3.7-plus`
+  仍只执行一次 AgentIntent；Phase C 的候选、确认和 Job 创建全部由 Server 守卫，Python
+  只安全执行已确认的导出，不负责 Agent 决策。
 - 外部多模态模型层：通过 TypeScript Model Gateway 接入 OpenAI、Claude、Gemini 或其他提供商。
 - 存储：本地文件系统，用于源素材引用、缓存文件、缩略图、抽帧、转写文本和导出剪辑。
 
@@ -103,7 +104,7 @@ LibrariesModule
 JobsModule
 MediaModule
 SearchModule
-AgentModule        持有 Server Agent 租约、Phase B 固定步骤和恢复 API
+AgentModule        持有 Agent 租约、固定搜索步骤、Phase C 确认导出和恢复 API
 ModelGatewayModule
 ```
 
@@ -162,7 +163,7 @@ Retrieval 组合 Qdrant 向量搜索、PostgreSQL full-text search 和 PostgreSQ
 Agent Runtime 位于 TypeScript/NestJS Server 主控层。Agent 是固定工作流编排器，
 不是搜索引擎本身，也不是模型自主 Tool Calling 循环。
 
-Phase B 当前已实现的执行模型：
+Phase C 当前已实现的完整闭环：
 
 ```text
 POST /agent/runs
@@ -175,7 +176,15 @@ POST /agent/runs
 → 提交严格校验后的意图和 Server 本地解析的素材范围
 → 用用户完整原文、original、rrf 在事务外调用一次 SearchService
 → 短事务用 lease_owner + lease_version + status + step_attempt_id 提交
-→ 同一事务冻结 agent_run_candidates 和 succeeded 状态
+→ 同一事务冻结 agent_run_candidates
+→ 普通搜索进入 succeeded；明确导出意图进入 waiting_for_export_selection
+→ Web 约每 2 秒读取持久化 run，隐藏时暂停、恢复可见时立即刷新
+→ 用户选择冻结视频候选和场景内时间范围
+→ Server 重新核对 generation、enforced scope、场景和文件边界并生成只读预览
+→ 用户确认后，同一事务条件领取 requires_confirmation tool call
+→ 同事务保存确认、创建或复用唯一 export_clip Job、更新 run/event
+→ Python Worker 写唯一 .partial，安全原子发布最终文件
+→ Web 分别展示 Agent run 和独立 Job 状态
 ```
 
 Lease（租约）是 Server 执行器的限时工作证。`lease_version` 是 Fencing Token
@@ -196,14 +205,19 @@ PostgreSQL 中的恢复事实分工：
 - `agent_run_authorizations`：每个 run 的文本/视觉外发授权，两者不能互相替代。
 - `agent_run_candidates`：Phase B 搜索后冻结 `file_generation`、Asset/场景身份、边界、
   RRF 排名和召回证据。提交前重新核对文件版本及 Server 强制范围。
-- `agent_side_effects`：Phase C 使用的唯一副作用幂等键；Phase A 只建协议，不创建导出 job。
+- `agent_side_effects`：每个 run 的 `export_clip_v1` 唯一副作用、确认预览和关联 Job。
 
-Phase B 注册了独立、可注入的 RightAPI `qwen3.7-plus` AgentIntent Runner。它使用
+Phase C 继续复用独立、可注入的 RightAPI `qwen3.7-plus` AgentIntent Runner。它使用
 Anthropic Messages 兼容接口、非思考模式和唯一强制 `extract_agent_intent` Tool Call，
 只接收本次用户原文与去标识化能力边界。模型不输出 query，也看不到候选、Caption、转录、
 文件名或路径。HTTP/Tool Call/Zod Schema/原文连续子串/范围任一校验失败时 run 明确失败，
 不会从自由文本猜 JSON 或自动修复。`ALLOW_EXTERNAL_LLM`、RightAPI 配置或执行器未就绪时，
-创建接口仍在数据库写入前拒绝。Phase C 才实现 Web 轮询、候选选择与安全确认导出。
+创建接口仍在数据库写入前拒绝。Rerank 和 VLM 仍未接入。
+
+`GET/PUT /agent/settings` 只暴露 Server allowlist 中的非敏感运行参数。Provider、固定模型、
+Prompt/Schema 版本只读；`RIGHT_CODE_API_KEY` 只返回 configured 布尔值，Provider URL 和 Key
+值不会返回浏览器。超时、租约、等待期限、启用开关、执行扫描间隔和 Web 轮询间隔都在
+当前 Server 进程立即生效；进程重启后重新采用环境变量默认值。
 
 NestJS AgentModule 组织：
 
@@ -211,6 +225,7 @@ NestJS AgentModule 组织：
 apps/server/src/agent/
   agent.controller.ts          run、恢复、取消和能力 HTTP API
   agent.service.ts             输入校验、capabilities 和用例边界
+  agent-runtime-config.service.ts  设置 allowlist、脱敏响应与跨字段校验
   agent-run.repository.ts      短事务、租约、幂等输入和恢复状态机
   agent-executor.service.ts    定时领取、过期恢复与事务外步骤执行
   qwen-agent-intent.runner.ts  唯一强制 Tool Call 和严格 AgentIntent 校验
@@ -228,7 +243,10 @@ Python worker 和 Python model service 是两个独立进程，但共享同一�
 
 ### Clip Export
 
-Clip Export 由 TypeScript API 创建 job，Python worker 使用 FFmpeg 直接处理原始本地视频文件。Fast mode 可以使用 stream copy。Accurate mode 可以重新编码以获得更精确的时间边界。
+Clip Export 由 TypeScript API 创建 job，Python worker 使用 FFmpeg 直接处理原始本地视频文件。
+Agent 确认以 `agent_side_effects.id` 作为 `export_request_id`，所以重复确认只关联一个 Job 和一个
+输出目标。Worker 先用 FFmpeg `-n` 写唯一 `.partial`，成功后在同一文件系统原子发布；目标已存在
+或任一步失败时 Job 明确失败并清理临时文件，绝不使用 `-y` 覆盖。
 
 ## 数据归属
 

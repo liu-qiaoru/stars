@@ -309,6 +309,57 @@ describe('AgentV1StepHandler', () => {
     }
   })
 
+  test('明确导出意图在搜索后等待用户选择，不把候选阶段误报为 succeeded', async () => {
+    const testDb = await createTestDatabase()
+    try {
+      const runner: AgentIntentRunner = {
+        isReady: () => true,
+        fingerprint: () => 'sha256:export-intent',
+        extract: vi.fn(async () => ({
+          ...validatedIntent({ searchScope: 'visual', mediaTypes: ['video'] }),
+          intent: {
+            ...validatedIntent({ searchScope: 'visual', mediaTypes: ['video'] }).intent,
+            goal: 'export_clip' as const,
+            requested_effect: { type: 'export_clip' as const },
+          },
+        })),
+      }
+      const search = vi.fn(async () => ({ limit: 20, offset: 0, groups: [], results: [] }))
+      const handler = new AgentV1StepHandler(testDb.db, settings(), runner, {
+        search,
+      } as unknown as SearchService)
+      const startedAt = new Date('2026-08-12T04:30:00.000Z')
+      const run = await createDurableAgentRun(
+        testDb.db,
+        {
+          prompt: '找视频并导出片段',
+          allowExternalText: true,
+          allowExternalVisual: false,
+          libraryIds: [],
+          mediaTypes: ['video'],
+        },
+        startedAt,
+      )
+
+      await new AgentExecutorService(testDb.db, settings(), handler).runOnce(startedAt)
+      await new AgentExecutorService(testDb.db, settings(), handler).runOnce(
+        new Date(startedAt.getTime() + 1_000),
+      )
+
+      await expect(
+        testDb.db.select().from(agentRuns).where(eq(agentRuns.id, run.id)),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          status: 'waiting_for_export_selection',
+          waitingStepId: expect.any(String),
+          waitingExpiresAt: expect.any(Date),
+        }),
+      ])
+    } finally {
+      await testDb.close()
+    }
+  })
+
   test('真实澄清链只有固定动作能把歧义覆盖为只读搜索，且不二次识别意图', async () => {
     const testDb = await createTestDatabase()
     try {

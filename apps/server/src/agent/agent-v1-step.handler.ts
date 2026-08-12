@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Optional } from '@nestjs/common'
 import { agentIntentSchema } from '@local-media-agent/shared/schemas'
 import { z } from 'zod'
 import { SETTINGS, type Settings } from '../config/settings.js'
@@ -23,6 +23,7 @@ import {
 } from './qwen-agent-intent.runner.js'
 import { AgentStepExecutionError } from './agent.types.js'
 import type { AgentStepHandler, FrozenAgentCandidate, PreparedAgentStep } from './agent.types.js'
+import { AgentRuntimeConfigService } from './agent-runtime-config.service.js'
 
 const supportedSearchMediaTypes = ['image', 'video', 'audio'] as const
 type SupportedSearchMediaType = (typeof supportedSearchMediaTypes)[number]
@@ -98,6 +99,7 @@ export class AgentV1StepHandler implements AgentStepHandler {
     @Inject(SETTINGS) private readonly settings: Settings,
     @Inject(AGENT_INTENT_RUNNER) private readonly intentRunner: AgentIntentRunner,
     @Inject(SearchService) private readonly searchService: SearchService,
+    @Optional() private readonly runtimeConfig?: AgentRuntimeConfigService,
   ) {}
 
   isReady() {
@@ -181,7 +183,12 @@ export class AgentV1StepHandler implements AgentStepHandler {
               status: 'waiting_for_user_input',
               nextStep: 'searching',
               waitingStepId: randomUUID(),
-              waitingExpiresAt: new Date(Date.now() + this.settings.agentWaitingTtlSeconds * 1000),
+              waitingExpiresAt: new Date(
+                Date.now() +
+                  (this.runtimeConfig?.values().waiting_ttl_seconds ??
+                    this.settings.agentWaitingTtlSeconds) *
+                    1000,
+              ),
             },
             outputJson,
           }
@@ -239,8 +246,22 @@ export class AgentV1StepHandler implements AgentStepHandler {
           response.results,
           intentOutput.enforced_scope,
         )
+        const expectsExport =
+          intentOutput.intent.goal === 'export_clip' &&
+          intentOutput.intent.requested_effect?.type === 'export_clip'
         return {
-          transition: { status: 'succeeded' },
+          transition: expectsExport
+            ? {
+                status: 'waiting_for_export_selection',
+                waitingStepId: randomUUID(),
+                waitingExpiresAt: new Date(
+                  Date.now() +
+                    (this.runtimeConfig?.values().waiting_ttl_seconds ??
+                      this.settings.agentWaitingTtlSeconds) *
+                      1000,
+                ),
+              }
+            : { status: 'succeeded' },
           outputJson: {
             candidate_count: candidates.length,
             enforced_scope: intentOutput.enforced_scope,

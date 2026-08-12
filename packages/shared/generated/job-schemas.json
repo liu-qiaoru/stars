@@ -627,6 +627,10 @@
               "mov"
             ],
             "default": "mp4"
+          },
+          "export_request_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [

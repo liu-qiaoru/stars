@@ -121,6 +121,29 @@ export const retryUnknownAgentRunInputSchema = z
   })
   .strict()
 
+// Phase C 的选择请求只接受冻结候选身份和场景内时间范围。输出格式在 V1 冻结为 mp4，
+// 浏览器不能提交任意输出路径或 FFmpeg 参数。
+export const agentExportSelectionInputSchema = z
+  .object({
+    candidate_key: z.string().min(1).max(300),
+    start_time_seconds: nonNegativeNumberSchema,
+    end_time_seconds: positiveNumberSchema,
+    output_format: z.literal('mp4').default('mp4'),
+  })
+  .strict()
+  .refine((input) => input.end_time_seconds > input.start_time_seconds, {
+    message: 'end_time_seconds must be greater than start_time_seconds',
+    path: ['end_time_seconds'],
+  })
+
+export const confirmAgentExportInputSchema = z
+  .object({
+    waiting_step_id: uuidSchema,
+    tool_call_id: z.string().min(1).max(300),
+    client_request_id: z.string().min(1).max(200),
+  })
+  .strict()
+
 export const agentErrorSchema = z
   .object({
     code: z.string().min(1).max(100),
@@ -251,6 +274,9 @@ export const exportClipInputSchema = z
     start_time_seconds: nonNegativeNumberSchema,
     end_time_seconds: positiveNumberSchema,
     output_format: z.enum(['mp4', 'mov']).default('mp4'),
+    // Agent 确认使用稳定 UUID 生成唯一输出名；旧的 Media Detail 导出没有该字段，
+    // 因此保持可选以维持已有 API 契约。
+    export_request_id: uuidSchema.optional(),
   })
   .refine((input) => input.end_time_seconds > input.start_time_seconds, {
     message: 'end_time_seconds must be greater than start_time_seconds',

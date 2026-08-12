@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'vitest'
 import {
+  agentExportSelectionInputSchema,
   agentIntentSchema,
   agentRunStatusSchema,
+  confirmAgentExportInputSchema,
   createAgentRunInputSchema,
   resumeAgentRunInputSchema,
 } from '../schemas/index.js'
@@ -69,5 +71,37 @@ describe('Agent V1 协议', () => {
     expect(() =>
       resumeAgentRunInputSchema.parse({ ...input, response: '只在家庭视频中搜索' }),
     ).toThrow('continue_as_read_only_search_with_resolved_scope')
+  })
+
+  test('导出选择只接受正向场景时间范围，确认必须携带等待步骤和幂等键', () => {
+    expect(
+      agentExportSelectionInputSchema.parse({
+        candidate_key: 'video:scene-1',
+        start_time_seconds: 12,
+        end_time_seconds: 18,
+      }),
+    ).toEqual({
+      candidate_key: 'video:scene-1',
+      start_time_seconds: 12,
+      end_time_seconds: 18,
+      output_format: 'mp4',
+    })
+    expect(() =>
+      agentExportSelectionInputSchema.parse({
+        candidate_key: 'video:scene-1',
+        start_time_seconds: 18,
+        end_time_seconds: 12,
+      }),
+    ).toThrow('end_time_seconds must be greater')
+
+    const confirmation = {
+      waiting_step_id: '11111111-1111-4111-8111-111111111111',
+      tool_call_id: 'export-1',
+      client_request_id: 'confirm-1',
+    }
+    expect(confirmAgentExportInputSchema.parse(confirmation)).toEqual(confirmation)
+    expect(() =>
+      confirmAgentExportInputSchema.parse({ ...confirmation, arbitrary_env: 'x' }),
+    ).toThrow()
   })
 })
