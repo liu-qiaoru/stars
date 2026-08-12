@@ -12,6 +12,13 @@ export interface Settings {
   agentModel: string
   agentMaxSteps: number
   agentToolTimeoutMs: number
+  rightCodeBaseUrl?: string
+  rightCodeApiKey?: string
+  agentExecutorEnabled: boolean
+  agentExecutorIntervalMs: number
+  agentLeaseDurationMs: number
+  agentActivityTimeoutMs: number
+  agentWaitingTtlSeconds: number
   jobCoordinatorEnabled: boolean
   jobCoordinatorIntervalMs: number
   jobCoordinatorEmbeddingLimit: number
@@ -108,6 +115,70 @@ const settingsSchema = z.object({
         return z.NEVER
       }
       return timeout
+    }),
+  RIGHT_CODE_BASE_URL: z.string().url('RIGHT_CODE_BASE_URL must be a valid URL').optional(),
+  RIGHT_CODE_API_KEY: z.string().min(1).optional(),
+  // Phase A 先交付可恢复执行器，默认关闭步骤执行。Phase B 注册
+  // qwen3.7-plus AgentIntent handler 并完成配置后才开启，避免 run 在无处理器时假装运行。
+  AGENT_EXECUTOR_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  AGENT_EXECUTOR_INTERVAL_MS: z
+    .string()
+    .default('2000')
+    .transform((value, context) => {
+      const interval = Number(value)
+      if (!Number.isInteger(interval) || interval < 500 || interval > 60000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'AGENT_EXECUTOR_INTERVAL_MS must be between 500 and 60000',
+        })
+        return z.NEVER
+      }
+      return interval
+    }),
+  AGENT_LEASE_DURATION_MS: z
+    .string()
+    .default('130000')
+    .transform((value, context) => {
+      const duration = Number(value)
+      if (!Number.isInteger(duration) || duration < 5000 || duration > 300000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'AGENT_LEASE_DURATION_MS must be between 5000 and 300000',
+        })
+        return z.NEVER
+      }
+      return duration
+    }),
+  AGENT_ACTIVITY_TIMEOUT_MS: z
+    .string()
+    .default('120000')
+    .transform((value, context) => {
+      const duration = Number(value)
+      if (!Number.isInteger(duration) || duration < 1000 || duration > 120000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'AGENT_ACTIVITY_TIMEOUT_MS must be between 1000 and 120000',
+        })
+        return z.NEVER
+      }
+      return duration
+    }),
+  AGENT_WAITING_TTL_SECONDS: z
+    .string()
+    .default('604800')
+    .transform((value, context) => {
+      const seconds = Number(value)
+      if (!Number.isInteger(seconds) || seconds < 60 || seconds > 604800) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'AGENT_WAITING_TTL_SECONDS must be between 60 and 604800',
+        })
+        return z.NEVER
+      }
+      return seconds
     }),
   JOB_COORDINATOR_ENABLED: z
     .enum(['true', 'false'])
@@ -257,6 +328,10 @@ const settingsSchema = z.object({
 
 export function createSettings(env: Env = process.env): Settings {
   const parsed = settingsSchema.parse(env)
+  // 租约必须覆盖活动硬超时和最后一次数据库提交；否则正常步骤会在超时前被接管。
+  if (parsed.AGENT_LEASE_DURATION_MS <= parsed.AGENT_ACTIVITY_TIMEOUT_MS) {
+    throw new Error('AGENT_LEASE_DURATION_MS must be greater than AGENT_ACTIVITY_TIMEOUT_MS')
+  }
 
   return {
     serverHost: parsed.SERVER_HOST,
@@ -270,6 +345,13 @@ export function createSettings(env: Env = process.env): Settings {
     agentModel: parsed.AGENT_MODEL,
     agentMaxSteps: parsed.AGENT_MAX_STEPS,
     agentToolTimeoutMs: parsed.AGENT_TOOL_TIMEOUT_MS,
+    rightCodeBaseUrl: parsed.RIGHT_CODE_BASE_URL,
+    rightCodeApiKey: parsed.RIGHT_CODE_API_KEY,
+    agentExecutorEnabled: parsed.AGENT_EXECUTOR_ENABLED,
+    agentExecutorIntervalMs: parsed.AGENT_EXECUTOR_INTERVAL_MS,
+    agentLeaseDurationMs: parsed.AGENT_LEASE_DURATION_MS,
+    agentActivityTimeoutMs: parsed.AGENT_ACTIVITY_TIMEOUT_MS,
+    agentWaitingTtlSeconds: parsed.AGENT_WAITING_TTL_SECONDS,
     jobCoordinatorEnabled: parsed.JOB_COORDINATOR_ENABLED,
     jobCoordinatorIntervalMs: parsed.JOB_COORDINATOR_INTERVAL_MS,
     jobCoordinatorEmbeddingLimit: parsed.JOB_COORDINATOR_EMBEDDING_LIMIT,

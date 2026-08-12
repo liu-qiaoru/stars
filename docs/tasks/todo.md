@@ -18,6 +18,37 @@
 - 下一步：生产检索保持 Phase 8。若继续研究，先设计显式必须条件/排除条件的复核协议，
   再用另一批未见样本验证，不能在本轮 30 条上调 Prompt 后直接宣布通过。
 
+## Agent V1 Phase A：协议、数据库、租约与恢复状态机
+
+- Start：2026-08-12。目标是只交付 Agent V1 的持久化执行基础：由 NestJS Server
+  使用 PostgreSQL 租约逐步推进 run，并提供 Phase A 的恢复、取消和能力查询 API。
+- 范围边界：不调用 RightAPI、`qwen3.7-plus`、DeepSeek 或其他外部模型；不进入
+  Phase B 的 AgentIntent 识别和真实检索；不实施 Phase C 的 Web 轮询与安全导出闭环。
+- 验证计划：先增加协议、迁移、状态迁移、并发领取、过期接管、迟到写入拒绝、
+  等待到期、恢复、取消和 API 的失败测试；实现后运行 Server 全量检查、迁移空库验证、
+  仓库级检查和 `git diff --check`，最后完成双轴 Review。
+
+- [x] 定义 AgentIntent、run 状态、等待输入、取消、授权和错误 Schema。
+- [x] 扩展 `agent_runs`，并新增规范化步骤、用户输入、授权和副作用幂等数据。
+- [x] 实现带 `lease_version` 隔离令牌的条件领取、过期接管和迟到结果拒绝。
+- [x] 实现固定状态迁移、等待到期、活动超时、崩溃恢复与 `outcome_unknown` 显式重试边界。
+- [x] 实现 `GET /agent/capabilities`、`POST /resume`、`POST /cancel` 和
+  `POST /retry-unknown`。
+- [x] 同步 Agent 架构、API 契约和数据库迁移说明。
+- [x] 运行 Phase A 测试、空库迁移验证、完整检查与双轴 Review。
+
+Review：
+
+- Result：Phase A 已完成并停止在 Provider 接入前。Server 现在使用 PostgreSQL 短事务、
+  `lease_version` 和 `step_attempt_id` 推进规范化 run；外部请求已派发但结果未知时进入
+  `outcome_unknown`，只有独立幂等入口可授权重试。默认 handler 明确未就绪，因此创建接口
+  在写数据库前返回 503，实际外部模型调用为 0。
+- Notes：增量迁移 `0001_agent_v1_phase_a.sql` 保留 `0000` 基线，空库顺序应用后由 15 张表
+  增至 20 张；不修改 Qdrant，不需回填媒体、重新索引或重新评测。`corepack pnpm check`
+  通过 Shared 10、Web 47、Server 152 项测试及 Web 生产构建；`.venv` 中 Python Worker
+  122 项测试通过，`cloud_calls=0`。双轴复审剩余 Standards 硬违规 0、Spec 缺口 0；仅保留
+  一个非阻断的 Data Clumps 判断项，建议 Phase B 再把重复租约写权字段收拢为领域类型。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

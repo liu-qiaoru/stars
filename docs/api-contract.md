@@ -466,134 +466,158 @@ Completed job result：
 }
 ```
 
-## POST /agent/runs
+## GET /agent/capabilities
 
-启动一次单次 agent task。
+返回 Agent V1 的部署开关、RightAPI 配置和步骤处理器可用性。响应不包含 API Key。
 
-Request：
-
-```json
-{
-  "prompt": "Find clips that look like a product launch presentation.",
-  "allow_external_vlm": false
-}
-```
-
-Agent run 事件结构：
+Phase A 默认返回 `run_creation_available=false`，因为 Phase B 的 `qwen3.7-plus`
+AgentIntent handler 尚未实施。这能阻止系统创建一个无法向前执行的假成功 run。
 
 ```json
 {
-  "event_id": "01J...",
-  "run_id": "0bfec861-c770-47ed-8e0d-1642a7a76591",
-  "type": "tool_call_started",
-  "created_at": "2026-05-26T10:06:00Z",
-  "payload": {
-    "tool_name": "search_media",
-    "summary": "Searching video segments."
-  }
-}
-```
-
-事件类型：
-
-```json
-"run_started" | "tool_call_started" | "tool_call_finished" | "candidate_results" | "user_confirmation_required" | "user_confirmation_pending" | "run_succeeded" | "run_failed"
-```
-
-`user_confirmation_required` 事件用于副作用工具（`export_clip`、`create_index_job`）。LLM 提出操作建议后，AgentService 不直接执行，而是写入该事件等待前端确认。前端通过 `POST /agent/runs/{id}/confirm` 确认后才创建实际 job。
-
-MVP 可以通过轮询 `GET /agent/runs/{id}` 返回累计事件。后续 SSE 或 WebSocket 应复用同一事件结构。
-
-Response：
-
-```json
-{
-  "run_id": "0bfec861-c770-47ed-8e0d-1642a7a76591",
-  "status": "succeeded"
-}
-```
-
-## GET /agent/runs/{id}
-
-返回 agent run 状态和结果。
-
-Response：
-
-```json
-{
-  "id": "0bfec861-c770-47ed-8e0d-1642a7a76591",
-  "status": "succeeded",
-  "prompt": "Find clips that look like a product launch presentation.",
-  "tool_calls": [
-    {
-      "tool_call_id": "search-1",
-      "name": "search_media",
-      "status": "succeeded",
-      "summary": "search_media completed",
-      "requires_confirmation": false
-    }
-  ],
-  "events": [
-    {
-      "event_id": "01J...",
-      "type": "tool_call_finished",
-      "tool_call_id": "search-1",
-      "created_at": "2026-05-26T10:06:10Z",
-      "payload": {
-        "tool_name": "search_media",
-        "summary": "Found candidate video segments."
-      }
-    }
-  ],
-  "results": [
-    {
-      "file_id": "54b83d84-7ff5-4b9a-8d11-fb27fbaf44db",
-      "asset_id": "75c1157b-21b7-4a90-8c2f-2aa4ae7c9331",
-      "start_time_seconds": 120.0,
-      "end_time_seconds": 150.0,
-      "score": 0.82,
-      "summary": "Candidate segment from a stage presentation."
-    }
+  "phase": "A",
+  "provider": "rightapi",
+  "model": "qwen3.7-plus",
+  "run_creation_available": false,
+  "external_text": {
+    "deployment_enabled": false,
+    "configured": false,
+    "step_handler_ready": false,
+    "available": false,
+    "allowed_fields": ["user_prompt"]
+  },
+  "external_visual": {
+    "deployment_enabled": false,
+    "configured": false,
+    "available": false,
+    "allowed_fields": []
+  },
+  "unavailable_reasons": [
+    "external_text_deployment_disabled",
+    "rightapi_not_configured",
+    "phase_b_step_handler_not_ready"
   ]
 }
 ```
 
-## POST /agent/runs/{id}/confirm
+## POST /agent/runs
 
-确认一个等待用户确认的副作用操作（例如 `export_clip` 或 `create_index_job`）。LLM 提出操作建议后，AgentService 写入 `user_confirmation_required` 事件但不创建 job。前端展示确认 UI，用户确认后调用此端点。
-
-Request：
-
-```json
-{
-  "tool_call_id": "01J..."
-}
-```
-
-Response：
+创建可恢复 Agent run。Server 只等待 PostgreSQL 短事务完成，不等待模型或检索；
+成功时立即返回 `run_id` 和 `queued`。
 
 ```json
 {
-  "job_id": "cdb55173-624f-4ba9-b1d5-f6d0c0f2b1fb",
-  "status": "queued"
+  "prompt": "帮我找红色汽车的视频",
+  "allow_external_text": true,
+  "allow_external_visual": false,
+  "library_ids": [],
+  "media_types": ["video"]
 }
 ```
 
-如果 `tool_call_id` 不存在或已确认，返回 HTTP 404。如果对应的 tool call 不需要确认（例如只读工具），返回 HTTP 400。
-
-## 外部 LLM 未启用时的行为
-
-`ALLOW_EXTERNAL_LLM=false`（默认）时，`POST /agent/runs` 仍然接受请求，但不调用外部 LLM provider。AgentService 返回提示信息，说明当前未启用外部 LLM，用户可在设置中开启。不返回 HTTP 500 或配置错误。
-
-Response（`ALLOW_EXTERNAL_LLM=false`）：
+- `prompt` 最多 4000 个 Unicode 字符，超限拒绝，不静默截断。
+- `allow_external_text` 是本 run 发送用户原 prompt 的授权，Agent V1 必须为 `true`。
+- `allow_external_visual` 是独立视觉授权；Phase A 必须为 `false`，且没有发图入口。
+- `library_ids` / `media_types` 是 Server 强制范围上限，不由模型扩大。
 
 ```json
 {
   "run_id": "0bfec861-c770-47ed-8e0d-1642a7a76591",
-  "status": "succeeded",
-  "message": "外部大模型未启用；已记录任务，但不会调用云端模型。"
+  "status": "queued"
 }
 ```
+
+Provider 部署开关、RightAPI 配置、Phase B handler 或本 run 文本授权不满足时，
+Server 在写数据库前返回 503/400，不创建假成功 run。
+
+## GET /agent/runs/{id}
+
+返回用户可见状态、下一步、逐 run 授权、规范化步骤尝试、冻结候选、脱敏错误和事件。
+活动执行时间超过 `AGENT_ACTIVITY_TIMEOUT_MS`（默认 120000 毫秒，即 120 秒）时进入
+`timed_out`；等待用户输入的时间不计入该上限。
+
+```json
+{
+  "id": "0bfec861-c770-47ed-8e0d-1642a7a76591",
+  "status": "queued",
+  "next_step": "extracting_intent",
+  "prompt": "帮我找红色汽车的视频",
+  "summary": null,
+  "enforced_scope": { "library_ids": [], "media_types": ["video"] },
+  "lease_version": 0,
+  "attempt_count": 0,
+  "waiting_step_id": null,
+  "waiting_expires_at": null,
+  "error": null,
+  "authorization": {
+    "allow_external_text": true,
+    "allow_external_visual": false,
+    "granted_at": "2026-08-12T03:00:00.000Z"
+  },
+  "steps": [],
+  "candidates": [],
+  "events": [
+    {
+      "event_id": "event-uuid",
+      "type": "run_queued",
+      "tool_call_id": null,
+      "created_at": "2026-08-12T03:00:00.000Z",
+      "payload": { "next_step": "extracting_intent" }
+    }
+  ],
+  "created_at": "2026-08-12T03:00:00.000Z",
+  "updated_at": "2026-08-12T03:00:00.000Z",
+  "finished_at": null
+}
+```
+
+## POST /agent/runs/{id}/resume
+
+只处理 `waiting_for_user_input` 澄清。`client_request_id` 在同一 run 内唯一，重复请求
+返回同一接受结果，不写第二条输入。`response` 最多 2000 个 Unicode 字符。
+
+```json
+{
+  "waiting_step_id": "11111111-1111-4111-8111-111111111111",
+  "client_request_id": "resume-001",
+  "response": "搜索全部已授权素材库"
+}
+```
+
+成功后返回 `{ "run_id": "...", "status": "queued" }`。等待步骤过期返回 410，
+同时 run 进入 `expired` 终态；步骤身份或状态不匹配返回 409。成功恢复后固定
+`next_step=searching`，不会再次执行已经完成的 AgentIntent。
+
+## POST /agent/runs/{id}/cancel
+
+```json
+{
+  "client_request_id": "cancel-001",
+  "reason": "用户不再需要"
+}
+```
+
+`queued` 和等待态没有正在提交的步骤，可直接进入 `cancelled`。
+`extracting_intent` / `searching` 先进入 `cancel_requested`，立即使旧结果的状态条件失效；
+租约安全到期后由 Server 转成 `cancelled`。已创建的独立导出 job 不属于 Phase A。
+
+## POST /agent/runs/{id}/retry-unknown
+
+```json
+{
+  "step_attempt_id": "22222222-2222-4222-8222-222222222222",
+  "client_request_id": "retry-001"
+}
+```
+
+只允许当前 run 为 `outcome_unknown`，且 `step_attempt_id` 匹配未知结果尝试。
+接受后创建新的用户授权输入并回到 `queued`；下次领取会生成新
+`step_attempt_id`。普通 `/resume` 不得代替该授权。
+
+## Phase A 暂不提供的 Agent API
+
+`/export-selection` 和 `/confirm` 属于 Phase C 安全导出闭环。Phase A 不保留旧的非事务确认路由，
+也不创建 `export_clip` / `index_media` 副作用 job。
 
 ## 单视频重索引接口
 

@@ -22,6 +22,13 @@ describe('createSettings', () => {
       agentModel: 'disabled',
       agentMaxSteps: 4,
       agentToolTimeoutMs: 10000,
+      rightCodeBaseUrl: undefined,
+      rightCodeApiKey: undefined,
+      agentExecutorEnabled: false,
+      agentExecutorIntervalMs: 2000,
+      agentLeaseDurationMs: 130000,
+      agentActivityTimeoutMs: 120000,
+      agentWaitingTtlSeconds: 604800,
       jobCoordinatorEnabled: true,
       jobCoordinatorIntervalMs: 5000,
       jobCoordinatorEmbeddingLimit: 100,
@@ -104,6 +111,13 @@ describe('createSettings', () => {
       agentModel: 'disabled',
       agentMaxSteps: 4,
       agentToolTimeoutMs: 10000,
+      rightCodeBaseUrl: undefined,
+      rightCodeApiKey: undefined,
+      agentExecutorEnabled: false,
+      agentExecutorIntervalMs: 2000,
+      agentLeaseDurationMs: 130000,
+      agentActivityTimeoutMs: 120000,
+      agentWaitingTtlSeconds: 604800,
     })
 
     expect(
@@ -115,6 +129,13 @@ describe('createSettings', () => {
         AGENT_MODEL: 'qwen3.7-plus',
         AGENT_MAX_STEPS: '3',
         AGENT_TOOL_TIMEOUT_MS: '2500',
+        RIGHT_CODE_BASE_URL: 'https://right.example.test',
+        RIGHT_CODE_API_KEY: 'right-test-key',
+        AGENT_EXECUTOR_ENABLED: 'true',
+        AGENT_EXECUTOR_INTERVAL_MS: '2500',
+        AGENT_LEASE_DURATION_MS: '150000',
+        AGENT_ACTIVITY_TIMEOUT_MS: '90000',
+        AGENT_WAITING_TTL_SECONDS: '86400',
       }),
     ).toMatchObject({
       allowExternalLlm: true,
@@ -122,6 +143,13 @@ describe('createSettings', () => {
       agentModel: 'qwen3.7-plus',
       agentMaxSteps: 3,
       agentToolTimeoutMs: 2500,
+      rightCodeBaseUrl: 'https://right.example.test',
+      rightCodeApiKey: 'right-test-key',
+      agentExecutorEnabled: true,
+      agentExecutorIntervalMs: 2500,
+      agentLeaseDurationMs: 150000,
+      agentActivityTimeoutMs: 90000,
+      agentWaitingTtlSeconds: 86400,
     })
   })
 
@@ -133,5 +161,16 @@ describe('createSettings', () => {
         QDRANT_URL: 'http://localhost:6333',
       }),
     ).toThrow('SERVER_PORT must be a valid port')
+  })
+
+  test('Agent 租约必须长于活动硬超时，避免正常步骤被提前接管', () => {
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        AGENT_LEASE_DURATION_MS: '120000',
+        AGENT_ACTIVITY_TIMEOUT_MS: '120000',
+      }),
+    ).toThrow('AGENT_LEASE_DURATION_MS must be greater than AGENT_ACTIVITY_TIMEOUT_MS')
   })
 })

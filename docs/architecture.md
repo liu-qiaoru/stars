@@ -31,12 +31,13 @@ docs            架构、API 和实施文档
 
 - 前端：Next.js、React、TypeScript、Tailwind。
 - 主控 API：TypeScript、NestJS、默认 Express adapter、Zod。
-- Agent LLM：Vercel AI SDK（`ai`）、Anthropic provider（`@ai-sdk/anthropic`）。
+- Agent 持久化执行：NestJS Server + PostgreSQL 租约状态机。Phase A 不调用外部模型。
 - 数据访问：PostgreSQL、Drizzle、node-postgres。
 - 向量数据库：Qdrant，使用 Qdrant JS client。Collection、point、payload 和 PostgreSQL 引用结构见 `docs/vector-index-design.md`。
 - 后台任务：PostgreSQL-backed jobs。Redis 只作为可选实时事件/pub-sub 通道。
 - Python worker：FFmpeg、ffprobe、PySceneDetect、SigLIP2、faster-whisper、Caption 文本嵌入模型，以及通过 Ollama 调用的 Qwen2.5-VL。
-- Agent 编排：Vercel AI SDK（`ai`）+ Anthropic provider（`@ai-sdk/anthropic`）。Python 不负责 agent 决策，只负责执行媒体/模型重任务。
+- Agent 编排：Server 固定状态迁移、租约隔离与逐步持久化。Phase B 才接入
+  RightAPI `qwen3.7-plus` 单次 AgentIntent；Python 不负责 Agent 决策。
 - 外部多模态模型层：通过 TypeScript Model Gateway 接入 OpenAI、Claude、Gemini 或其他提供商。
 - 存储：本地文件系统，用于源素材引用、缓存文件、缩略图、抽帧、转写文本和导出剪辑。
 
@@ -101,7 +102,7 @@ LibrariesModule
 JobsModule
 MediaModule
 SearchModule
-AgentModule        使用 Vercel AI SDK + Anthropic provider，见 Agent Runtime 章节
+AgentModule        持有 Server Agent 租约、恢复状态机和 Phase A API
 ModelGatewayModule
 ```
 
@@ -157,73 +158,54 @@ Retrieval 组合 Qdrant 向量搜索、PostgreSQL full-text search 和 PostgreSQ
 
 ### Agent Runtime
 
-Agent Runtime 位于 TypeScript 主控层，使用 Vercel AI SDK 接入 LLM function calling。Agent 是协调者，不是搜索引擎本身，也不直接操作文件系统。
+Agent Runtime 位于 TypeScript/NestJS Server 主控层。Agent 是固定工作流编排器，
+不是搜索引擎本身，也不是模型自主 Tool Calling 循环。
 
-为什么选择 Vercel AI SDK：
+Phase A 当前已实现的执行模型：
 
-- Tool 定义使用 Zod schema，与项目 `packages/shared` 的 schema 体系一致，无双 schema 问题。
-- 核心只负责"接收 prompt → 调 LLM → 执行 tool → 返回结果"，不接管存储、向量、部署等已有架构。
-- `generateText` / `streamText` 是纯函数，与 NestJS service 直接集成，无框架摩擦。
-- 支持 30+ 官方 LLM provider，切换 provider 只需改 model 配置。
-- 不碰 PostgreSQL/Drizzle、Qdrant、Python worker 等现有模块。
+```text
+POST /agent/runs
+→ 短事务原子写入 agent_runs + 逐 run 授权 + run_queued 事件
+→ HTTP 立即返回 run_id/status=queued
+→ AgentExecutorService 使用条件 UPDATE 领取租约并递增 lease_version
+→ 同一短事务创建唯一 step_attempt_id
+→ 若为外部步骤，先持久化 dispatched + 输入指纹
+→ 在事务外等待 Provider 或 SearchService
+→ 短事务用 lease_owner + lease_version + status + step_attempt_id 提交
+```
 
-不用于：
+Lease（租约）是 Server 执行器的限时工作证。`lease_version` 是 Fencing Token
+（隔离旧持有者的令牌）：新执行器接管后版本递增，旧执行器的迟到结果只会
+更新 0 行，必须丢弃。外部请求若已记为 `dispatched` 但未完成，租约过期后
+进入 `outcome_unknown`，只能由 `/retry-unknown` 的新用户授权重试。
+纯本地活动步骤受 `AGENT_ACTIVITY_TIMEOUT_MS` 硬上限约束，默认 120 秒；超时后
+run、step 和审计事件在同一短事务内进入 `timed_out`。已经标记 `dispatched` 的外部请求
+不按本地超时重放，而是在租约过期后进入 `outcome_unknown`。
 
-- Agent 不直接操作文件系统。
-- Agent 不替代搜索引擎或检索逻辑。
-- Agent 的 tool 执行结果写入 PostgreSQL 由 AgentService 负责，不由 AI SDK 负责。
+PostgreSQL 中的恢复事实分工：
 
-MVP 使用 Anthropic Claude Sonnet 作为默认 LLM provider，但外部 LLM 调用必须由 `ALLOW_EXTERNAL_LLM` 显式启用。`ALLOW_EXTERNAL_LLM=false`（默认）时，Agent API 仍接受请求，但返回提示信息说明未启用，不返回错误。后续可通过 AI SDK 的统一 model 接口切换到其他 provider。
+- `agent_runs`：用户可见状态、下一步、租约、等待到期和脱敏错误。
+- `agent_run_steps`：每次步骤尝试、输入指纹、外部派发状态和规范化输出。
+- `agent_run_inputs`：`resume`/`cancel`/`retry-unknown` 用户输入，由
+  `(run_id, client_request_id)` 唯一约束保证幂等。
+- `agent_run_authorizations`：每个 run 的文本/视觉外发授权，两者不能互相替代。
+- `agent_run_candidates`：Phase B 搜索后冻结 `file_generation` 等候选身份。
+- `agent_side_effects`：Phase C 使用的唯一副作用幂等键；Phase A 只建协议，不创建导出 job。
 
-外部 LLM 隐私边界：
-
-- 默认不发送源媒体文件、缩略图、关键帧、音频、视频、完整 transcript 或 Caption 原文。
-- 默认不发送绝对本地路径；对外部 LLM 只发送脱敏后的文件显示名、media type、时间范围、score、候选摘要和必要 metadata。
-- 如果用户后续开启外部 VLM 或发送候选样本，必须走 Model Gateway 的显式开关和审计记录，不由 Agent tool 直接上传。
-- 所有发往外部 LLM 的 request 摘要必须记录到 `agent_run_events`，便于用户审计。
-
-副作用工具边界：
-
-- `search_media` 和 `get_media_detail` 是只读工具，可以由 LLM function calling 自动触发。
-- `create_index_job` 和 `export_clip` 会创建后台任务或写本地文件，必须经过服务端 deterministic guard。
-- `export_clip` 需要明确 `file_id`、`start_time_seconds`、`end_time_seconds`、用户显式导出意图；LLM 只能提出导出建议，不能独立授权执行。确认流程：LLM 生成建议 → AgentService 写入 `user_confirmation_required` 事件 → 前端展示确认 UI → 用户通过 `POST /agent/runs/{id}/confirm` 确认 → 服务端创建 job。确认凭证为 `tool_call_id`，不需要额外的 token 机制。
-- `create_index_job` 需要明确 library/path 范围和用户显式索引意图，不能因为 LLM 猜测自动触发全库重建。确认流程与 `export_clip` 一致。
-
-Agent loop 边界：
-
-- MVP 使用有限步 tool loop，例如 `maxSteps = 4`。
-- 单次 run 设置最大 tool call 数、超时和错误返回，避免 LLM 反复调用工具。
-- 如果 tool 失败或无法解析参数，AgentService 记录事件并返回可读错误，不让 LLM 重试无限循环。
-
-初始工具：
-
-- `search_media`
-- `get_media_detail`
-- `create_index_job`
-- `export_clip`
-
-后续工具：
-
-- `find_similar_image`
-- `inspect_candidates_with_vlm`
-- `extract_frames`
-- `summarize_clip`
-- `make_montage`
-- `reindex_path`
+Phase A 默认处理器明确报告未就绪：`GET /agent/capabilities` 返回
+`run_creation_available=false`，`POST /agent/runs` 在写数据库前返回 503。因此当前没有外部
+模型调用，也没有真实搜索。Phase B 将注册 RightAPI `qwen3.7-plus` 单次 AgentIntent
+handler；Phase C 才实现候选选择与安全确认导出。
 
 NestJS AgentModule 组织：
 
 ```text
 apps/server/src/agent/
-  agent.module.ts       注册 AgentService、依赖 AI SDK provider
-  agent.service.ts      封装 generateText/streamText 调用、tool 注册和事件持久化
-  agent.controller.ts   HTTP API（复用 api-contract 定义的 endpoints）
-  agent.events.ts       将 AI SDK steps 映射为 api-contract 定义的事件类型
-  tools/
-    search-media.tool.ts        调用 SearchService
-    get-media-detail.tool.ts    调用 MediaService
-    create-index-job.tool.ts    调用 JobsService
-    export-clip.tool.ts         调用 JobsService
+  agent.controller.ts          Phase A HTTP API
+  agent.service.ts             输入校验、capabilities 和用例边界
+  agent-run.repository.ts      短事务、租约、幂等输入和恢复状态机
+  agent-executor.service.ts    定时领取、过期恢复与事务外步骤执行
+  agent.types.ts               可注入的步骤 handler 协议
 ```
 
 ### Model Gateway

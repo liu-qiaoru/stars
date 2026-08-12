@@ -1,25 +1,48 @@
 import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common'
+import type { z } from 'zod'
+import {
+  cancelAgentRunInputSchema,
+  createAgentRunInputSchema,
+  resumeAgentRunInputSchema,
+  retryUnknownAgentRunInputSchema,
+} from '@local-media-agent/shared/schemas'
 import { AgentService } from './agent.service.js'
 
-@Controller('agent/runs')
+/** Agent V1 Phase A HTTP API：Controller 只转发已校验请求，状态迁移在 AgentService/仓库中完成。 */
+@Controller('agent')
 export class AgentController {
-  constructor(
-    @Inject(AgentService)
-    private readonly agentService: AgentService,
-  ) {}
+  constructor(@Inject(AgentService) private readonly agentService: AgentService) {}
 
-  @Post()
-  createRun(@Body() body: { prompt: string; allow_external_vlm?: boolean }) {
+  @Get('capabilities')
+  getCapabilities() {
+    return this.agentService.getCapabilities()
+  }
+
+  @Post('runs')
+  createRun(@Body() body: z.input<typeof createAgentRunInputSchema>) {
     return this.agentService.createRun(body)
   }
 
-  @Get(':id')
+  @Get('runs/:id')
   getRun(@Param('id') id: string) {
     return this.agentService.getRun(id)
   }
 
-  @Post(':id/confirm')
-  confirmToolCall(@Param('id') id: string, @Body() body: { tool_call_id: string }) {
-    return this.agentService.confirmToolCall(id, body)
+  @Post('runs/:id/resume')
+  resumeRun(@Param('id') id: string, @Body() body: z.input<typeof resumeAgentRunInputSchema>) {
+    return this.agentService.resumeRun(id, body)
+  }
+
+  @Post('runs/:id/cancel')
+  cancelRun(@Param('id') id: string, @Body() body: z.input<typeof cancelAgentRunInputSchema>) {
+    return this.agentService.cancelRun(id, body)
+  }
+
+  @Post('runs/:id/retry-unknown')
+  retryUnknown(
+    @Param('id') id: string,
+    @Body() body: z.input<typeof retryUnknownAgentRunInputSchema>,
+  ) {
+    return this.agentService.retryUnknown(id, body)
   }
 }

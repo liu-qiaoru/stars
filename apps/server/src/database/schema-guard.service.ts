@@ -8,6 +8,13 @@ const REQUIRED_TABLES = [
   'vector_refs',
   'jobs',
   'agent_runs',
+  // Agent V1 不能只看到旧 agent_runs 就认为可恢复。步骤、授权、幂等输入、
+  // 冻结候选和副作用唯一键都是 Phase A 必需事实，缺任一表必须在启动时快速失败。
+  'agent_run_authorizations',
+  'agent_run_steps',
+  'agent_run_inputs',
+  'agent_run_candidates',
+  'agent_side_effects',
 ] as const
 
 const MIGRATION_COMMAND = 'corepack pnpm --dir apps/server db:migrate'

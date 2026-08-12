@@ -341,16 +341,153 @@ export const evaluationJudgments = pgTable(
   (table) => [uniqueIndex('evaluation_judgments_candidate_unique').on(table.candidateId)],
 )
 
-// agent_* 表保存一次 Agent 运行的 prompt、事件流和工具调用审计。
-// 有副作用的 tool 会先进入 waiting_for_confirmation，确认后再创建真正的 job。
-export const agentRuns = pgTable('agent_runs', {
-  id: uuid('id').primaryKey().notNull(),
-  status: text('status').notNull().default('running'),
-  prompt: text('prompt').notNull(),
-  summary: text('summary'),
-  ...timestamps,
-  finishedAt: timestamp('finished_at', { withTimezone: true }),
-})
+// agent_runs 是 Agent V1 恢复状态机的主事实。它不复用 Python jobs 队列：
+// NestJS Server 用限时租约领取 run，Python Worker 仍只执行媒体重任务。
+export const agentRuns = pgTable(
+  'agent_runs',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    status: text('status').notNull().default('queued'),
+    prompt: text('prompt').notNull(),
+    summary: text('summary'),
+    // queued 或已提交一步的 run 必须明确记住下一个固定步骤，
+    // 恢复时不能依赖 Provider 原始对话去猜“接下来做什么”。
+    nextStep: text('next_step').notNull().default('extracting_intent'),
+    enforcedScopeJson: jsonb('enforced_scope_json').notNull().default({}),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    // lease_version 是单调递增的 Fencing Token（隔离旧持有者的令牌）。
+    // 结果提交必须同时匹配 owner + version + status，否则迟到写入更新 0 行。
+    leaseVersion: integer('lease_version').notNull().default(0),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+    currentStepAttemptId: uuid('current_step_attempt_id'),
+    externalCallStatus: text('external_call_status'),
+    waitingStepId: uuid('waiting_step_id'),
+    waitingExpiresAt: timestamp('waiting_expires_at', { withTimezone: true }),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    cancelReason: text('cancel_reason'),
+    ...timestamps,
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [
+    // 执行器先按状态和最早可领取时间找候选，再用条件 UPDATE 争抢唯一租约。
+    index('agent_runs_claim_idx').on(table.status, table.nextAttemptAt, table.createdAt),
+    index('agent_runs_waiting_expiry_idx').on(table.status, table.waitingExpiresAt),
+  ],
+)
+
+// 文本与视觉授权按 run 分开保存。同一个 Provider/模型也不能让“可发 prompt”
+// 自动扩大为“可发候选图片”，更不能把一次 run 的授权复用到下一次。
+export const agentRunAuthorizations = pgTable(
+  'agent_run_authorizations',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    allowExternalText: boolean('allow_external_text').notNull().default(false),
+    allowExternalVisual: boolean('allow_external_visual').notNull().default(false),
+    textScopeJson: jsonb('text_scope_json').notNull().default({}),
+    visualScopeJson: jsonb('visual_scope_json').notNull().default({}),
+    grantedAt: timestamp('granted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('agent_run_authorizations_run_unique').on(table.runId)],
+)
+
+// 每次成功领取都创建新的 step_attempt_id。外部调用前先把 dispatched 提交到这张表，
+// 因此 Server 崩溃后能区分“尚未发出，可重试”和“已发出但结果不明，不可自动重放”。
+export const agentRunSteps = pgTable(
+  'agent_run_steps',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    stepAttemptId: uuid('step_attempt_id').notNull(),
+    stepKind: text('step_kind').notNull(),
+    status: text('status').notNull(),
+    inputFingerprint: text('input_fingerprint'),
+    inputJson: jsonb('input_json').notNull().default({}),
+    outputJson: jsonb('output_json'),
+    externalCallStatus: text('external_call_status').notNull().default('not_dispatched'),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('agent_run_steps_attempt_unique').on(table.stepAttemptId),
+    index('agent_run_steps_run_idx').on(table.runId, table.createdAt),
+  ],
+)
+
+// resume/retry 输入使用 (run_id, client_request_id) 唯一约束作为数据库级幂等边界。
+export const agentRunInputs = pgTable(
+  'agent_run_inputs',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    waitingStepId: uuid('waiting_step_id'),
+    stepAttemptId: uuid('step_attempt_id'),
+    clientRequestId: text('client_request_id').notNull(),
+    inputType: text('input_type').notNull(),
+    responseJson: jsonb('response_json').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('agent_run_inputs_client_request_unique').on(table.runId, table.clientRequestId),
+    index('agent_run_inputs_run_idx').on(table.runId, table.createdAt),
+  ],
+)
+
+// Phase C 才会创建导出副作用；Phase A 先用唯一 effect_key 冻结幂等事实边界。
+export const agentSideEffects = pgTable(
+  'agent_side_effects',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    effectKey: text('effect_key').notNull(),
+    toolCallId: text('tool_call_id'),
+    status: text('status').notNull().default('pending'),
+    jobId: uuid('job_id').references(() => jobs.id),
+    confirmationJson: jsonb('confirmation_json'),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex('agent_side_effects_run_effect_unique').on(table.runId, table.effectKey)],
+)
+
+// 检索后冻结候选身份，后续选择/确认将用 file_generation 拒绝过期候选。
+// Phase A 只建立数据库协议，Phase B 才会在一次原文检索后写入候选。
+export const agentRunCandidates = pgTable(
+  'agent_run_candidates',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    candidateKey: text('candidate_key').notNull(),
+    fileId: uuid('file_id').notNull(),
+    fileGeneration: integer('file_generation').notNull(),
+    assetId: uuid('asset_id').notNull(),
+    sceneId: uuid('scene_id'),
+    sceneStartSeconds: numeric('scene_start_seconds'),
+    sceneEndSeconds: numeric('scene_end_seconds'),
+    rank: integer('rank').notNull(),
+    retrievalJson: jsonb('retrieval_json').notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('agent_run_candidates_run_key_unique').on(table.runId, table.candidateKey),
+    index('agent_run_candidates_run_rank_idx').on(table.runId, table.rank),
+  ],
+)
 
 export const agentRunEvents = pgTable(
   'agent_run_events',
@@ -442,4 +579,9 @@ export const vectorRefsRelations = relations(vectorRefs, ({ one }) => ({
 export const agentRunsRelations = relations(agentRuns, ({ many }) => ({
   events: many(agentRunEvents),
   toolCalls: many(agentToolCalls),
+  authorizations: many(agentRunAuthorizations),
+  steps: many(agentRunSteps),
+  inputs: many(agentRunInputs),
+  sideEffects: many(agentSideEffects),
+  candidates: many(agentRunCandidates),
 }))

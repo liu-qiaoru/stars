@@ -1,277 +1,344 @@
-import { randomUUID } from "node:crypto";
-import { Test } from "@nestjs/testing";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { AgentController } from "../../src/agent/agent.controller.js";
-import { AgentModule } from "../../src/agent/agent.module.js";
-import { AGENT_MODEL_RUNNER, type AgentModelRunner } from "../../src/agent/agent.types.js";
-import { SETTINGS } from "../../src/config/settings.js";
-import { DATABASE, PG_POOL } from "../../src/database/database.module.js";
-import { createLibrary, createMediaAsset, createMediaFile, createVectorRef } from "../../src/database/repositories.js";
-import { videoScenes } from "../../src/database/schema.js";
-import { JobsController } from "../../src/jobs/jobs.controller.js";
-import { JobsModule } from "../../src/jobs/jobs.module.js";
-import { ModelGatewayService } from "../../src/model-gateway/model-gateway.service.js";
-import { QDRANT_CLIENT } from "../../src/qdrant/qdrant.module.js";
-import { createTestDatabase } from "../database/test-db.js";
+import { Test } from '@nestjs/testing'
+import { count, eq } from 'drizzle-orm'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { AgentController } from '../../src/agent/agent.controller.js'
+import { AgentModule } from '../../src/agent/agent.module.js'
+import {
+  claimNextAgentRun,
+  markAgentExternalCallDispatched,
+  recoverExpiredAgentRuns,
+} from '../../src/agent/agent-run.repository.js'
+import { AGENT_STEP_HANDLER, type AgentStepHandler } from '../../src/agent/agent.types.js'
+import { SETTINGS, type Settings } from '../../src/config/settings.js'
+import { DATABASE, PG_POOL } from '../../src/database/database.module.js'
+import { agentRunInputs, agentRuns } from '../../src/database/schema.js'
+import { createTestDatabase } from '../database/test-db.js'
 
-let closeDb: () => Promise<void>;
-let closeModule: () => Promise<void>;
-let agentController: AgentController;
-let jobsController: JobsController;
-let db: Awaited<ReturnType<typeof createTestDatabase>>["db"];
-const qdrantSearch = vi.fn();
-const embedText = vi.fn();
-const runnerRun = vi.fn<AgentModelRunner["run"]>();
+let closeDb: () => Promise<void>
+let closeModule: () => Promise<void>
+let agentController: AgentController
+let db: Awaited<ReturnType<typeof createTestDatabase>>['db']
 
-function testSettings(overrides = {}) {
+const prepareStep = vi.fn<AgentStepHandler['prepare']>()
+
+function testSettings(overrides: Partial<Settings> = {}): Settings {
   return {
-    serverHost: "127.0.0.1",
+    serverHost: '127.0.0.1',
     serverPort: 4000,
-    databaseUrl: "postgres://user:pass@localhost:5432/media_agent_test",
-    qdrantUrl: "http://localhost:6333",
-    modelServiceUrl: "http://127.0.0.1:4020",
+    databaseUrl: 'postgres://user:pass@localhost:5432/media_agent_test',
+    qdrantUrl: 'http://localhost:6333',
+    modelServiceUrl: 'http://127.0.0.1:4020',
     modelServiceTimeoutMs: 10000,
     allowExternalLlm: false,
     anthropicApiKey: undefined,
-    agentModel: "disabled",
+    agentModel: 'disabled',
     agentMaxSteps: 4,
     agentToolTimeoutMs: 10000,
+    rightCodeBaseUrl: undefined,
+    rightCodeApiKey: undefined,
+    agentExecutorEnabled: false,
+    agentExecutorIntervalMs: 2000,
+    agentLeaseDurationMs: 130000,
+    agentActivityTimeoutMs: 120000,
+    agentWaitingTtlSeconds: 604800,
+    jobCoordinatorEnabled: false,
+    jobCoordinatorIntervalMs: 5000,
+    jobCoordinatorEmbeddingLimit: 100,
+    queryExpansionProvider: 'none',
+    queryExpansionTimeoutMs: 10000,
+    queryExpansionMaxVariants: 3,
+    deepseekBaseUrl: 'https://api.deepseek.com',
+    deepseekApiKey: undefined,
+    deepseekModel: 'deepseek-v4-flash',
+    captionIndexingEnabled: false,
+    captionSearchEnabled: false,
+    localVlmEnabled: false,
+    localVlmServiceUrl: 'http://127.0.0.1:4030',
+    searchRerankMode: 'off',
+    searchRerankTopK: 10,
+    searchRerankTimeoutMs: 30000,
+    frameCacheEnabled: false,
+    frameCacheMaxBytes: 1073741824,
+    frameCacheImageMaxWidth: 512,
     ...overrides,
-  };
+  }
 }
 
-async function compileAgentModule(settings = testSettings()) {
-  const testDb = await createTestDatabase();
-  db = testDb.db;
-  closeDb = testDb.close;
-  qdrantSearch.mockReset();
-  embedText.mockReset();
-  embedText.mockResolvedValue(Array.from({ length: 768 }, (_, index) => index / 768));
-  runnerRun.mockReset();
+async function compileAgentModule(
+  settings = testSettings(),
+  handler: AgentStepHandler = {
+    isReady: () => false,
+    prepare: prepareStep,
+  },
+) {
+  const testDb = await createTestDatabase()
+  db = testDb.db
+  closeDb = testDb.close
+  prepareStep.mockReset()
 
-  const moduleRef = await Test.createTestingModule({
-    imports: [AgentModule, JobsModule],
-  })
+  const moduleRef = await Test.createTestingModule({ imports: [AgentModule] })
     .overrideProvider(DATABASE)
     .useValue(db)
     .overrideProvider(PG_POOL)
     .useValue(null)
     .overrideProvider(SETTINGS)
     .useValue(settings)
-    .overrideProvider(QDRANT_CLIENT)
-    .useValue({ search: qdrantSearch, searchPointGroups: qdrantSearch })
-    .overrideProvider(ModelGatewayService)
-    .useValue({ embedText })
-    .overrideProvider(AGENT_MODEL_RUNNER)
-    .useValue({ run: runnerRun })
-    .compile();
+    .overrideProvider(AGENT_STEP_HANDLER)
+    .useValue(handler)
+    .compile()
 
-  agentController = moduleRef.get(AgentController);
-  jobsController = moduleRef.get(JobsController);
-  closeModule = () => moduleRef.close();
+  agentController = moduleRef.get(AgentController)
+  closeModule = () => moduleRef.close()
 }
 
-afterEach(async () => {
-  await closeModule?.();
-  await closeDb?.();
-});
+async function closeCurrentModule() {
+  await closeModule?.()
+  await closeDb?.()
+}
 
-describe("agent API", () => {
+afterEach(closeCurrentModule)
+
+describe('Agent V1 Phase A API', () => {
   beforeEach(async () => {
-    await compileAgentModule();
-  });
+    await compileAgentModule()
+  })
 
-  test("外部 LLM 默认关闭时仍持久化 run 和事件", async () => {
+  test('Phase B 处理器或 RightAPI 未就绪时，capabilities 明确不可用且创建前拒绝', async () => {
+    expect(agentController.getCapabilities()).toMatchObject({
+      phase: 'A',
+      provider: 'rightapi',
+      model: 'qwen3.7-plus',
+      run_creation_available: false,
+      external_text: {
+        deployment_enabled: false,
+        configured: false,
+        step_handler_ready: false,
+      },
+      external_visual: { available: false },
+    })
+
+    await expect(
+      agentController.createRun({
+        prompt: '找红色汽车的视频',
+        allow_external_text: true,
+      }),
+    ).rejects.toMatchObject({ status: 503 })
+    const [{ total }] = await db.select({ total: count() }).from(agentRuns)
+    expect(total).toBe(0)
+  })
+
+  test('请求不符合 Agent Schema 时返回 400，不把客户端输入错误包装成 500', async () => {
+    await expect(
+      agentController.createRun({ prompt: '', allow_external_text: true }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+
+  test('能力就绪时创建接口只持久化并立即返回 queued，不同步执行步骤', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+      }),
+      handler,
+    )
+
     const created = await agentController.createRun({
-      prompt: "查找发布会片段",
-      allow_external_vlm: false,
-    });
+      prompt: '找红汽车的视频',
+      allow_external_text: true,
+      allow_external_visual: false,
+      media_types: ['video'],
+    })
 
-    expect(created).toMatchObject({
-      run_id: expect.any(String),
-      status: "succeeded",
-      message: expect.stringContaining("外部大模型未启用"),
-    });
-    expect(runnerRun).not.toHaveBeenCalled();
-
+    expect(created).toMatchObject({ run_id: expect.any(String), status: 'queued' })
+    expect(prepareStep).not.toHaveBeenCalled()
     await expect(agentController.getRun(created.run_id)).resolves.toMatchObject({
       id: created.run_id,
-      status: "succeeded",
-      prompt: "查找发布会片段",
-      events: [
-        expect.objectContaining({ type: "run_started" }),
-        expect.objectContaining({ type: "run_succeeded" }),
-      ],
-    });
-  });
-
-  test("开启外部 LLM 时 fake runner 可以调用 search_media tool 并持久化 tool summary", async () => {
-    await closeModule?.();
-    await closeDb?.();
-    await compileAgentModule(testSettings({ allowExternalLlm: true, anthropicApiKey: "test-key", agentModel: "test-model" }));
-
-    const library = await createLibrary(db, { name: "Main Media", rootPath: "/Volumes/Media" });
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: "/Volumes/Media/launch.mp4",
-      relativePath: "launch.mp4",
-      mediaType: "video",
-      sizeBytes: 20,
-      mtimeMs: 1710000000001,
-    });
-    const [scene] = await db
-      .insert(videoScenes)
-      .values({
-        id: randomUUID(),
-        fileId: file.id,
-        sceneKey: "scene-0001",
-        startTimeSeconds: "30",
-        endTimeSeconds: "60",
-        detectionStrategy: "scene_detection",
-        strategyFingerprint: "test-fingerprint",
-        indexGeneration: 0,
-      })
-      .returning();
-    const asset = await createMediaAsset(db, {
-      fileId: file.id,
-      assetType: "video_frame",
-      sceneId: scene.id,
-      frameTimeSeconds: "45",
-      contentHash: "frame-hash",
-    });
-    const pointId = "22222222-2222-4222-8222-222222222222";
-    await createVectorRef(db, {
-      assetId: asset.id,
-      fileId: file.id,
-      libraryId: library.id,
-      collectionName: "video_frame_vectors",
-      pointId,
-      modelName: "google/siglip2-base-patch16-224",
-      modelVersion: "siglip2-base-patch16-224",
-      vectorKind: "frame_embedding",
-      vectorDim: 768,
-      distance: "Cosine",
-      contentHash: "frame-hash",
-      indexProfile: "balanced",
-      status: "indexed",
-    });
-    // 视频帧向量走分组检索：返回该场景一个组，代表帧即命中的 point。
-    qdrantSearch.mockResolvedValue({
-      groups: [{ id: scene.id, hits: [{ id: pointId, score: 0.82 }] }],
-    });
-    runnerRun.mockImplementation(async ({ tools }) => {
-      const input = { query: "发布会", media_types: ["video"], library_ids: [], limit: 5, offset: 0 };
-      const output = (await tools.search_media.execute(input)) as {
-        results: Array<Record<string, unknown>>;
-      };
-      expect(output.results[0]).toMatchObject({
-        file_id: file.id,
-        asset_id: asset.id,
-        score_kind: "rrf_score",
-        primary_reason: "vector_match",
-      });
-      // Agent 默认沿用 Phase 5 的 visual + RRF；单通道第 1 名贡献为 1/(60+1)。
-      expect(output.results[0]?.score).toBeCloseTo(1 / 61, 8);
-      expect(output.results[0]).not.toHaveProperty("path");
-      return {
-        summary: "找到候选视频片段",
-        toolCalls: [{ toolCallId: "search-1", toolName: "search_media", input, output }],
-      };
-    });
-
-    const created = await agentController.createRun({
-      prompt: "查找发布会片段",
-      allow_external_vlm: false,
-    });
-    const run = await agentController.getRun(created.run_id);
-
-    expect(run).toMatchObject({
-      status: "succeeded",
-      summary: "找到候选视频片段",
-      tool_calls: [
-        {
-          tool_call_id: "search-1",
-          name: "search_media",
-          status: "succeeded",
-          summary: "search_media completed",
-        },
-      ],
-      results: [
-        expect.objectContaining({
-          file_id: file.id,
-          asset_id: asset.id,
-          start_time_seconds: 30,
-          end_time_seconds: 60,
-        }),
-      ],
-    });
-  });
-
-  test("export_clip tool 先写确认事件，确认后才创建 export job", async () => {
-    await closeModule?.();
-    await closeDb?.();
-    await compileAgentModule(testSettings({ allowExternalLlm: true, anthropicApiKey: "test-key", agentModel: "test-model" }));
-
-    const library = await createLibrary(db, { name: "Main Media", rootPath: "/Volumes/Media" });
-    const file = await createMediaFile(db, {
-      libraryId: library.id,
-      path: "/Volumes/Media/launch.mp4",
-      relativePath: "launch.mp4",
-      mediaType: "video",
-      sizeBytes: 20,
-      mtimeMs: 1710000000001,
-      durationSeconds: "120",
-    });
-    runnerRun.mockImplementation(async ({ tools }) => {
-      const input = {
-        file_id: file.id,
-        start_time_seconds: 30,
-        end_time_seconds: 60,
-        output_format: "mp4" as const,
-      };
-      const output = await tools.export_clip.execute(input, { toolCallId: "export-1" });
-      return {
-        summary: "需要确认导出",
-        toolCalls: [{ toolCallId: "export-1", toolName: "export_clip", input, output }],
-      };
-    });
-
-    const created = await agentController.createRun({
-      prompt: "导出这个片段",
-      allow_external_vlm: false,
-    });
-    const pending = await agentController.getRun(created.run_id);
-
-    expect(pending).toMatchObject({
-      status: "waiting_for_confirmation",
-      tool_calls: [
-        {
-          tool_call_id: "export-1",
-          name: "export_clip",
-          status: "waiting_for_confirmation",
-          requires_confirmation: true,
-        },
-      ],
-      events: expect.arrayContaining([
-        expect.objectContaining({
-          type: "user_confirmation_required",
-          tool_call_id: "export-1",
-        }),
-      ]),
-    });
-    await expect(jobsController.listJobs()).resolves.toMatchObject({ items: [], total: 0 });
-
-    const confirmed = await agentController.confirmToolCall(created.run_id, { tool_call_id: "export-1" });
-
-    expect(confirmed).toMatchObject({ job_id: expect.any(String), status: "queued" });
-    await expect(jobsController.getJob(confirmed.job_id)).resolves.toMatchObject({
-      job_type: "export_clip",
-      input: {
-        file_id: file.id,
-        start_time_seconds: 30,
-        end_time_seconds: 60,
-        output_format: "mp4",
+      status: 'queued',
+      next_step: 'extracting_intent',
+      authorization: {
+        allow_external_text: true,
+        allow_external_visual: false,
       },
-    });
-  });
-});
+      steps: [],
+    })
+  })
+
+  test('resume 事务校验等待步骤并对重复 client_request_id 只保存一次输入', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+      }),
+      handler,
+    )
+    const created = await agentController.createRun({
+      prompt: '找视频',
+      allow_external_text: true,
+    })
+    const waitingStepId = '11111111-1111-4111-8111-111111111111'
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'waiting_for_user_input',
+        nextStep: 'searching',
+        waitingStepId,
+        waitingExpiresAt: new Date('2026-08-19T00:00:00.000Z'),
+      })
+      .where(eq(agentRuns.id, created.run_id))
+    const input = {
+      waiting_step_id: waitingStepId,
+      client_request_id: 'resume-001',
+      response: '搜索全部已授权素材库',
+    }
+
+    const first = await agentController.resumeRun(created.run_id, input)
+    const duplicate = await agentController.resumeRun(created.run_id, input)
+
+    expect(first).toMatchObject({ run_id: created.run_id, status: 'queued' })
+    expect(duplicate).toEqual(first)
+    await expect(agentController.getRun(created.run_id)).resolves.toMatchObject({
+      status: 'queued',
+      next_step: 'searching',
+    })
+    // 幂等键只能重放相同动作；复用同一键指向另一个等待步骤必须显式冲突，
+    // 否则客户端会误以为新的澄清内容已经保存。
+    await expect(
+      agentController.resumeRun(created.run_id, {
+        ...input,
+        waiting_step_id: '33333333-3333-4333-8333-333333333333',
+      }),
+    ).rejects.toMatchObject({ status: 409 })
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(agentRunInputs)
+      .where(eq(agentRunInputs.runId, created.run_id))
+    expect(total).toBe(1)
+  })
+
+  test('澄清等待超过 waiting_expires_at 后明确进入 expired，不会静默重新排队', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+      }),
+      handler,
+    )
+    const created = await agentController.createRun({
+      prompt: '找视频',
+      allow_external_text: true,
+    })
+    const waitingStepId = '22222222-2222-4222-8222-222222222222'
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'waiting_for_user_input',
+        nextStep: 'searching',
+        waitingStepId,
+        waitingExpiresAt: new Date('2026-08-11T00:00:00.000Z'),
+      })
+      .where(eq(agentRuns.id, created.run_id))
+
+    await expect(
+      agentController.resumeRun(created.run_id, {
+        waiting_step_id: waitingStepId,
+        client_request_id: 'resume-expired',
+        response: '搜索全部素材库',
+      }),
+    ).rejects.toMatchObject({ status: 410 })
+    await expect(agentController.getRun(created.run_id)).resolves.toMatchObject({
+      status: 'expired',
+      error: { code: 'AGENT_WAITING_EXPIRED' },
+    })
+  })
+
+  test('cancel 在 queued 安全边界直接结束，且不会调用步骤处理器', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+      }),
+      handler,
+    )
+    const created = await agentController.createRun({
+      prompt: '找视频',
+      allow_external_text: true,
+    })
+
+    await expect(
+      agentController.cancelRun(created.run_id, {
+        client_request_id: 'cancel-001',
+        reason: '用户不再需要',
+      }),
+    ).resolves.toMatchObject({ status: 'cancelled' })
+    expect(prepareStep).not.toHaveBeenCalled()
+  })
+
+  test('outcome_unknown 只能通过独立幂等入口重新排队', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+        agentLeaseDurationMs: 5000,
+      }),
+      handler,
+    )
+    const created = await agentController.createRun({
+      prompt: '找视频',
+      allow_external_text: true,
+    })
+    const startedAt = new Date(Date.now() + 1_000)
+    const claim = await claimNextAgentRun(db, {
+      leaseOwner: 'server-a',
+      leaseDurationMs: 5000,
+      now: startedAt,
+    })
+    await markAgentExternalCallDispatched(
+      db,
+      {
+        runId: created.run_id,
+        leaseOwner: 'server-a',
+        leaseVersion: claim!.run.leaseVersion,
+        stepAttemptId: claim!.step.stepAttemptId,
+        currentStatus: 'extracting_intent',
+        inputFingerprint: 'sha256:test',
+      },
+      startedAt,
+    )
+    await recoverExpiredAgentRuns(db, new Date(startedAt.getTime() + 6_000))
+    const input = {
+      step_attempt_id: claim!.step.stepAttemptId,
+      client_request_id: 'retry-001',
+    }
+
+    const first = await agentController.retryUnknown(created.run_id, input)
+    const duplicate = await agentController.retryUnknown(created.run_id, input)
+
+    expect(first).toMatchObject({ run_id: created.run_id, status: 'queued' })
+    expect(duplicate).toEqual(first)
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(agentRunInputs)
+      .where(eq(agentRunInputs.runId, created.run_id))
+    expect(total).toBe(1)
+  })
+})

@@ -8,6 +8,13 @@
       "when": 1785424526406,
       "tag": "0000_final_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786505320725,
+      "tag": "0001_agent_v1_phase_a",
+      "breakpoints": true
     }
   ]
 }

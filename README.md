@@ -73,7 +73,7 @@
 | 层 | 技术 |
 | --- | --- |
 | 前端 | Next.js 16 / React 19 / Tailwind 4 / TypeScript |
-| 后端 API | NestJS（Express adapter）/ Zod / Vercel AI SDK（可选 Anthropic） |
+| 后端 API | NestJS（Express adapter）/ Zod；Agent V1 Phase A 仅提供持久化状态机，尚未接入外部模型 |
 | 数据库 | PostgreSQL 16（Drizzle ORM + node-postgres） |
 | 向量库 | Qdrant（JS client + Python HTTP client） |
 | Python worker | FFmpeg、ffprobe、PySceneDetect、SigLIP2（torch/transformers）、faster-whisper、Qwen2.5-VL（可选 Caption） |
@@ -310,9 +310,14 @@ brew install --cask dbeaver-community
 | `media_assets` | 媒体资产（image / video_segment / video_frame / text_chunk / caption） | `asset_type`、`text_content`、`start/end_time_seconds`、`metadata_json` |
 | `vector_refs` | 向量引用，指向 Qdrant 中的 point | `collection_name`、`point_id`、`status`（pending/indexed）、`vector_dim` |
 | `jobs` | 后台任务队列 | `job_type`、`status`、`progress`、`input_json`、`result_json`、`error_message` |
-| `agent_runs` | Agent 运行记录 | `prompt`、`status`、`summary` |
+| `agent_runs` | Agent V1 可恢复 run 主状态 | `status`、`next_step`、`lease_version`、`waiting_expires_at` |
+| `agent_run_authorizations` | 逐 run 外发授权 | `allow_external_text`、`allow_external_visual`、`granted_at` |
+| `agent_run_steps` | 步骤尝试与外部派发审计 | `step_attempt_id`、`input_fingerprint`、`external_call_status` |
+| `agent_run_inputs` | 澄清、取消和未知结果重试输入 | `client_request_id`、`input_type`、`response_json` |
+| `agent_run_candidates` | 冻结候选身份 | `file_generation`、`asset_id`、`scene_id`、`rank` |
+| `agent_side_effects` | Phase C 预留的副作用幂等事实 | `effect_key`、`status`、`job_id` |
 | `agent_run_events` | Agent 事件流 | `event_type`、`tool_call_id`、`payload_json` |
-| `agent_tool_calls` | Agent 工具调用记录 | `tool_name`、`status`、`requires_confirmation` |
+| `agent_tool_calls` | 旧 Agent MVP 工具调用审计（Phase A 不再写入） | `tool_name`、`status`、`requires_confirmation` |
 
 ### 常用查看 SQL
 

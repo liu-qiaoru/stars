@@ -8,6 +8,126 @@ const nonNegativeNumberSchema = z.number().min(0)
 const collectionSchema = z.enum(vectorCollectionNames)
 const indexProfileSchema = z.enum(indexProfiles)
 
+/**
+ * 使用 Unicode code point（字符代码点）计数，避免 JavaScript 把一个表情符号算成两个字符。
+ * Agent 协议的长度上限是隐私、成本和数据库边界，因此不能静默截断。
+ */
+function unicodeStringSchema(fieldName: string, maximum: number) {
+  return z
+    .string()
+    .min(1)
+    .refine((value) => [...value].length <= maximum, {
+      message: `${fieldName} must contain at most ${maximum} Unicode characters`,
+    })
+}
+
+// Agent V1 是 Server 控制的固定状态机。模型输出和 API 输入都只能使用这些状态，
+// 不能自造“思考中”或跳过等待授权边界的状态。
+export const agentRunStatusSchema = z.enum([
+  'queued',
+  'extracting_intent',
+  'waiting_for_user_input',
+  'searching',
+  'waiting_for_export_selection',
+  'waiting_for_confirmation',
+  'succeeded',
+  'failed',
+  'timed_out',
+  'completed_with_errors',
+  'cancel_requested',
+  'cancelled',
+  'expired',
+  'outcome_unknown',
+])
+
+export const agentNextStepSchema = z.enum(['extracting_intent', 'searching'])
+export const agentExternalCallStatusSchema = z.enum([
+  'not_dispatched',
+  'dispatched',
+  'completed',
+  'outcome_unknown',
+])
+
+const agentConditionSchema = z
+  .object({
+    source_text: unicodeStringSchema('source_text', 200),
+    kind: z.enum(['must_have', 'optional', 'exclusion']),
+    evidence_type: z.enum(['visual', 'spoken', 'metadata', 'unknown']),
+  })
+  .strict()
+
+// AgentIntent 只分类用户原文中的意图和条件，故意没有 query 字段。
+// Phase B 将校验 source_text 是原 prompt 的连续子串，检索仍使用完整原文。
+export const agentIntentSchema = z
+  .object({
+    goal: z.enum(['search', 'inspect', 'export_clip']),
+    search_scope: z.enum(['visual', 'spoken', 'all']),
+    media_types: z.array(z.enum(mediaTypes)).max(4),
+    library_references: z.array(unicodeStringSchema('library_reference', 200)).max(10),
+    conditions: z.array(agentConditionSchema).max(30),
+    needs_clarification: z.boolean(),
+    clarification_reason: unicodeStringSchema('clarification_reason', 500).nullable(),
+    requested_effect: z
+      .object({
+        type: z.literal('export_clip'),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .superRefine((intent, context) => {
+    for (const kind of ['must_have', 'optional', 'exclusion'] as const) {
+      if (intent.conditions.filter((condition) => condition.kind === kind).length > 10) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${kind} conditions must contain at most 10 items`,
+          path: ['conditions'],
+        })
+      }
+    }
+  })
+
+export const createAgentRunInputSchema = z
+  .object({
+    prompt: unicodeStringSchema('prompt', 4000),
+    // 文本和视觉授权必须分开。允许发 prompt 不等于允许发候选帧。
+    allow_external_text: z.boolean(),
+    allow_external_visual: z.boolean().optional().default(false),
+    library_ids: z.array(uuidSchema).max(100).optional().default([]),
+    media_types: z.array(z.enum(mediaTypes)).max(4).optional().default([]),
+  })
+  .strict()
+
+export const resumeAgentRunInputSchema = z
+  .object({
+    waiting_step_id: uuidSchema,
+    client_request_id: z.string().min(1).max(200),
+    response: unicodeStringSchema('response', 2000),
+  })
+  .strict()
+
+export const cancelAgentRunInputSchema = z
+  .object({
+    client_request_id: z.string().min(1).max(200),
+    reason: unicodeStringSchema('reason', 500).optional(),
+  })
+  .strict()
+
+export const retryUnknownAgentRunInputSchema = z
+  .object({
+    step_attempt_id: uuidSchema,
+    client_request_id: z.string().min(1).max(200),
+  })
+  .strict()
+
+export const agentErrorSchema = z
+  .object({
+    code: z.string().min(1).max(100),
+    message: z.string().min(1).max(1000),
+    retryable: z.boolean(),
+  })
+  .strict()
+
 // 这里是跨语言 job 协议的事实来源：NestJS 创建 job，Python worker 读取生成的 JSON Schema 校验输入。
 // 新 job type 必须先在这里声明输入/输出，再生成 packages/shared/generated/job-schemas.json。
 export const jobTypeSchema = z.enum(jobTypes)
