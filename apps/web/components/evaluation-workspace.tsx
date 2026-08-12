@@ -9,6 +9,7 @@ import {
   type EvaluationVersion,
   type LibrarySummary,
 } from '../lib/api-client'
+import { CandidateEvidencePanel } from './candidate-evidence-panel'
 
 /**
  * 本地评测工作台：草稿阶段选择正式图片或 video_scenes 场景目标；运行后逐条盲标。
@@ -110,7 +111,8 @@ export function EvaluationWorkspace({
     await guard(async () => setRun(await apiClient.getEvaluationRun(runId.trim())))
   }
 
-  const requiredCandidates = run?.candidates.filter((candidate) => candidate.requires_judgment) ?? []
+  const requiredCandidates =
+    run?.candidates.filter((candidate) => candidate.requires_judgment) ?? []
   const next = requiredCandidates.find((candidate) => !candidate.judgment)
   const judgedCount = requiredCandidates.filter((candidate) => candidate.judgment).length
   return (
@@ -281,15 +283,27 @@ export function EvaluationWorkspace({
                       src={apiClient.mediaContentUrl(next.file_id)}
                     />
                   ) : (
-                    <video
-                      aria-label="待标注候选"
-                      className="max-h-96 w-full rounded"
-                      controls
-                      src={apiClient.mediaContentUrl(next.file_id, {
-                        startTimeSeconds: next.start_time_seconds,
-                        endTimeSeconds: next.end_time_seconds,
-                      })}
-                    />
+                    <>
+                      <video
+                        aria-label="待标注候选"
+                        className="max-h-96 w-full rounded"
+                        controls
+                        src={apiClient.mediaContentUrl(next.file_id, {
+                          startTimeSeconds: next.start_time_seconds,
+                          endTimeSeconds: next.end_time_seconds,
+                        })}
+                      />
+                      <CandidateEvidencePanel
+                        key={next.id}
+                        source={{
+                          type: 'evaluation_candidate',
+                          run_id: run.id,
+                          candidate_id: next.id,
+                        }}
+                        candidateKey={next.candidate_key}
+                        apiClient={apiClient}
+                      />
+                    </>
                   )}
                   <div className="flex flex-wrap gap-2">
                     {[

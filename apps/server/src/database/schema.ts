@@ -489,6 +489,55 @@ export const agentRunCandidates = pgTable(
   ],
 )
 
+// Candidate Evidence（候选证据）是 Phase D 的长期业务事实，不只存在 jobs.result_json。
+// Server 用 source_type/source_id 证明候选来自哪个冻结快照；Python Worker 只写本地派生
+// 文件和 manifest。artifact_path 永不进入普通 API，浏览器只能经受控 artifact 路由读取。
+export const candidateEvidence = pgTable(
+  'candidate_evidence',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: uuid('source_id').notNull(),
+    candidateKey: text('candidate_key').notNull(),
+    fileId: uuid('file_id').notNull(),
+    fileGeneration: integer('file_generation').notNull(),
+    assetId: uuid('asset_id').notNull(),
+    sceneId: uuid('scene_id').notNull(),
+    strategy: text('strategy').notNull(),
+    protocolVersion: text('protocol_version').notNull(),
+    status: text('status').notNull().default('queued'),
+    jobId: uuid('job_id').references(() => jobs.id),
+    manifestJson: jsonb('manifest_json'),
+    inputSha256: text('input_sha256'),
+    artifactSha256: text('artifact_sha256'),
+    artifactPath: text('artifact_path'),
+    artifactMimeType: text('artifact_mime_type'),
+    artifactWidth: integer('artifact_width'),
+    artifactHeight: integer('artifact_height'),
+    artifactByteSize: bigint('artifact_byte_size', { mode: 'number' }),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    errorDetailsJson: jsonb('error_details_json'),
+    retentionClass: text('retention_class').notNull().default('cache_24h'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }),
+    ...timestamps,
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('candidate_evidence_identity_unique').on(
+      table.sourceType,
+      table.sourceId,
+      table.candidateKey,
+      table.fileGeneration,
+      table.strategy,
+      table.protocolVersion,
+    ),
+    index('candidate_evidence_job_idx').on(table.jobId),
+    index('candidate_evidence_expiry_idx').on(table.retentionClass, table.expiresAt),
+  ],
+)
+
 export const agentRunEvents = pgTable(
   'agent_run_events',
   {

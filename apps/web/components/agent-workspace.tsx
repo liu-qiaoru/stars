@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Textarea } from './ui/textarea'
+import { CandidateEvidencePanel } from './candidate-evidence-panel'
 
 const terminalRunStatuses = new Set([
   'succeeded',
@@ -31,6 +32,10 @@ type AgentApiClient = Pick<
   | 'getJob'
   | 'retryUnknownAgentRun'
   | 'mediaContentUrl'
+  | 'createCandidateEvidence'
+  | 'listCandidateEvidence'
+  | 'cancelCandidateEvidence'
+  | 'candidateEvidenceArtifactUrl'
 >
 
 /**
@@ -264,7 +269,7 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
               <Bot aria-hidden="true" size={22} />
             </span>
             <div>
-              <p className="eyebrow">Agent V1 · Phase C</p>
+              <p className="eyebrow">Agent V1 · Phase D</p>
               <CardTitle className="text-2xl">检索与安全导出</CardTitle>
             </div>
           </div>
@@ -401,6 +406,14 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
                         <p className="text-sm text-[var(--mute)]">
                           未验证条件：{candidate.unverified_condition_ids?.length ?? 0} 项
                         </p>
+                        {candidate.scene_id ? (
+                          <CandidateEvidencePanel
+                            source={{ type: 'agent_run_candidate', run_id: run.id }}
+                            candidateKey={candidate.candidate_key}
+                            apiClient={client}
+                            pollIntervalMs={pollIntervalMs}
+                          />
+                        ) : null}
                         <Button
                           type="button"
                           variant={isSelected ? 'default' : 'outline'}

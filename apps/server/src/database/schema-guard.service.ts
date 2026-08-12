@@ -15,6 +15,8 @@ const REQUIRED_TABLES = [
   'agent_run_inputs',
   'agent_run_candidates',
   'agent_side_effects',
+  // Phase D 页面和 Worker 都依赖独立证据事实；缺表时禁止退化为只读 jobs.result_json。
+  'candidate_evidence',
 ] as const
 
 const MIGRATION_COMMAND = 'corepack pnpm --dir apps/server db:migrate'

@@ -18,6 +18,7 @@ export const jobTypes = [
   'embed_video_frame',
   'embed_text_asset',
   'generate_caption',
+  'build_candidate_evidence',
   'export_clip',
 ] as const
 
@@ -33,12 +34,7 @@ export const jobStatuses = [
 
 export const mediaTypes = ['image', 'video', 'audio', 'document', 'unknown'] as const
 
-export const mediaAssetTypes = [
-  'image',
-  'video_frame',
-  'text_chunk',
-  'caption',
-] as const
+export const mediaAssetTypes = ['image', 'video_frame', 'text_chunk', 'caption'] as const
 
 export const vectorCollectionNames = [
   'image_vectors',

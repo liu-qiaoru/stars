@@ -604,6 +604,217 @@
         "$schema": "http://json-schema.org/draft-07/schema#"
       }
     },
+    "build_candidate_evidence": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "candidate_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "file_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "file_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "asset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scene_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "strategies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "contact_sheet_v1",
+                "all_indexed_frames_v1"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "candidate_key",
+          "file_id",
+          "file_generation",
+          "asset_id",
+          "scene_id",
+          "strategies"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 1,
+            "maxItems": 2
+          },
+          "manifests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "candidate_key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 300
+                },
+                "file_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "file_generation": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "asset_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "scene_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "frame_asset_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "minItems": 1,
+                  "maxItems": 12
+                },
+                "frame_time_seconds": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "minItems": 1,
+                  "maxItems": 12
+                },
+                "strategy": {
+                  "type": "string",
+                  "enum": [
+                    "contact_sheet_v1",
+                    "all_indexed_frames_v1"
+                  ]
+                },
+                "protocol_version": {
+                  "type": "string",
+                  "const": "candidate-evidence-v1"
+                },
+                "frame_count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 12
+                },
+                "input_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "artifact_sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "artifact_id": {
+                  "type": "string",
+                  "pattern": "^candidate-evidence\\/[0-9a-f-]{36}\\/artifact$"
+                },
+                "protocol_parameters": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                },
+                "format": {
+                  "type": "string",
+                  "enum": [
+                    "png",
+                    "json"
+                  ]
+                },
+                "width": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "height": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "byte_size": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "candidate_key",
+                "file_id",
+                "file_generation",
+                "asset_id",
+                "scene_id",
+                "frame_asset_ids",
+                "frame_time_seconds",
+                "strategy",
+                "protocol_version",
+                "frame_count",
+                "input_sha256",
+                "artifact_sha256",
+                "artifact_id",
+                "protocol_parameters",
+                "format",
+                "width",
+                "height",
+                "byte_size"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "evidence_ids",
+          "manifests"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      }
+    },
     "export_clip": {
       "input": {
         "type": "object",

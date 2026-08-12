@@ -162,6 +162,46 @@ describe('typed API client', () => {
     )
   })
 
+  test('creates, restores, cancels, and addresses local candidate evidence with stable routes', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'evidence-1', status: 'cancelled' }), { status: 200 }),
+      )
+    const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })
+    const source = { type: 'agent_run_candidate' as const, run_id: 'run-1' }
+
+    await client.createCandidateEvidence({
+      source,
+      candidate_key: 'video:scene-1',
+      strategies: ['contact_sheet_v1', 'all_indexed_frames_v1'],
+    })
+    await client.listCandidateEvidence({
+      source_type: 'agent_run_candidate',
+      source_id: 'run-1',
+      candidate_key: 'video:scene-1',
+    })
+    await client.cancelCandidateEvidence('evidence-1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://api.local/candidate-evidence',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      'http://api.local/candidate-evidence?source_type=agent_run_candidate&source_id=run-1&candidate_key=video%3Ascene-1',
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'http://api.local/candidate-evidence/evidence-1/cancel',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(client.candidateEvidenceArtifactUrl('evidence-1')).toBe(
+      'http://api.local/candidate-evidence/evidence-1/artifact',
+    )
+  })
+
   test('reads settings and completes Agent export selection and confirmation with stable routes', async () => {
     fetchMock
       .mockResolvedValueOnce(

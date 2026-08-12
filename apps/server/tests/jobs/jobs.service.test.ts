@@ -81,6 +81,41 @@ describe('jobs service', () => {
     })
   })
 
+  test('candidate evidence Jobs hide local paths and reject the generic retry endpoint', async () => {
+    const library = await createLibrary(db, { name: 'Private', rootPath: '/private/media' })
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: '/private/media/clip.mp4',
+      relativePath: 'clip.mp4',
+      mediaType: 'video',
+      sizeBytes: 100,
+      mtimeMs: 1,
+    })
+    const failed = await createJob(db, {
+      jobType: 'build_candidate_evidence',
+      fileId: file.id,
+      inputJson: {
+        candidate_key: 'video:scene-1',
+        file_id: file.id,
+        file_generation: 0,
+        asset_id: '11111111-1111-4111-8111-111111111111',
+        scene_id: '22222222-2222-4222-8222-222222222222',
+        strategies: ['contact_sheet_v1'],
+      },
+    })
+    await db.update(jobs).set({ status: 'failed' }).where(eq(jobs.id, failed.id))
+
+    const detail = await service.getJob(failed.id)
+    const list = await service.listJobs()
+
+    expect(detail.file_paths).toEqual([])
+    expect(list.items.find((item) => item.id === failed.id)?.file_paths).toEqual([])
+    expect(JSON.stringify({ detail, list })).not.toContain('/private/media')
+    await expect(service.retryJob(failed.id)).rejects.toMatchObject({
+      response: { error_code: 'CANDIDATE_EVIDENCE_RETRY_REQUIRES_SOURCE' },
+    })
+  })
+
   test('按优先级 claim queued job 并写入 worker lock', async () => {
     await createJob(db, {
       jobType: 'scan_library',

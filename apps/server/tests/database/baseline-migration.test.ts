@@ -11,20 +11,30 @@ afterEach(async () => {
 })
 
 describe('database migration chain', () => {
-  test('keeps the Phase 7 baseline immutable and appends the Agent V1 Phase A migration', async () => {
+  test('keeps the Phase 7 baseline immutable and appends Agent V1 migrations', async () => {
     const migrationFiles = (await readdir(resolve('drizzle')))
       .filter((file) => file.endsWith('.sql'))
       .sort()
     const metadataFiles = (await readdir(resolve('drizzle/meta'))).sort()
 
-    expect(migrationFiles).toEqual(['0000_final_baseline.sql', '0001_agent_v1_phase_a.sql'])
-    expect(metadataFiles).toEqual(['0000_snapshot.json', '0001_snapshot.json', '_journal.json'])
+    expect(migrationFiles).toEqual([
+      '0000_final_baseline.sql',
+      '0001_agent_v1_phase_a.sql',
+      '0002_agent_v1_phase_d_candidate_evidence.sql',
+    ])
+    expect(metadataFiles).toEqual([
+      '0000_snapshot.json',
+      '0001_snapshot.json',
+      '0002_snapshot.json',
+      '_journal.json',
+    ])
     const journal = JSON.parse(await readFile(resolve('drizzle/meta/_journal.json'), 'utf8')) as {
       entries: Array<{ tag: string }>
     }
     expect(journal.entries.map((entry) => entry.tag)).toEqual([
       '0000_final_baseline',
       '0001_agent_v1_phase_a',
+      '0002_agent_v1_phase_d_candidate_evidence',
     ])
 
     const sql = await readFile(resolve('drizzle', migrationFiles[0]!), 'utf8')
@@ -108,6 +118,37 @@ describe('database migration chain', () => {
         'lease_version',
         'next_step',
         'waiting_expires_at',
+      ]),
+    )
+  })
+
+  test('applies Phase D as an additive migration and creates only candidate_evidence', async () => {
+    client = new PGlite()
+    for (const file of [
+      '0000_final_baseline.sql',
+      '0001_agent_v1_phase_a.sql',
+      '0002_agent_v1_phase_d_candidate_evidence.sql',
+    ]) {
+      await client.exec(await readFile(resolve('drizzle', file), 'utf8'))
+    }
+
+    const tables = await client.query<{ tablename: string }>(
+      "select tablename from pg_tables where schemaname='public' order by tablename",
+    )
+    expect(tables.rows).toHaveLength(21)
+    expect(tables.rows.map((row) => row.tablename)).toContain('candidate_evidence')
+    const evidenceColumns = await client.query<{ column_name: string }>(
+      "select column_name from information_schema.columns where table_name='candidate_evidence'",
+    )
+    expect(evidenceColumns.rows.map((row) => row.column_name)).toEqual(
+      expect.arrayContaining([
+        'manifest_json',
+        'input_sha256',
+        'artifact_sha256',
+        'artifact_path',
+        'retention_class',
+        'expires_at',
+        'frozen_at',
       ]),
     )
   })

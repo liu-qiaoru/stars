@@ -15,6 +15,13 @@
       "when": 1786505320725,
       "tag": "0001_agent_v1_phase_a",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786538749003,
+      "tag": "0002_agent_v1_phase_d_candidate_evidence",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,52 @@
 import json
 import unittest
 
-from media_agent_worker.repository import PostgresMediaRepository
+from media_agent_worker.errors import JobCancelled
+from media_agent_worker.repository import PostgresJobRepository, PostgresMediaRepository
+
+
+class EvidenceJobFakeConnection:
+    """覆盖 Phase D 的 claim 与完成竞争 SQL，不模拟媒体仓储。"""
+
+    def __init__(self, *, claimed_job=None, job_status="running"):
+        self.claimed_job = claimed_job
+        self.job_status = job_status
+        self.executed = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    def cursor(self):
+        return EvidenceJobFakeCursor(self)
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+class EvidenceJobFakeCursor:
+    def __init__(self, connection):
+        self.connection = connection
+        self.fetchone_result = None
+        self.rowcount = 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, query, params=None):
+        self.connection.executed.append((query, params))
+        normalized = " ".join(query.split())
+        if normalized.startswith("SELECT id, job_type, input_json"):
+            self.fetchone_result = self.connection.claimed_job
+        elif normalized.startswith("SELECT status FROM jobs"):
+            self.fetchone_result = (self.connection.job_status,)
+
+    def fetchone(self):
+        return self.fetchone_result
 
 
 class PurgeFakeConnection:
@@ -106,6 +151,43 @@ class FakeCursor:
 
     def fetchone(self):
         return self.fetchone_result
+
+
+class PostgresJobRepositoryEvidenceTest(unittest.TestCase):
+    def test_claim_marks_evidence_running_without_writing_an_unknown_started_at_column(self):
+        connection = EvidenceJobFakeConnection(
+            claimed_job=("job-1", "build_candidate_evidence", {"strategies": ["contact_sheet_v1"]})
+        )
+        repository = PostgresJobRepository(connection)
+
+        claimed = repository.claim_next_job("worker-1")
+        executed_sql = "\n".join(query for query, _params in connection.executed)
+
+        self.assertEqual(claimed["job_type"], "build_candidate_evidence")
+        self.assertIn("UPDATE candidate_evidence", executed_sql)
+        self.assertNotIn("started_at", executed_sql)
+        self.assertEqual(connection.commits, 1)
+
+    def test_completion_observes_cancel_requested_under_the_job_row_lock(self):
+        connection = EvidenceJobFakeConnection(job_status="cancel_requested")
+        repository = PostgresMediaRepository(connection)
+
+        with self.assertRaises(JobCancelled):
+            repository.complete_candidate_evidence_job("job-1", [], {})
+
+        self.assertEqual(connection.rollbacks, 1)
+        self.assertTrue(any("FOR UPDATE" in query for query, _params in connection.executed))
+
+    def test_failure_cannot_overwrite_a_concurrent_cancel_request(self):
+        connection = EvidenceJobFakeConnection(job_status="cancel_requested")
+        repository = PostgresJobRepository(connection)
+
+        repository.mark_failed("job-1", "late failure", error_code="LATE_FAILURE")
+        executed_sql = "\n".join(query for query, _params in connection.executed)
+
+        self.assertIn("SET status = 'cancelled'", executed_sql)
+        self.assertNotIn("SET status = 'failed'", executed_sql)
+        self.assertEqual(connection.commits, 1)
 
 
 class PostgresMediaRepositoryTest(unittest.TestCase):

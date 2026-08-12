@@ -104,7 +104,8 @@ LibrariesModule
 JobsModule
 MediaModule
 SearchModule
-AgentModule        持有 Agent 租约、固定搜索步骤、Phase C 确认导出和恢复 API
+  AgentModule        持有 Agent 租约、固定搜索步骤、Phase C 确认导出和恢复 API
+  CandidateEvidenceModule  校验冻结候选、创建/恢复 Phase D 本地证据 Job 和受控文件读取
 ModelGatewayModule
 ```
 
@@ -219,6 +220,39 @@ Prompt/Schema 版本只读；`RIGHT_CODE_API_KEY` 只返回 configured 布尔值
 值不会返回浏览器。超时、租约、等待期限、启用开关、执行扫描间隔和 Web 轮询间隔都在
 当前 Server 进程立即生效；进程重启后重新采用环境变量默认值。
 
+### Agent V1 Phase D：独立候选证据
+
+Phase D 在候选冻结之后增加一条完全本地的派生数据链，不改变候选排名，也不执行模型判断：
+
+```text
+用户在 Agent 或 Evaluation 页面明确点击“准备本地证据”
+→ CandidateEvidenceModule 重新校验候选、文件 generation、场景和代表帧 Asset
+→ PostgreSQL 事务创建或复用 candidate_evidence 与 build_candidate_evidence Job
+→ Python Worker 异步领取 Job，再次读取并校验当前 PostgreSQL 文件、场景和已索引帧事实
+→ 按稳定时间顺序重新物化这些已有索引时间点，不新增时间点、不读取邻帧、不重新采样
+→ 生成 contact_sheet_v1 拼图和 all_indexed_frames_v1 有序清单
+→ 计算输入/产物 SHA-256，先写唯一 partial，再以不覆盖方式原子发布
+→ 同一 PostgreSQL 事务提交 evidence 事实与 Job succeeded
+→ Web 通过受控 artifact API 读取拼图，不接收本机绝对路径
+```
+
+`candidate_evidence` 是长期事实表，保存来源候选、generation、strategy（证据策略）、协议版本、
+manifest（实际帧清单）、SHA-256 指纹、私有文件位置、状态和结构化错误。普通 Agent 证据记录约
+24 小时缓存期限；正式 Evaluation 记录使用 `evaluation_frozen` 长期冻结。当前阶段只记录期限，
+没有目录级自动清理，避免越界删除。Server 负责身份、幂等和 HTTP；Worker 负责耗时图像处理与
+文件发布；PostgreSQL 负责重启恢复和审计；Qdrant 不读取也不写入。`queued → running →
+succeeded|failed|cancelled` 均从数据库恢复，运行中取消先进入 `cancel_requested`。
+
+`contact_sheet_v1` 使用 1600×900 RGB PNG、深灰背景、8 像素单格留白、保持宽高比的 contain
+缩放和左下角 `T+HH:MM:SS.mmm` 时间戳。时间戳使用协议内置的 5×7 像素字形，渲染器固定为
+Pillow 11.3.0；版本变化必须升级协议。1/2/3–4/5–6/7–9/10–12 帧分别使用
+1×1、1×2、2×2、2×3、3×3、3×4 布局。`all_indexed_frames_v1` 保存全部 1～12 帧的稳定
+顺序、Asset ID、秒数、标准化 PNG 指纹和受控标识。两种策略均使用
+`candidate-evidence-v1`；协议参数变化必须升级版本，不能静默复用旧产物。
+
+本阶段没有接入 Rerank（重排）或 VLM（Vision-Language Model，视觉语言模型）审核，没有任何
+图片、Caption、转录、路径或文件名外发，也不产生通过/拒绝结论。
+
 NestJS AgentModule 组织：
 
 ```text
@@ -259,6 +293,9 @@ Agent 确认以 `agent_side_effects.id` 作为 `export_request_id`，所以重�
     frames/
     transcripts/
     scenes/
+  evidence/
+    <evidence-id>.png
+    <evidence-id>.bundle/
   exports/
     clips/
     montages/

@@ -50,6 +50,10 @@ function client(overrides: Record<string, unknown> = {}) {
     confirmAgentExport: vi.fn(),
     getJob: vi.fn(),
     retryUnknownAgentRun: vi.fn(),
+    createCandidateEvidence: vi.fn().mockResolvedValue({ items: [] }),
+    listCandidateEvidence: vi.fn().mockResolvedValue({ items: [] }),
+    cancelCandidateEvidence: vi.fn(),
+    candidateEvidenceArtifactUrl: vi.fn((id: string) => `http://media.test/evidence/${id}`),
     mediaContentUrl: vi.fn(
       (
         id: string,

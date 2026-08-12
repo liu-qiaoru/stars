@@ -1,4 +1,7 @@
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { zodToJsonSchema } from 'zod-to-json-schema'
 import { jobInputSchemas, jobOutputSchemas } from '../schemas/index.js'
 
 describe('job schemas', () => {
@@ -123,5 +126,84 @@ describe('job schemas', () => {
 
     expect(legacy).not.toHaveProperty('export_request_id')
     expect(agent.export_request_id).toBe('22222222-2222-4222-8222-222222222222')
+  })
+
+  it('validates the local candidate evidence job without accepting unknown strategies or invalid frames', () => {
+    const input = jobInputSchemas.build_candidate_evidence.parse({
+      candidate_key: 'video:scene-1',
+      file_id: '11111111-1111-4111-8111-111111111111',
+      file_generation: 3,
+      asset_id: '22222222-2222-4222-8222-222222222222',
+      scene_id: '33333333-3333-4333-8333-333333333333',
+      strategies: ['contact_sheet_v1', 'all_indexed_frames_v1'],
+    })
+    const output = jobOutputSchemas.build_candidate_evidence.parse({
+      evidence_ids: ['44444444-4444-4444-8444-444444444444'],
+      manifests: [
+        {
+          candidate_key: input.candidate_key,
+          file_id: input.file_id,
+          file_generation: input.file_generation,
+          asset_id: input.asset_id,
+          scene_id: input.scene_id,
+          frame_asset_ids: ['55555555-5555-4555-8555-555555555555'],
+          frame_time_seconds: [12.5],
+          strategy: 'contact_sheet_v1',
+          protocol_version: 'candidate-evidence-v1',
+          frame_count: 1,
+          input_sha256: 'a'.repeat(64),
+          artifact_sha256: 'b'.repeat(64),
+          artifact_id: 'candidate-evidence/44444444-4444-4444-8444-444444444444/artifact',
+          protocol_parameters: {
+            canvas_width: 1600,
+            canvas_height: 900,
+            resize_mode: 'contain_with_padding',
+          },
+          format: 'png',
+          width: 1600,
+          height: 900,
+          byte_size: 1234,
+        },
+      ],
+    })
+
+    expect(output.manifests[0].frame_count).toBe(1)
+    expect(() =>
+      jobInputSchemas.build_candidate_evidence.parse({
+        ...input,
+        strategies: ['neighbor_frames_v1'],
+      }),
+    ).toThrow()
+    for (const invalidInput of [
+      { ...input, file_id: 'not-a-uuid' },
+      { ...input, asset_id: 'not-a-uuid' },
+      { ...input, scene_id: 'not-a-uuid' },
+      { ...input, file_generation: -1 },
+    ]) {
+      expect(() => jobInputSchemas.build_candidate_evidence.parse(invalidInput)).toThrow()
+    }
+    expect(() =>
+      jobOutputSchemas.build_candidate_evidence.parse({
+        ...output,
+        manifests: [{ ...output.manifests[0], frame_count: 0, frame_time_seconds: [-1] }],
+      }),
+    ).toThrow()
+  })
+
+  it('keeps the generated Python candidate evidence JSON Schema identical to current Zod', async () => {
+    const generated = JSON.parse(await readFile(resolve('generated/job-schemas.json'), 'utf8')) as {
+      jobs: Record<string, { input: unknown; output: unknown }>
+    }
+
+    expect(generated.jobs.build_candidate_evidence).toEqual({
+      input: zodToJsonSchema(jobInputSchemas.build_candidate_evidence, {
+        $refStrategy: 'none',
+        target: 'jsonSchema7',
+      }),
+      output: zodToJsonSchema(jobOutputSchemas.build_candidate_evidence, {
+        $refStrategy: 'none',
+        target: 'jsonSchema7',
+      }),
+    })
   })
 })

@@ -1,6 +1,7 @@
 psycopg[binary]>=3.2,<4
 python-dotenv>=1,<2
-pillow>=10,<12
+# contact_sheet_v1 的 PNG 编码协议依赖固定 Pillow 版本；升级时必须同时升级证据协议版本。
+pillow==11.3.0
 # TorchCodec 0.13's official compatibility table starts at PyTorch 2.11. Keeping
 # these lower bounds aligned prevents installation from succeeding with a decoder
 # that cannot load against the selected tensor runtime.

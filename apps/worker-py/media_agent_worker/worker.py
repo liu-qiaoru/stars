@@ -1,4 +1,4 @@
-from .errors import JobError
+from .errors import JobCancelled, JobError
 
 
 class WorkerRunner:
@@ -23,6 +23,7 @@ class WorkerRunner:
         embed_text_asset_handler=None,
         transcribe_handler=None,
         export_handler=None,
+        candidate_evidence_handler=None,
     ):
         self.worker_id = worker_id
         self.job_repository = job_repository
@@ -36,6 +37,7 @@ class WorkerRunner:
         self.embed_text_asset_handler = embed_text_asset_handler
         self.transcribe_handler = transcribe_handler
         self.export_handler = export_handler
+        self.candidate_evidence_handler = candidate_evidence_handler
         self._shutdown_requested = False
 
     def request_shutdown(self):
@@ -72,10 +74,21 @@ class WorkerRunner:
                 result = self.transcribe_handler.handle(job["input_json"])
             elif job["job_type"] == "export_clip" and self.export_handler is not None:
                 result = self.export_handler.handle(job["input_json"])
+            elif (
+                job["job_type"] == "build_candidate_evidence"
+                and self.candidate_evidence_handler is not None
+            ):
+                # 候选证据需要把 evidence 事实与 Job 成功状态放在同一 PostgreSQL
+                # 事务提交，因此 handler 自己完成终态更新，不能再调用 mark_succeeded。
+                self.candidate_evidence_handler.handle(job["input_json"], job_id=job["id"])
+                return True
             else:
                 raise ValueError(f"Unsupported job type: {job['job_type']}")
             self.job_repository.mark_succeeded(job["id"], result)
             return True
+        except JobCancelled as error:
+            self.job_repository.mark_cancelled(job["id"], str(error))
+            return False
         except JobError as error:
             # 确定性失败（场景检测不可用等）带稳定 error_code，写入结构化错误字段供 Jobs 页面展示。
             # run_ocr 路由已在阶段 2 删除。
@@ -103,6 +116,11 @@ class WorkerRunner:
                     "Caption 文本 Embedding 任务失败",
                 ),
                 "generate_caption": ("CAPTION_FAILED", "caption_generation", "Caption 生成任务失败"),
+                "build_candidate_evidence": (
+                    "CANDIDATE_EVIDENCE_FAILED",
+                    "candidate_evidence",
+                    "候选证据构建失败",
+                ),
             }.get(job["job_type"])
             if structured:
                 error_code, stage, safe_message = structured

@@ -27,7 +27,10 @@ export class JobsService {
 
   async listJobs(input: { limit?: number; offset?: number } = {}) {
     const { rows, total, limit, offset } = await listJobs(this.db, input)
-    const filePathsByJobId = await resolveJobFilePaths(this.db, rows)
+    const filePathsByJobId = await resolveJobFilePaths(
+      this.db,
+      rows.filter((row) => row.jobType !== 'build_candidate_evidence'),
+    )
     return {
       items: rows.map((row) => this.toResponse(row, filePathsByJobId.get(row.id) ?? [])),
       total,
@@ -41,7 +44,10 @@ export class JobsService {
     if (!row) {
       throw new NotFoundException('Job not found')
     }
-    const filePathsByJobId = await resolveJobFilePaths(this.db, [row])
+    const filePathsByJobId = await resolveJobFilePaths(
+      this.db,
+      row.jobType === 'build_candidate_evidence' ? [] : [row],
+    )
     return this.toResponse(row, filePathsByJobId.get(row.id) ?? [])
   }
 
@@ -52,6 +58,14 @@ export class JobsService {
     }
     if (failed.status !== 'failed') {
       throw new ConflictException('Only failed jobs can be retried')
+    }
+    if (failed.jobType === 'build_candidate_evidence') {
+      // Phase D 重试必须由 POST /candidate-evidence 在同一事务重新关联 evidence.job_id。
+      // 通用复制会产生没有 evidence 事实归属的孤儿 Job，因此在这里明确拒绝。
+      throw new ConflictException({
+        error_code: 'CANDIDATE_EVIDENCE_RETRY_REQUIRES_SOURCE',
+        message: '请从 Agent 或 Evaluation 候选重新准备本地证据',
+      })
     }
     // 重试创建新的 queued 审计行，而不把原失败行改回 queued。这样用户仍能看到原错误，
     // Python Worker 也只会领取新任务；输入仍由原任务创建时通过的共享 Job Schema 约束。
@@ -140,11 +154,7 @@ export class JobsService {
     let cursor: { createdAtCursor: string; id: string } | undefined
 
     while (created < creationLimit) {
-      const pendingRefs = await listPendingEmbeddingVectorRefs(
-        this.db,
-        creationLimit,
-        cursor,
-      )
+      const pendingRefs = await listPendingEmbeddingVectorRefs(this.db, creationLimit, cursor)
       if (pendingRefs.length === 0) {
         break
       }
@@ -266,7 +276,8 @@ export class JobsService {
       heartbeat_at: row.heartbeatAt?.toISOString() ?? null,
       timeout_seconds: row.timeoutSeconds,
       progress: row.progress,
-      file_paths: filePaths,
+      // 候选证据 Job 即使关联 file_id，也不得通过通用 Jobs API 暴露本地绝对路径。
+      file_paths: row.jobType === 'build_candidate_evidence' ? [] : filePaths,
       input: row.inputJson,
       result: row.resultJson,
       // error_message 是给用户看的简短错误；error_code/error_details 暴露机器可读的结构化

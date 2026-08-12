@@ -413,6 +413,34 @@ export interface AgentSettingsResponse {
   persistence: 'process'
 }
 
+export type CandidateEvidenceStatus =
+  | 'queued'
+  | 'running'
+  | 'cancel_requested'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+
+export interface CandidateEvidenceSummary {
+  id: string
+  candidate_key: string
+  file_id: string
+  file_generation: number
+  asset_id: string
+  scene_id: string
+  job_id: string | null
+  status: CandidateEvidenceStatus
+  strategy: 'contact_sheet_v1' | 'all_indexed_frames_v1'
+  protocol_version: string
+  frame_count: number | null
+  artifact_url: string | null
+  error: { code: string; message: string; details?: unknown } | null
+}
+
+export type CandidateEvidenceSource =
+  | { type: 'agent_run_candidate'; run_id: string }
+  | { type: 'evaluation_candidate'; run_id: string; candidate_id: string }
+
 interface ApiClientOptions {
   baseUrl?: string
   fetcher?: typeof fetch
@@ -583,6 +611,30 @@ export function createApiClient(options: ApiClientOptions = {}) {
         method: 'GET',
         signal: options.signal,
       }),
+    createCandidateEvidence: (input: {
+      source: CandidateEvidenceSource
+      candidate_key: string
+      strategies: Array<'contact_sheet_v1' | 'all_indexed_frames_v1'>
+    }) =>
+      request<{ items: CandidateEvidenceSummary[] }>('/candidate-evidence', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    listCandidateEvidence: (
+      input: {
+        source_type: CandidateEvidenceSource['type']
+        source_id: string
+        candidate_key?: string
+      },
+      options: { signal?: AbortSignal } = {},
+    ) =>
+      request<{ items: CandidateEvidenceSummary[] }>(withQuery('/candidate-evidence', input), {
+        method: 'GET',
+        signal: options.signal,
+      }),
+    cancelCandidateEvidence: (id: string) =>
+      request<CandidateEvidenceSummary>(`/candidate-evidence/${id}/cancel`, { method: 'POST' }),
+    candidateEvidenceArtifactUrl: (id: string) => `${baseUrl}/candidate-evidence/${id}/artifact`,
     selectAgentExport: (
       id: string,
       input: {

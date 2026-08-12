@@ -268,6 +268,90 @@ export const generateCaptionOutputSchema = z.object({
   vector_ref_created: z.boolean().optional(),
 })
 
+export const candidateEvidenceStrategySchema = z.enum(['contact_sheet_v1', 'all_indexed_frames_v1'])
+
+// 证据 Job 只携带冻结候选的稳定身份与小型协议选择。源视频路径、图片字节、Caption、
+// 转录和向量都由 Worker 在本地重新读取 PostgreSQL 事实，绝不能穿过跨语言 Job 参数。
+export const buildCandidateEvidenceInputSchema = z
+  .object({
+    candidate_key: z.string().min(1).max(300),
+    file_id: uuidSchema,
+    file_generation: nonNegativeIntegerSchema,
+    asset_id: uuidSchema,
+    scene_id: uuidSchema,
+    strategies: z.array(candidateEvidenceStrategySchema).min(1).max(2),
+  })
+  .strict()
+  .refine((input) => new Set(input.strategies).size === input.strategies.length, {
+    message: 'strategies must not contain duplicates',
+    path: ['strategies'],
+  })
+
+const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/)
+
+export const candidateEvidenceManifestSchema = z
+  .object({
+    candidate_key: z.string().min(1).max(300),
+    file_id: uuidSchema,
+    file_generation: nonNegativeIntegerSchema,
+    asset_id: uuidSchema,
+    scene_id: uuidSchema,
+    frame_asset_ids: z.array(uuidSchema).min(1).max(12),
+    frame_time_seconds: z.array(nonNegativeNumberSchema.finite()).min(1).max(12),
+    strategy: candidateEvidenceStrategySchema,
+    protocol_version: z.literal('candidate-evidence-v1'),
+    frame_count: z.number().int().min(1).max(12),
+    input_sha256: sha256Schema,
+    artifact_sha256: sha256Schema,
+    // artifact_id 是受控 API 标识，不是文件系统路径；浏览器只能经 Server 读取成功证据。
+    artifact_id: z.string().regex(/^candidate-evidence\/[0-9a-f-]{36}\/artifact$/),
+    protocol_parameters: z.record(z.union([z.string(), z.number(), z.boolean()])),
+    format: z.enum(['png', 'json']),
+    width: z.number().int().positive().nullable(),
+    height: z.number().int().positive().nullable(),
+    byte_size: z.number().int().positive(),
+  })
+  .strict()
+  .superRefine((manifest, context) => {
+    if (
+      manifest.frame_count !== manifest.frame_asset_ids.length ||
+      manifest.frame_count !== manifest.frame_time_seconds.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'frame_count must match frame ids and times',
+        path: ['frame_count'],
+      })
+    }
+    if (
+      manifest.strategy === 'contact_sheet_v1' &&
+      (manifest.format !== 'png' || manifest.width === null || manifest.height === null)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'contact_sheet_v1 requires PNG dimensions',
+        path: ['format'],
+      })
+    }
+    if (
+      manifest.strategy === 'all_indexed_frames_v1' &&
+      (manifest.format !== 'json' || manifest.width !== null || manifest.height !== null)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'all_indexed_frames_v1 is a dimensionless JSON artifact',
+        path: ['format'],
+      })
+    }
+  })
+
+export const buildCandidateEvidenceOutputSchema = z
+  .object({
+    evidence_ids: z.array(uuidSchema).min(1).max(2),
+    manifests: z.array(candidateEvidenceManifestSchema).min(1).max(2),
+  })
+  .strict()
+
 export const exportClipInputSchema = z
   .object({
     file_id: uuidSchema,
@@ -315,6 +399,7 @@ export const jobInputSchemas = {
   embed_video_frame: embedVideoFrameInputSchema,
   embed_text_asset: embedTextAssetInputSchema,
   generate_caption: generateCaptionInputSchema,
+  build_candidate_evidence: buildCandidateEvidenceInputSchema,
   export_clip: exportClipInputSchema,
 } satisfies Record<z.infer<typeof jobTypeSchema>, z.ZodTypeAny>
 
@@ -329,5 +414,6 @@ export const jobOutputSchemas = {
   embed_video_frame: embeddingOutputSchema,
   embed_text_asset: embeddingOutputSchema,
   generate_caption: generateCaptionOutputSchema,
+  build_candidate_evidence: buildCandidateEvidenceOutputSchema,
   export_clip: exportClipOutputSchema,
 } satisfies Record<z.infer<typeof jobTypeSchema>, z.ZodTypeAny>

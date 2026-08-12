@@ -120,6 +120,40 @@ Review：
   check 仍由 38 个未改动历史文件阻断。Standards/Spec 首轮阻断项已修复，最终双轴复审无
   阻断项。真实 RightAPI 调用、费用和本地媒体数据外发均为 0。
 
+## Agent V1 Phase D：独立候选证据构建器
+
+- Start：2026-08-12。目标是只使用当前 generation 已索引的 1～12 张视频帧，异步生成
+  `contact_sheet_v1` 拼图和 `all_indexed_frames_v1` 稳定 manifest，并把证据身份、指纹、
+  状态与结构化错误保存为 PostgreSQL 长期事实。
+- 范围边界：不调用任何外部 Provider，不执行 Rerank 或 VLM 判断，不改变候选顺序、
+  不删除/过滤/补位候选，不重新搜索、扫描、抽样或索引，也不修改 Qdrant。
+- 验证计划：以 Shared Job Schema、Server HTTP API、Worker Job handler 和 Web 用户可见行为
+  为四条公共测试接缝，逐条红绿实现；最后运行定向/全量测试、lint、format、迁移与真实数据
+  完整性核对，并以 `b1fbdea` 为固定起点完成 Standards/Spec 双轴 Review。
+
+- [x] 定义 `build_candidate_evidence` 共享 Job 输入、输出与 Python JSON Schema。
+- [x] 新增规范化 `candidate_evidence` PostgreSQL 事实和增量迁移。
+- [x] 实现候选/generation/场景/Asset 身份校验及事务性 Job 幂等创建与恢复 API。
+- [x] Worker 二次校验当前 generation 的全部已索引场景帧并生成两种证据协议。
+- [x] 实现规范化指纹、唯一 `.partial`、原子发布、不覆盖与失败/取消清理。
+- [x] Web 以明确用户操作构建证据，并展示等待、构建、完成、失败、取消和本地拼图预览。
+- [x] 同步架构、API、Job 协议、迁移说明和本阶段 Review。
+- [x] 完成定向/全量验证、真实数据核对和双轴 Review 后只提交 Phase D 文件。
+
+Review：
+
+- Result：Phase D 已完成。Agent 与 Evaluation 都只在用户明确操作后创建本地证据 Job；
+  `contact_sheet_v1` 和 `all_indexed_frames_v1` 使用当前 generation 的全部 1～12 张已索引帧，
+  状态、manifest、SHA-256、保留策略与结构化错误由 `candidate_evidence` 独立保存。页面明确显示
+  证据准备状态，并持续声明尚未执行 Rerank 或 VLM 审核。
+- Notes：迁移前已备份 PostgreSQL；迁移后媒体文件 35、Asset 7,940、场景 1,919、已索引
+  Vector Ref 7,564 与迁移前一致，Qdrant 三个 Collection Point 仍为 8 / 5,629 / 1,927。
+  不需要回填、重新扫描或重新索引。全量验证通过 Shared 14、Server 200、Web 62、Python
+  Worker 133 项和 Web 生产构建；lint 仅有一个未修改历史文件 warning，全仓 format check 仍由
+  34 个既有文件阻断，Phase D 22 个可格式化文件单独通过。真实 Provider 调用、费用、数据外发
+  与 Qdrant 写入均为 0。以 `b1fbdea` 为固定点的 Standards/Spec 首轮发现已修复，最终复审无
+  阻断项；实现严格停在 Phase D。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

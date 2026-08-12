@@ -342,6 +342,83 @@ Result：
 }
 ```
 
+### build_candidate_evidence
+
+Phase D 的证据 Job 只携带稳定 UUID、冻结 generation 和两个小型策略名，不传图片、Base64、
+源视频、绝对路径、大向量、Caption 或转录文本。TypeScript/Zod 是 Schema（数据结构约束）的唯一
+权威来源；修改后必须重新生成 `packages/shared/generated/job-schemas.json` 给 Python 测试核对。
+
+Input：
+
+```json
+{
+  "candidate_key": "video:scene-uuid",
+  "file_id": "uuid",
+  "file_generation": 3,
+  "asset_id": "uuid",
+  "scene_id": "uuid",
+  "strategies": ["contact_sheet_v1", "all_indexed_frames_v1"]
+}
+```
+
+Server 在同一 PostgreSQL 事务中创建或复用 `candidate_evidence` 与 Job。Worker 领取时把关联证据
+置为 `running`，随后重新验证：活动视频文件与 generation、场景归属、代表帧 Asset、全部帧均为
+当前场景非 stale（过期标记）且已有 `video_frame_vectors` indexed Vector Ref、帧时间有限非负并
+位于场景范围、ID/时间不重复、数量为 1～12。排序固定为
+`(frame_time_seconds, asset_id)`；任何失败都写稳定 `error_code`，不能换用新 generation 或降级。
+
+Worker 只在已有索引帧时间点重新物化画面，不选择新时间点、不取邻帧、不做运动峰值或重新抽样。
+每帧先标准化为 RGB PNG 并计算 SHA-256。规范化 JSON 使用 UTF-8、键名排序、无多余空白和末尾
+LF；帧秒值使用 IEEE 754 binary64 浮点数的 17 位有效数字往返格式，保证任一可表示的时间变化
+都进入指纹；帧 ID、帧内容哈希、generation、strategy、协议版本与完整协议参数共同
+计算 `input_sha256`。最终拼图 PNG 或 bundle manifest 字节计算 `artifact_sha256`。
+
+`contact_sheet_v1` 固定参数：Pillow 11.3.0、1600×900 RGB PNG、压缩级别 9、背景 `#111827`、
+8 像素留白、保持宽高比 contain 缩放、左下角仓库内置 5×7 像素字形绘制的白色
+`T+HH:MM:SS.mmm` 时间戳；1/2/3–4/5–6/7–9/10–12
+帧布局依次为 1×1、1×2、2×2、2×3、3×3、3×4。`all_indexed_frames_v1` bundle 包含稳定
+`manifest.json` 和每帧标准化 PNG，记录 Asset ID、时间、格式、宽高、字节数、内容哈希及受控标识。
+协议版本均为 `candidate-evidence-v1`。
+
+Result：
+
+```json
+{
+  "evidence_ids": ["uuid"],
+  "manifests": [
+    {
+      "candidate_key": "video:scene-uuid",
+      "file_id": "uuid",
+      "file_generation": 3,
+      "asset_id": "uuid",
+      "scene_id": "uuid",
+      "frame_asset_ids": ["uuid"],
+      "frame_time_seconds": [12.5],
+      "strategy": "contact_sheet_v1",
+      "protocol_version": "candidate-evidence-v1",
+      "frame_count": 1,
+      "input_sha256": "64 lowercase hex characters",
+      "artifact_sha256": "64 lowercase hex characters",
+      "artifact_id": "candidate-evidence/uuid/artifact",
+      "protocol_parameters": {},
+      "format": "png",
+      "width": 1600,
+      "height": 900,
+      "byte_size": 12345
+    }
+  ]
+}
+```
+
+文件先写唯一 `.partial`，再以不覆盖方式原子发布；已存在文件必须先核对指纹才能复用。失败、取消
+和数据库提交失败会清理本次临时文件及未被引用的新产物。evidence 事实和 Job `succeeded` 在同一
+PostgreSQL 事务提交；Server 重启后直接读取该事实，不从文件名或 Worker 内存猜状态。
+
+该 Job 不能通过通用 Jobs 重试接口复制；失败后必须由候选证据 API 重新校验冻结来源并原子更新
+`candidate_evidence.job_id`。通用 Jobs 查询也不返回它关联媒体文件的绝对路径。
+
+该 Job 不读取或写入 Qdrant，不调用任何外部 Provider，不执行 Rerank/VLM，也不产生业务结论。
+
 ### export_clip
 
 Input：
@@ -430,6 +507,8 @@ Python worker 可以：
 - 创建或更新 `vector_refs`。
 - 写入 transcript 和 Caption 结果。
 - 写入 clip export 结果。
+- 写入 `candidate_evidence` manifest、指纹、私有 artifact 元数据和结构化状态；与证据 Job 终态
+  在同一事务提交。
 - upsert Qdrant points，并写回 `vector_refs`。
 
 Python worker 不可以：

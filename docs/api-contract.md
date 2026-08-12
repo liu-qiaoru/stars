@@ -655,6 +655,63 @@ run 进入 `succeeded` 只表示确认事实完成；导出是否完成必须读
 
 Phase C 仍不提供 Rerank、VLM 复核或 Agent 自主循环。
 
+## 候选证据 API（Agent V1 Phase D）
+
+候选证据只支持已冻结的视频场景。API（应用程序接口）只创建和读取本地派生图片，不调用外部
+Provider（模型服务提供方），不改变候选顺序，也不返回审核结论或本机绝对路径。
+
+### POST /candidate-evidence
+
+Agent 来源请求示例：
+
+```json
+{
+  "source": { "type": "agent_run_candidate", "run_id": "uuid" },
+  "candidate_key": "video:scene-uuid",
+  "strategies": ["contact_sheet_v1", "all_indexed_frames_v1"]
+}
+```
+
+Evaluation 来源把 `source` 改为
+`{"type":"evaluation_candidate","run_id":"uuid","candidate_id":"uuid"}`。Server 重新校验
+候选属于该 run，当前文件仍是视频且 `index_generation` 未变化，场景与代表帧 Asset 身份一致。
+过期 generation 返回 HTTP 409 和 `STALE_FILE_GENERATION`，不会改用新 generation。
+
+响应为 `{ "items": [...] }`，每项使用 snake_case，包含 `id`、`candidate_key`、
+`file_generation`、`job_id`、`status`、`strategy`、`protocol_version`、`manifest`、
+`frame_count`、`artifact_url`、`error`、期限和冻结时间。`artifact_url` 只在 `succeeded` 时出现；
+响应不包含 `artifact_path`。重复或并发请求复用同一 evidence 和活动 Job；失败或取消后可用同一
+evidence 身份创建新 Job 重试。
+
+`build_candidate_evidence` 虽关联 `file_id`，通用 `GET /jobs` 与 `GET /jobs/{id}` 也固定返回空
+`file_paths`，避免从旁路泄露绝对路径。通用 `POST /jobs/{id}/retry` 对该 Job 返回 409 和
+`CANDIDATE_EVIDENCE_RETRY_REQUIRES_SOURCE`；证据重试必须回到冻结候选调用本节 POST，才能在
+同一事务重新关联 `candidate_evidence.job_id`。
+
+### GET /candidate-evidence
+
+使用 `source_type`、`source_id` 和可选 `candidate_key` 查询 PostgreSQL 已有状态，用于页面刷新或
+Server 重启后恢复。Agent 的 `source_id` 是 run UUID；Evaluation 的 `source_id` 是 candidate UUID。
+该读取不会创建 Job。
+
+### GET /candidate-evidence/{id}
+
+读取单条证据状态、manifest 和结构化错误。状态为 `queued | running | cancel_requested |
+succeeded | failed | cancelled`。`succeeded` 只表示本地证据准备完成，不表示候选符合条件。
+
+### GET /candidate-evidence/{id}/artifact
+
+只允许读取 `succeeded` 证据。Server 从私有数据库列定位文件并重新计算 SHA-256；文件缺失或指纹
+不一致返回 HTTP 409。响应使用 `private, no-store`，浏览器无法指定任意本机路径。
+
+### POST /candidate-evidence/{id}/cancel
+
+排队中的 Job 与同 Job 的全部策略立即转为 `cancelled`；运行中的 Job 转为
+`cancel_requested`，由 Worker 在安全边界清理 partial 后写入 `cancelled`。终态重复取消幂等返回。
+
+Web 文案必须区分“证据准备完成”“尚未执行 Rerank”“尚未执行 VLM 审核”。页面隐藏时暂停轮询，
+恢复可见时立即刷新，终态停止，卸载时取消 HTTP 请求。普通候选展示不得自动调用 POST。
+
 ## 单视频重索引接口
 
 `POST /jobs/video/reindex` 为一个 active 视频创建破坏性重索引任务。body 只接受

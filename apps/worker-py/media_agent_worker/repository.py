@@ -3,6 +3,8 @@ import os
 import uuid
 from pathlib import Path
 
+from .errors import JobCancelled
+
 
 class PostgresJobRepository:
     """Thin SQL adapter for the shared jobs table.
@@ -45,6 +47,17 @@ class PostgresJobRepository:
                 """,
                 (worker_id, job_id),
             )
+            if job_type == "build_candidate_evidence":
+                # Job 与 evidence 的运行态必须在同一事务可见，页面重载后才能从
+                # PostgreSQL 恢复真实状态，而不是依赖 Worker 内存。
+                cursor.execute(
+                    """
+                    UPDATE candidate_evidence
+                    SET status = 'running', updated_at = now()
+                    WHERE job_id = %s AND status IN ('queued', 'running')
+                    """,
+                    (job_id,),
+                )
             self.connection.commit()
             return {"id": str(job_id), "job_type": job_type, "input_json": input_json}
 
@@ -67,6 +80,13 @@ class PostgresJobRepository:
             )
         self.connection.commit()
 
+    def is_cancel_requested(self, job_id):
+        """只读检查取消信号；长任务在安全边界调用，避免半发布证据。"""
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT status FROM jobs WHERE id = %s", (job_id,))
+            row = cursor.fetchone()
+        return row is not None and row[0] == "cancel_requested"
+
     def mark_succeeded(self, job_id, result):
         with self.connection.cursor() as cursor:
             cursor.execute(
@@ -87,6 +107,36 @@ class PostgresJobRepository:
         # error_code/error_details_json 让 Jobs 页面展示机器可读的结构化错误和技术诊断，
         # 与面向用户的 error_message 一起形成完整的失败说明。
         with self.connection.cursor() as cursor:
+            cursor.execute("SELECT status FROM jobs WHERE id = %s FOR UPDATE", (job_id,))
+            job_row = cursor.fetchone()
+            if job_row is None or job_row[0] in ("succeeded", "failed", "cancelled"):
+                self.connection.commit()
+                return
+            if job_row[0] == "cancel_requested":
+                cancel_message = "候选证据构建已取消"
+                cancel_details = json.dumps({"stage": "candidate_evidence"})
+                cursor.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'cancelled', error_message = %s,
+                        error_code = 'EVIDENCE_CANCELLED', error_details_json = %s,
+                        updated_at = now(), finished_at = now()
+                    WHERE id = %s AND status = 'cancel_requested'
+                    """,
+                    (cancel_message, cancel_details, job_id),
+                )
+                cursor.execute(
+                    """
+                    UPDATE candidate_evidence
+                    SET status = 'cancelled', error_code = 'EVIDENCE_CANCELLED',
+                        error_message = %s, error_details_json = %s,
+                        updated_at = now(), finished_at = now()
+                    WHERE job_id = %s AND status = 'cancel_requested'
+                    """,
+                    (cancel_message, cancel_details, job_id),
+                )
+                self.connection.commit()
+                return
             cursor.execute(
                 """
                 UPDATE jobs
@@ -96,7 +146,7 @@ class PostgresJobRepository:
                     error_details_json = %s,
                     updated_at = now(),
                     finished_at = now()
-                WHERE id = %s
+                WHERE id = %s AND status = 'running'
                 """,
                 (
                     message,
@@ -104,6 +154,44 @@ class PostgresJobRepository:
                     json.dumps(error_details) if error_details is not None else None,
                     job_id,
                 ),
+            )
+            cursor.execute(
+                """
+                UPDATE candidate_evidence
+                SET status = 'failed', error_code = %s, error_message = %s,
+                    error_details_json = %s, updated_at = now(), finished_at = now()
+                WHERE job_id = %s AND status NOT IN ('succeeded', 'cancelled')
+                """,
+                (
+                    error_code,
+                    message,
+                    json.dumps(error_details) if error_details is not None else None,
+                    job_id,
+                ),
+            )
+        self.connection.commit()
+
+    def mark_cancelled(self, job_id, message):
+        """原子记录取消终态，保留结构化原因供 Web 与审计读取。"""
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE jobs
+                SET status = 'cancelled', error_message = %s, error_code = 'EVIDENCE_CANCELLED',
+                    error_details_json = %s, updated_at = now(), finished_at = now()
+                WHERE id = %s AND status IN ('running', 'cancel_requested')
+                """,
+                (message, json.dumps({"stage": "candidate_evidence"}), job_id),
+            )
+            cursor.execute(
+                """
+                UPDATE candidate_evidence
+                SET status = 'cancelled', error_code = 'EVIDENCE_CANCELLED',
+                    error_message = %s, error_details_json = %s,
+                    updated_at = now(), finished_at = now()
+                WHERE job_id = %s AND status IN ('running', 'cancel_requested')
+                """,
+                (message, json.dumps({"stage": "candidate_evidence"}), job_id),
             )
         self.connection.commit()
 
@@ -537,6 +625,173 @@ class PostgresMediaRepository:
             }
             for row in rows
         ]
+
+    def load_candidate_evidence_context(self, job_input):
+        """重读当前 PostgreSQL 事实，供 Worker 对 Server 冻结身份做第二次校验。
+
+        这里只选择已经写入 ``video_frame_vectors`` 且状态为 ``indexed`` 的帧。
+        大向量留在 Qdrant，不会进入 Job 参数或 Python/TypeScript 边界。
+        """
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, path, media_type, index_generation, deleted_at
+                FROM media_files WHERE id = %s
+                """,
+                (job_input["file_id"],),
+            )
+            file_row = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT id, file_id, index_generation, start_time_seconds, end_time_seconds
+                FROM video_scenes WHERE id = %s
+                """,
+                (job_input["scene_id"],),
+            )
+            scene_row = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT id, file_id, scene_id, asset_type,
+                       COALESCE(metadata_json->>'stale', 'false') = 'true'
+                FROM media_assets WHERE id = %s
+                """,
+                (job_input["asset_id"],),
+            )
+            asset_row = cursor.fetchone()
+            cursor.execute(
+                """
+                SELECT ma.id, ma.file_id, ma.scene_id, ma.asset_type,
+                       ma.frame_time_seconds,
+                       COALESCE(ma.metadata_json->>'stale', 'false') = 'true',
+                       EXISTS (
+                         SELECT 1 FROM vector_refs vr
+                         WHERE vr.asset_id = ma.id
+                           AND vr.collection_name = 'video_frame_vectors'
+                           AND vr.status = 'indexed'
+                       )
+                FROM media_assets ma
+                WHERE ma.scene_id = %s AND ma.asset_type = 'video_frame'
+                ORDER BY ma.frame_time_seconds ASC, ma.id ASC
+                """,
+                (job_input["scene_id"],),
+            )
+            frame_rows = cursor.fetchall()
+        return {
+            "file": None if file_row is None else {
+                "id": str(file_row[0]),
+                "path": file_row[1],
+                "media_type": file_row[2],
+                "index_generation": int(file_row[3]),
+                "deleted": file_row[4] is not None,
+            },
+            "scene": None if scene_row is None else {
+                "id": str(scene_row[0]),
+                "file_id": str(scene_row[1]),
+                "index_generation": int(scene_row[2]),
+                "start_time_seconds": float(scene_row[3]),
+                "end_time_seconds": float(scene_row[4]),
+            },
+            "candidate_asset": None if asset_row is None else {
+                "id": str(asset_row[0]),
+                "file_id": str(asset_row[1]),
+                "scene_id": str(asset_row[2]) if asset_row[2] is not None else None,
+                "asset_type": asset_row[3],
+                "stale": bool(asset_row[4]),
+            },
+            "frames": [
+                {
+                    "asset_id": str(row[0]),
+                    "file_id": str(row[1]),
+                    "scene_id": str(row[2]) if row[2] is not None else None,
+                    "asset_type": row[3],
+                    "frame_time_seconds": float(row[4]) if row[4] is not None else None,
+                    "stale": bool(row[5]),
+                    "indexed": bool(row[6]),
+                }
+                for row in frame_rows
+            ],
+        }
+
+    def get_candidate_evidence_for_job(self, job_id):
+        """读取该 Job 要发布的策略；私有 artifact_path 不离开 Worker/Server。"""
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, strategy, protocol_version
+                FROM candidate_evidence WHERE job_id = %s ORDER BY strategy ASC
+                """,
+                (job_id,),
+            )
+            rows = cursor.fetchall()
+        return [
+            {"id": str(row[0]), "strategy": row[1], "protocol_version": row[2]}
+            for row in rows
+        ]
+
+    def complete_candidate_evidence_job(self, job_id, outputs, result):
+        """原子提交 evidence 文件事实和 Job 成功终态。
+
+        文件已经通过不覆盖的原子发布变得可见；只有本事务成功后 Server 才会返回
+        artifact URL。事务失败时 handler 会删除仅由本次创建、尚未被引用的产物。
+        """
+        try:
+            with self.connection.cursor() as cursor:
+                # 与 Server 取消事务争抢同一 jobs 行锁：谁先取得锁就决定唯一终态。
+                # 若取消先提交，抛 JobCancelled 让 handler 删除刚发布的未引用产物；
+                # 若完成先提交，后到的取消会读取 succeeded 并保持成功终态。
+                cursor.execute("SELECT status FROM jobs WHERE id = %s FOR UPDATE", (job_id,))
+                job_row = cursor.fetchone()
+                if job_row is None:
+                    raise RuntimeError("Candidate evidence Job is missing")
+                if job_row[0] == "cancel_requested":
+                    raise JobCancelled("候选证据构建已取消")
+                if job_row[0] != "running":
+                    raise RuntimeError("Candidate evidence Job is not running")
+                for output in outputs:
+                    manifest = output["manifest"]
+                    cursor.execute(
+                        """
+                        UPDATE candidate_evidence
+                        SET status = 'succeeded', manifest_json = %s,
+                            input_sha256 = %s, artifact_sha256 = %s,
+                            artifact_path = %s, artifact_mime_type = %s,
+                            artifact_width = %s, artifact_height = %s,
+                            artifact_byte_size = %s, error_code = NULL,
+                            error_message = NULL, error_details_json = NULL,
+                            updated_at = now(), finished_at = now()
+                        WHERE id = %s AND job_id = %s
+                        """,
+                        (
+                            json.dumps(manifest),
+                            manifest["input_sha256"],
+                            manifest["artifact_sha256"],
+                            output["artifact_path"],
+                            output["artifact_mime_type"],
+                            manifest["width"],
+                            manifest["height"],
+                            manifest["byte_size"],
+                            output["evidence_id"],
+                            job_id,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError("Candidate evidence row changed before completion")
+                cursor.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'succeeded', progress = 100, result_json = %s,
+                        error_message = NULL, error_code = NULL, error_details_json = NULL,
+                        updated_at = now(), finished_at = now()
+                    WHERE id = %s AND status = 'running'
+                    """,
+                    (json.dumps(result), job_id),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("Candidate evidence Job changed before completion")
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
 
     def mark_vector_ref_indexed(self, point_id):
         with self.connection.cursor() as cursor:

@@ -3,6 +3,7 @@ import signal
 import time
 
 from .captioning import GenerateCaptionHandler
+from .candidate_evidence import CandidateEvidenceHandler
 from .exporting import ExportClipHandler
 from .embedding_worker import EmbedImageHandler, EmbedTextAssetHandler, EmbedVideoFrameHandler
 from .embeddings import SiglipEmbedder
@@ -45,6 +46,12 @@ def build_runner(
         embed_text_asset_handler=EmbedTextAssetHandler(media_repository, qdrant_client, shared_text_embedder),
         transcribe_handler=TranscribeHandler(media_repository),
         export_handler=ExportClipHandler(media_repository),
+        candidate_evidence_handler=CandidateEvidenceHandler(
+            media_repository,
+            # 旧的专用测试/嵌入进程可能注入只实现最小 Job 接口的 fake；只有真正领取
+            # Phase D Job 时才需要取消读取能力。
+            cancellation_checker=getattr(job_repository, "is_cancel_requested", lambda _job_id: False),
+        ),
     )
 
 

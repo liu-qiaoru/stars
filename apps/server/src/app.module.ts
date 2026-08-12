@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { AgentModule } from './agent/agent.module.js'
 import { ClipsModule } from './clips/clips.module.js'
+import { CandidateEvidenceModule } from './candidate-evidence/candidate-evidence.module.js'
 import { ConfigModule } from './config/config.module.js'
 import { DatabaseModule } from './database/database.module.js'
 import { HealthModule } from './health/health.module.js'
@@ -24,6 +25,7 @@ import { SearchModule } from './search/search.module.js'
     LibrariesModule,
     MediaModule,
     ClipsModule,
+    CandidateEvidenceModule,
     AgentModule,
     QdrantModule,
     SearchModule,
