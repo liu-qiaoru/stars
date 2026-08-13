@@ -41,9 +41,10 @@ describe('evaluation reports workspace', () => {
       'fetch',
       vi.fn().mockImplementation(async (request: string | URL | Request) => {
         const url = String(request)
-        return {
-          ok: true,
-          json: async () =>
+        // 使用浏览器原生 Response 作为测试替身，确保同时覆盖 text()/json()
+        // 的真实 Fetch 契约；影子接口的 JSON null 与 HTTP 空正文是两个不同状态。
+        return new Response(
+          JSON.stringify(
             url.endsWith('/shadow-rerank')
               ? null
               : {
@@ -72,7 +73,9 @@ describe('evaluation reports workspace', () => {
                     },
                   ],
                 },
-        }
+          ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
       }),
     )
 

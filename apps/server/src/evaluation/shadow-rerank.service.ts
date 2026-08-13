@@ -6,15 +6,17 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   type OnModuleInit,
 } from '@nestjs/common'
 import {
   shadowRerankRequestSchema,
   shadowRerankResponseSchema,
 } from '@local-media-agent/shared/schemas'
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import sharp from 'sharp'
 import { z, ZodError } from 'zod'
+import { SETTINGS, type Settings } from '../config/settings.js'
 import { DATABASE } from '../database/database.module.js'
 import type { Database } from '../database/repositories.js'
 import {
@@ -26,34 +28,54 @@ import {
   evaluationShadowAttempts,
   evaluationShadowRankings,
   evaluationShadowRuns,
+  evaluationShadowUsageReconciliations,
   mediaAssets,
   mediaFiles,
+  vectorRefs,
 } from '../database/schema.js'
 import { calculateRankingMetrics, type RankingMetrics } from '../ranking/metrics.js'
-import { SHADOW_RERANK_PROVIDER, type ShadowRerankProvider } from './shadow-rerank.provider.js'
+import { dashScopeShadowRerankRequestBytes } from './dashscope-shadow-rerank.provider.js'
+import {
+  SHADOW_RERANK_PROVIDER,
+  ShadowRerankProviderResponseError,
+  type ShadowRerankProvider,
+} from './shadow-rerank.provider.js'
 
 const PROTOCOL_VERSION = 'qwen3-vl-rerank-top20-v1'
 const MODEL = 'qwen3-vl-rerank'
 const REQUEST_TIMEOUT_MS = 120_000
+// DashScope 将图片输入定价为每百万 token 1.8 元。一次 Phase E 请求全部使用图片
+// document，因此对 total_tokens 全部采用图片单价是不会低估预算的保守估算。
+const IMAGE_INPUT_COST_CNY_PER_TOKEN = 1.8 / 1_000_000
+const TEXT_INPUT_COST_CNY_PER_TOKEN = 0.7 / 1_000_000
+const MAX_REQUEST_TOKENS = 120_000
+const MAX_REQUEST_COST_CNY = MAX_REQUEST_TOKENS * IMAGE_INPUT_COST_CNY_PER_TOKEN
 
 // TypeScript 接口不能保护运行时 Provider 边界；用量和费用也必须先做
 // Schema 校验，否则负 token、NaN 费用或过长 request ID 会污染历史报告。
 const providerAuditSchema = z
   .object({
     providerRequestId: z.string().min(1).max(500).nullable(),
-    responseModel: z.string().min(1).max(200),
+    responseModel: z.string().min(1).max(200).nullable(),
     modelSnapshot: z.string().min(1).max(500).nullable(),
     region: z.string().min(1).max(200).nullable(),
-    inputTokens: z.number().int().nonnegative(),
-    outputTokens: z.number().int().nonnegative(),
-    totalTokens: z.number().int().nonnegative(),
-    billedCostCny: z.number().finite().nonnegative(),
+    inputTokens: z.number().int().nonnegative().nullable(),
+    outputTokens: z.number().int().nonnegative().nullable(),
+    totalTokens: z.number().int().nonnegative().nullable(),
+    billedCostCny: z.number().finite().nonnegative().nullable(),
   })
   .strict()
-  .refine((value) => value.totalTokens === value.inputTokens + value.outputTokens, {
-    path: ['totalTokens'],
-    message: 'totalTokens must equal inputTokens + outputTokens',
-  })
+  .refine(
+    (value) =>
+      value.inputTokens === null ||
+      value.outputTokens === null ||
+      value.totalTokens === null ||
+      value.totalTokens === value.inputTokens + value.outputTokens,
+    {
+      path: ['totalTokens'],
+      message: 'totalTokens must equal inputTokens + outputTokens when all are provided',
+    },
+  )
 
 type CandidateRow = typeof evaluationCandidates.$inferSelect
 type ShadowRankingRow = typeof evaluationShadowRankings.$inferSelect
@@ -72,6 +94,9 @@ export class ShadowRerankService implements OnModuleInit {
   constructor(
     @Inject(DATABASE) private readonly db: Database,
     @Inject(SHADOW_RERANK_PROVIDER) private readonly provider: ShadowRerankProvider,
+    @Optional()
+    @Inject(SETTINGS)
+    private readonly settings?: Pick<Settings, 'shadowRerankMaxCalls' | 'shadowRerankMaxCostCny'>,
   ) {}
 
   async onModuleInit() {
@@ -111,6 +136,7 @@ export class ShadowRerankService implements OnModuleInit {
           id: shadowRunId,
           evaluationRunId,
           protocolVersion: PROTOCOL_VERSION,
+          executionNumber: 1,
           status: 'pending',
           queryCount: queryRows.length,
         })
@@ -126,6 +152,7 @@ export class ShadowRerankService implements OnModuleInit {
               and(
                 eq(evaluationShadowRuns.evaluationRunId, evaluationRunId),
                 eq(evaluationShadowRuns.protocolVersion, PROTOCOL_VERSION),
+                eq(evaluationShadowRuns.executionNumber, 1),
               ),
             )
             .limit(1)
@@ -147,8 +174,166 @@ export class ShadowRerankService implements OnModuleInit {
           })
           .onConflictDoNothing()
       }
+      // 调用次数或预算门只会拦截尚未外发的本地 attempt。用户以后明确扩大同一
+      // smoke 授权时，允许这些 attempt 恢复；已经 dispatched/completed/outcome_unknown
+      // 的请求绝不重放，避免重复外发和重复计费。
+      const reopened = await tx
+        .update(evaluationShadowAttempts)
+        .set({
+          status: 'pending',
+          errorCode: null,
+          errorMessage: null,
+          errorDetailsJson: null,
+          finishedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(evaluationShadowAttempts.shadowRunId, run.id),
+            eq(evaluationShadowAttempts.status, 'failed'),
+            eq(evaluationShadowAttempts.externalCallStatus, 'not_dispatched'),
+            inArray(evaluationShadowAttempts.errorCode, [
+              'SHADOW_RERANK_CALL_LIMIT_REACHED',
+              'SHADOW_RERANK_BUDGET_LIMIT_REACHED',
+              'SHADOW_RERANK_BUDGET_UNKNOWN',
+            ]),
+          ),
+        )
+        .returning()
+      if (reopened.length > 0) {
+        await tx
+          .update(evaluationShadowRuns)
+          .set({
+            status: 'pending',
+            errorCode: null,
+            errorMessage: null,
+            errorDetailsJson: null,
+            finishedAt: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(evaluationShadowRuns.id, run.id))
+      }
     })
     return this.getByEvaluationRun(evaluationRunId)
+  }
+
+  /**
+   * 为同一冻结 Evaluation 创建一次新的、可审计的执行。它不重新搜索，也不复用旧
+   * attempt；只有上一次执行已经失败时才能创建，避免误把成功请求再次计费。
+   */
+  async retry(evaluationRunId: string) {
+    const [evaluationRun] = await this.db
+      .select()
+      .from(evaluationRuns)
+      .where(eq(evaluationRuns.id, evaluationRunId))
+      .limit(1)
+    if (!evaluationRun) throw new NotFoundException('evaluation run not found')
+    if (evaluationRun.status !== 'reported') {
+      throw new ConflictException('evaluation run must be reported before shadow rerank retry')
+    }
+    const queryRows = await this.db
+      .select({ id: evaluationQueries.id, searchScope: evaluationQueries.searchScope })
+      .from(evaluationQueries)
+      .where(eq(evaluationQueries.versionId, evaluationRun.versionId))
+      .orderBy(asc(evaluationQueries.createdAt))
+
+    const newRunId = await this.db.transaction(async (tx) => {
+      // 表锁把两个并发 retry 串行化；execution_number 是同一 Evaluation 下的稳定序号。
+      await tx.execute(sql`lock table evaluation_shadow_runs in share row exclusive mode`)
+      const [latest] = await tx
+        .select()
+        .from(evaluationShadowRuns)
+        .where(
+          and(
+            eq(evaluationShadowRuns.evaluationRunId, evaluationRunId),
+            eq(evaluationShadowRuns.protocolVersion, PROTOCOL_VERSION),
+          ),
+        )
+        .orderBy(desc(evaluationShadowRuns.executionNumber))
+        .limit(1)
+      if (!latest) throw new ConflictException('shadow rerank must run once before retry')
+      if (!['failed', 'completed_with_errors'].includes(latest.status)) {
+        throw new ConflictException('only a failed shadow rerank can be retried')
+      }
+      const id = randomUUID()
+      await tx.insert(evaluationShadowRuns).values({
+        id,
+        evaluationRunId,
+        protocolVersion: PROTOCOL_VERSION,
+        executionNumber: latest.executionNumber + 1,
+        status: 'pending',
+        queryCount: queryRows.length,
+      })
+      for (const query of queryRows) {
+        await tx.insert(evaluationShadowAttempts).values({
+          id: randomUUID(),
+          shadowRunId: id,
+          queryId: query.id,
+          idempotencyKey: `${id}:${query.id}:${PROTOCOL_VERSION}`,
+          status: query.searchScope === 'visual' ? 'pending' : 'not_applicable',
+          notApplicableReason:
+            query.searchScope === 'visual'
+              ? null
+              : '只有冻结 search_scope=visual 的查询可进入影子重排',
+        })
+      }
+      return id
+    })
+    return this.get(newRunId)
+  }
+
+  async retryAndSchedule(evaluationRunId: string) {
+    if (!this.provider.available) throw new ConflictException('真实视觉外发授权尚未开启')
+    const result = await this.retry(evaluationRunId)
+    this.schedule(result.id)
+    return result
+  }
+
+  /**
+   * 只读组装即将外发的冻结事实并返回安全摘要。它不创建 shadow run、不写数据库、
+   * 不调用 Provider，也不返回 query/Base64；用于真实 smoke 授权前确认精确请求大小。
+   */
+  async preview(evaluationRunId: string) {
+    const [evaluationRun] = await this.db
+      .select()
+      .from(evaluationRuns)
+      .where(eq(evaluationRuns.id, evaluationRunId))
+      .limit(1)
+    if (!evaluationRun) throw new NotFoundException('evaluation run not found')
+    if (evaluationRun.status !== 'reported') {
+      throw new ConflictException('evaluation run must be reported before shadow rerank preview')
+    }
+    const visualQueries = await this.db
+      .select({ id: evaluationQueries.id })
+      .from(evaluationQueries)
+      .where(
+        and(
+          eq(evaluationQueries.versionId, evaluationRun.versionId),
+          eq(evaluationQueries.searchScope, 'visual'),
+        ),
+      )
+      .orderBy(asc(evaluationQueries.createdAt))
+    const items = []
+    for (const query of visualQueries) {
+      const prepared = await this.prepareRequest(evaluationRunId, query.id)
+      items.push({
+        query_id: query.id,
+        candidate_count: prepared.candidates.length,
+        document_count: prepared.request.documents.length,
+        request_bytes: prepared.requestBytes,
+        query_fingerprint: prepared.queryFingerprint,
+        evidence_fingerprint: prepared.evidenceFingerprint,
+      })
+    }
+    return {
+      evaluation_run_id: evaluationRunId,
+      provider: 'dashscope',
+      requested_model: MODEL,
+      region: 'cn-beijing',
+      protocol_version: PROTOCOL_VERSION,
+      external_call_count: 0,
+      items,
+    }
   }
 
   /** HTTP 创建先返回可轮询事实，再调度后台执行；测试可直接调用 start 而不会遗留悬空任务。 */
@@ -262,33 +447,17 @@ export class ShadowRerankService implements OnModuleInit {
     if (!attempt || attempt.status !== 'pending') return
     let providerResponseReceived = false
     try {
-      const prepared = await this.prepareRequest(attempt)
+      const prepared = await this.prepareRequest(
+        (await this.shadowRun(attempt.shadowRunId)).evaluationRunId,
+        attempt.queryId,
+      )
       if (!this.provider.available) {
         throw new ShadowRerankError(
           'SHADOW_RERANK_PROVIDER_DISABLED',
           '真实 qwen3-vl-rerank 调用尚未获得视觉外发授权',
         )
       }
-      const [claimed] = await this.db
-        .update(evaluationShadowAttempts)
-        .set({
-          status: 'running',
-          externalCallStatus: 'dispatched',
-          queryFingerprint: prepared.queryFingerprint,
-          evidenceFingerprint: prepared.evidenceFingerprint,
-          requestBytes: prepared.requestBytes,
-          actualCandidateCount: 20,
-          dispatchedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(evaluationShadowAttempts.id, attemptId),
-            eq(evaluationShadowAttempts.status, 'pending'),
-            eq(evaluationShadowAttempts.externalCallStatus, 'not_dispatched'),
-          ),
-        )
-        .returning()
+      const claimed = await this.claimDispatch(attempt, prepared)
       if (!claimed) return
 
       const controller = new AbortController()
@@ -298,7 +467,40 @@ export class ShadowRerankService implements OnModuleInit {
       try {
         providerResult = await this.provider.rerank(prepared.request, controller.signal)
         providerResponseReceived = true
-      } catch {
+      } catch (error) {
+        if (error instanceof ShadowRerankProviderResponseError) {
+          // HTTP 响应已明确到达，不能标记 outcome_unknown。只保存安全码、状态、请求 ID、
+          // 延迟和响应指纹；供应商 message/响应正文绝不写入 PostgreSQL、API 或日志。
+          providerResponseReceived = true
+          await this.db
+            .update(evaluationShadowAttempts)
+            .set({
+              status: 'failed',
+              externalCallStatus: 'completed',
+              providerRequestId: error.providerRequestId,
+              region: error.region,
+              responseFingerprint: safeFingerprint(error.responseForFingerprint),
+              latencyMs: Date.now() - started,
+              actualResultCount: providerResultCount(error.responseForFingerprint),
+              errorCode: error.code,
+              errorMessage: 'Provider 已返回明确响应，但请求被拒绝或响应协议无效',
+              errorDetailsJson: {
+                http_status: error.httpStatus,
+                provider_code: error.providerCode,
+                schema_issues: error.schemaIssues,
+              },
+              finishedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(evaluationShadowAttempts.id, attemptId),
+                eq(evaluationShadowAttempts.status, 'running'),
+                eq(evaluationShadowAttempts.externalCallStatus, 'dispatched'),
+              ),
+            )
+          return
+        }
         await this.db
           .update(evaluationShadowAttempts)
           .set({
@@ -357,6 +559,8 @@ export class ShadowRerankService implements OnModuleInit {
           latencyMs,
           billedCostCny:
             safeAudit.billedCostCny === null ? null : safeAudit.billedCostCny.toString(),
+          estimatedCostCny:
+            safeAudit.totalTokens === null ? null : estimatedImageCostCny(safeAudit.totalTokens),
           actualResultCount,
           updatedAt: new Date(),
         })
@@ -368,7 +572,9 @@ export class ShadowRerankService implements OnModuleInit {
           ),
         )
       const providerAudit = providerAuditSchema.parse(rawProviderAudit)
-      if (providerAudit.responseModel !== MODEL) {
+      // DashScope 当前不返回响应模型；只有 Provider 明确返回该字段时才执行一致性校验。
+      // requested_model 仍由 shadow run 固定为 qwen3-vl-rerank，不能由响应改变。
+      if (providerAudit.responseModel !== null && providerAudit.responseModel !== MODEL) {
         throw new ShadowRerankError(
           'SHADOW_RESPONSE_MODEL_MISMATCH',
           'Provider 响应模型不是冻结的 qwen3-vl-rerank',
@@ -433,11 +639,178 @@ export class ShadowRerankService implements OnModuleInit {
     }
   }
 
-  private async prepareRequest(attempt: typeof evaluationShadowAttempts.$inferSelect) {
+  /**
+   * 短暂锁住整个 Phase E attempt 表后，跨所有 Evaluation run 核对同一协议的累计
+   * 调用次数和预算，再把当前 attempt 标成 dispatched。smoke 最多 4 次，锁的时间只有
+   * 一次本地事务，不覆盖网络请求；因此不同 run 并发时也不能各自获得一份新额度。
+   * 下一次用理论最高 ¥0.216 预留预算；任何已外发请求缺用量时停止，而不是按零估算。
+   */
+  private async claimDispatch(
+    attempt: typeof evaluationShadowAttempts.$inferSelect,
+    prepared: Awaited<ReturnType<ShadowRerankService['prepareRequest']>>,
+  ) {
+    return this.db.transaction(async (tx) => {
+      // SHARE ROW EXCLUSIVE 会让所有 claimDispatch 串行通过这段预算核对，但不阻止
+      // 普通只读报告。Phase E smoke 至多 4 次，使用窄而明确的表锁比进程内 mutex
+      // 更安全：多 Server 进程或重启后仍由 PostgreSQL 维护同一事实边界。
+      await tx.execute(
+        sql`lock table evaluation_shadow_attempts, evaluation_shadow_usage_reconciliations in share row exclusive mode`,
+      )
+      const attempts = await tx
+        .select({ attempt: evaluationShadowAttempts })
+        .from(evaluationShadowAttempts)
+        .innerJoin(
+          evaluationShadowRuns,
+          eq(evaluationShadowRuns.id, evaluationShadowAttempts.shadowRunId),
+        )
+        .where(
+          and(
+            eq(evaluationShadowRuns.protocolVersion, PROTOCOL_VERSION),
+            eq(evaluationShadowRuns.provider, 'dashscope'),
+            eq(evaluationShadowRuns.requestedModel, MODEL),
+          ),
+        )
+      const dispatched = attempts
+        .map((row) => row.attempt)
+        .filter((row) => row.externalCallStatus !== 'not_dispatched')
+      const reconciliations = dispatched.length
+        ? await tx
+            .select()
+            .from(evaluationShadowUsageReconciliations)
+            .where(
+              inArray(
+                evaluationShadowUsageReconciliations.attemptId,
+                dispatched.map((row) => row.id),
+              ),
+            )
+        : []
+      const reconciliationByAttempt = new Map(reconciliations.map((row) => [row.attemptId, row]))
+      const maxCalls = this.settings?.shadowRerankMaxCalls ?? 1
+      const maxCostCny = this.settings?.shadowRerankMaxCostCny ?? 0.5
+      let policyError: { code: string; message: string; details: Record<string, unknown> } | null =
+        null
+      if (attempt.shadowRunId) {
+        const [currentRun] = await tx
+          .select()
+          .from(evaluationShadowRuns)
+          .where(eq(evaluationShadowRuns.id, attempt.shadowRunId))
+          .limit(1)
+        if (currentRun && currentRun.executionNumber > 1) {
+          const [previous] = await tx
+            .select({ attempt: evaluationShadowAttempts })
+            .from(evaluationShadowAttempts)
+            .innerJoin(
+              evaluationShadowRuns,
+              eq(evaluationShadowRuns.id, evaluationShadowAttempts.shadowRunId),
+            )
+            .where(
+              and(
+                eq(evaluationShadowRuns.evaluationRunId, currentRun.evaluationRunId),
+                eq(evaluationShadowAttempts.queryId, attempt.queryId),
+                ne(evaluationShadowRuns.id, currentRun.id),
+              ),
+            )
+            .orderBy(desc(evaluationShadowRuns.executionNumber))
+            .limit(1)
+          if (
+            previous &&
+            (previous.attempt.queryFingerprint !== prepared.queryFingerprint ||
+              previous.attempt.evidenceFingerprint !== prepared.evidenceFingerprint)
+          ) {
+            policyError = {
+              code: 'SHADOW_RERANK_RETRY_FINGERPRINT_MISMATCH',
+              message: '冻结查询或证据指纹已变化，禁止重试外发',
+              details: {},
+            }
+          }
+        }
+      }
+      if (!policyError && dispatched.length >= maxCalls) {
+        policyError = {
+          code: 'SHADOW_RERANK_CALL_LIMIT_REACHED',
+          message: '本次授权允许的影子重排调用次数已用完',
+          details: { max_calls: maxCalls, dispatched_count: dispatched.length },
+        }
+      } else if (!policyError) {
+        const knownCosts = dispatched.map((row) => {
+          const cost = row.estimatedCostCny ?? reconciliationByAttempt.get(row.id)?.estimatedCostCny
+          return cost === null || cost === undefined ? null : Number(cost)
+        })
+        if (knownCosts.some((value) => value === null)) {
+          policyError = {
+            code: 'SHADOW_RERANK_BUDGET_UNKNOWN',
+            message: '已外发请求缺少可确认用量，禁止继续产生费用',
+            details: { dispatched_count: dispatched.length },
+          }
+        } else {
+          const spent = (knownCosts as number[]).reduce((sum, value) => sum + value, 0)
+          if (spent + MAX_REQUEST_COST_CNY > maxCostCny) {
+            policyError = {
+              code: 'SHADOW_RERANK_BUDGET_LIMIT_REACHED',
+              message: '下一次请求的理论最高费用会超过本次授权预算',
+              details: {
+                max_cost_cny: maxCostCny,
+                known_estimated_cost_cny: spent,
+                next_request_max_cost_cny: MAX_REQUEST_COST_CNY,
+              },
+            }
+          }
+        }
+      }
+      if (policyError) {
+        await tx
+          .update(evaluationShadowAttempts)
+          .set({
+            status: 'failed',
+            // 网络前被预算门拦截时也保存已经验证过的冻结指纹，供后续 execution 比对。
+            queryFingerprint: prepared.queryFingerprint,
+            evidenceFingerprint: prepared.evidenceFingerprint,
+            requestBytes: prepared.requestBytes,
+            actualCandidateCount: 20,
+            errorCode: policyError.code,
+            errorMessage: policyError.message,
+            errorDetailsJson: policyError.details,
+            finishedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(evaluationShadowAttempts.id, attempt.id),
+              eq(evaluationShadowAttempts.status, 'pending'),
+              eq(evaluationShadowAttempts.externalCallStatus, 'not_dispatched'),
+            ),
+          )
+        return false
+      }
+      const [claimed] = await tx
+        .update(evaluationShadowAttempts)
+        .set({
+          status: 'running',
+          externalCallStatus: 'dispatched',
+          queryFingerprint: prepared.queryFingerprint,
+          evidenceFingerprint: prepared.evidenceFingerprint,
+          requestBytes: prepared.requestBytes,
+          actualCandidateCount: 20,
+          dispatchedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(evaluationShadowAttempts.id, attempt.id),
+            eq(evaluationShadowAttempts.status, 'pending'),
+            eq(evaluationShadowAttempts.externalCallStatus, 'not_dispatched'),
+          ),
+        )
+        .returning()
+      return Boolean(claimed)
+    })
+  }
+
+  private async prepareRequest(evaluationRunId: string, queryId: string) {
     const [query] = await this.db
       .select()
       .from(evaluationQueries)
-      .where(eq(evaluationQueries.id, attempt.queryId))
+      .where(eq(evaluationQueries.id, queryId))
       .limit(1)
     if (!query) throw new ShadowRerankError('SHADOW_QUERY_MISSING', '冻结查询不存在')
     const candidates = await this.db
@@ -445,10 +818,7 @@ export class ShadowRerankService implements OnModuleInit {
       .from(evaluationCandidates)
       .where(
         and(
-          eq(
-            evaluationCandidates.runId,
-            (await this.shadowRun(attempt.shadowRunId)).evaluationRunId,
-          ),
+          eq(evaluationCandidates.runId, evaluationRunId),
           eq(evaluationCandidates.queryId, query.id),
           sql`${evaluationCandidates.rrfRank} between 1 and 20`,
         ),
@@ -501,7 +871,6 @@ export class ShadowRerankService implements OnModuleInit {
         row.candidateKey !== candidate.candidateKey ||
         row.fileId !== candidate.fileId ||
         row.fileGeneration !== candidate.fileGeneration ||
-        row.assetId !== candidate.assetId ||
         row.sceneId !== candidate.sceneId
       ) {
         throw new ShadowRerankError(
@@ -509,6 +878,52 @@ export class ShadowRerankService implements OnModuleInit {
           '候选证据与冻结 Evaluation 快照身份不一致',
           { candidate_index: index },
         )
+      }
+      if (row.assetId !== candidate.assetId) {
+        // Caption-only RRF 视频候选必须保留 Caption Asset 作为冻结检索事实；Phase D
+        // evidence.asset_id 则是 Worker 二次校验所需的视频帧锚点。只有锚点仍属于同一
+        // file/scene、非 stale 且拥有 indexed video_frame_vectors 引用时才接受。
+        const [sourceCaption] = await this.db
+          .select({ id: mediaAssets.id, metadataJson: mediaAssets.metadataJson })
+          .from(mediaAssets)
+          .where(
+            and(
+              eq(mediaAssets.id, candidate.assetId),
+              eq(mediaAssets.fileId, candidate.fileId),
+              eq(mediaAssets.sceneId, candidate.sceneId!),
+              eq(mediaAssets.assetType, 'caption'),
+            ),
+          )
+          .limit(1)
+        if (!sourceCaption || (sourceCaption.metadataJson as { stale?: unknown }).stale === true) {
+          throw new ShadowRerankError(
+            'SHADOW_EVIDENCE_IDENTITY_MISMATCH',
+            '只有冻结 Caption 视频候选允许使用不同的视频帧证据锚点',
+            { candidate_index: index },
+          )
+        }
+        const [anchor] = await this.db
+          .select({ id: mediaAssets.id, metadataJson: mediaAssets.metadataJson })
+          .from(mediaAssets)
+          .innerJoin(vectorRefs, eq(vectorRefs.assetId, mediaAssets.id))
+          .where(
+            and(
+              eq(mediaAssets.id, row.assetId),
+              eq(mediaAssets.fileId, candidate.fileId),
+              eq(mediaAssets.sceneId, candidate.sceneId!),
+              eq(mediaAssets.assetType, 'video_frame'),
+              eq(vectorRefs.collectionName, 'video_frame_vectors'),
+              eq(vectorRefs.status, 'indexed'),
+            ),
+          )
+          .limit(1)
+        if (!anchor || (anchor.metadataJson as { stale?: unknown }).stale === true) {
+          throw new ShadowRerankError(
+            'SHADOW_EVIDENCE_IDENTITY_MISMATCH',
+            '候选证据的视频帧锚点与冻结 Evaluation 场景不一致',
+            { candidate_index: index },
+          )
+        }
       }
       const bytes = await readFile(row.artifactPath)
       if (createHash('sha256').update(bytes).digest('hex') !== row.artifactSha256) {
@@ -536,7 +951,9 @@ export class ShadowRerankService implements OnModuleInit {
       candidates,
       queryFingerprint: fingerprint(query.queryText),
       evidenceFingerprint: fingerprint(documents.map((document) => document.evidence_sha256)),
-      requestBytes: Buffer.byteLength(JSON.stringify(request)),
+      // 直接使用真实 DashScope wire JSON 计数，即使 Provider 仍禁用，preflight 也能得到
+      // 精确 UTF-8 body 字节数；不包含不可稳定复现的 HTTP headers。
+      requestBytes: dashScopeShadowRerankRequestBytes(request),
     }
   }
 
@@ -627,13 +1044,20 @@ export class ShadowRerankService implements OnModuleInit {
         notApplicableCount: notApplicable.length,
         actualSampleCount: succeeded.length,
         requestBytes: attempts.reduce((sum, attempt) => sum + (attempt.requestBytes ?? 0), 0),
-        inputTokens: attempts.reduce((sum, attempt) => sum + (attempt.inputTokens ?? 0), 0),
-        outputTokens: attempts.reduce((sum, attempt) => sum + (attempt.outputTokens ?? 0), 0),
-        totalTokens: attempts.reduce((sum, attempt) => sum + (attempt.totalTokens ?? 0), 0),
-        latencyMs: attempts.reduce((sum, attempt) => sum + (attempt.latencyMs ?? 0), 0),
-        billedCostCny: attempts
-          .reduce((sum, attempt) => sum + Number(attempt.billedCostCny ?? 0), 0)
-          .toString(),
+        inputTokens: aggregateExternalMetric(attempts, (attempt) => attempt.inputTokens),
+        outputTokens: aggregateExternalMetric(attempts, (attempt) => attempt.outputTokens),
+        totalTokens: aggregateExternalMetric(attempts, (attempt) => attempt.totalTokens),
+        latencyMs: aggregateExternalMetric(attempts, (attempt) => attempt.latencyMs),
+        billedCostCny: nullableNumberString(
+          aggregateExternalMetric(attempts, (attempt) =>
+            attempt.billedCostCny === null ? null : Number(attempt.billedCostCny),
+          ),
+        ),
+        estimatedCostCny: nullableNumberString(
+          aggregateExternalMetric(attempts, (attempt) =>
+            attempt.estimatedCostCny === null ? null : Number(attempt.estimatedCostCny),
+          ),
+        ),
         responseModel: succeeded[0]?.responseModel ?? null,
         modelSnapshot: succeeded[0]?.modelSnapshot ?? null,
         region: succeeded[0]?.region ?? null,
@@ -658,13 +1082,14 @@ export class ShadowRerankService implements OnModuleInit {
           eq(evaluationShadowRuns.protocolVersion, PROTOCOL_VERSION),
         ),
       )
+      .orderBy(desc(evaluationShadowRuns.executionNumber))
       .limit(1)
     if (!run) throw new NotFoundException('shadow rerank has not been started')
     return this.get(run.id)
   }
 
   async findByEvaluationRun(evaluationRunId: string) {
-    const [run] = await this.db
+    const runs = await this.db
       .select({ id: evaluationShadowRuns.id })
       .from(evaluationShadowRuns)
       .where(
@@ -673,8 +1098,103 @@ export class ShadowRerankService implements OnModuleInit {
           eq(evaluationShadowRuns.protocolVersion, PROTOCOL_VERSION),
         ),
       )
-      .limit(1)
-    return run ? this.get(run.id) : null
+      .orderBy(desc(evaluationShadowRuns.executionNumber))
+    if (!runs[0]) return null
+    // 最新执行用于主报告，同时返回全部只读 execution，旧 request ID 与用量仍可审计。
+    const executionHistory = await Promise.all(runs.map((run) => this.get(run.id)))
+    return { ...executionHistory[0]!, execution_history: executionHistory }
+  }
+
+  /**
+   * 保存阿里云模型监控中的人工核对用量。该事实只允许补充一个已经明确完成、但 Provider
+   * token 为 null 的尝试；相同内容可幂等重放，任何冲突值都必须拒绝，避免通过修改历史
+   * 用量绕过全局预算门。
+   */
+  async reconcileUsage(
+    attemptId: string,
+    input: {
+      source: 'aliyun_model_monitor'
+      providerRequestId: string
+      totalTokens: number
+      textInputTokens: number
+      imageInputTokens: number
+    },
+  ) {
+    const parsed = z
+      .object({
+        source: z.literal('aliyun_model_monitor'),
+        providerRequestId: z.string().min(1).max(500),
+        totalTokens: z.number().int().nonnegative(),
+        textInputTokens: z.number().int().nonnegative(),
+        imageInputTokens: z.number().int().nonnegative(),
+      })
+      .strict()
+      .refine((value) => value.totalTokens === value.textInputTokens + value.imageInputTokens, {
+        path: ['totalTokens'],
+        message: 'totalTokens must equal textInputTokens + imageInputTokens',
+      })
+      .parse(input)
+    // 价格精确到每百万 token，保留 6 位人民币小数即可覆盖单 token 计价；先舍入再
+    // 写 numeric，避免 IEEE-754 浮点误差把 ¥0.044832 显示成更长的小数。
+    const estimatedCostCny =
+      Math.round(
+        (parsed.textInputTokens * TEXT_INPUT_COST_CNY_PER_TOKEN +
+          parsed.imageInputTokens * IMAGE_INPUT_COST_CNY_PER_TOKEN) *
+          1_000_000,
+      ) / 1_000_000
+
+    const shadowRunId = await this.db.transaction(async (tx) => {
+      // 与 claimDispatch 使用相同表锁顺序，保证“核对完成”和“下一次派发预算判断”之间
+      // 不会发生竞态；网络调用不在这个事务内。
+      await tx.execute(
+        sql`lock table evaluation_shadow_attempts, evaluation_shadow_usage_reconciliations in share row exclusive mode`,
+      )
+      const [attempt] = await tx
+        .select()
+        .from(evaluationShadowAttempts)
+        .where(eq(evaluationShadowAttempts.id, attemptId))
+        .limit(1)
+      if (!attempt) throw new NotFoundException('shadow rerank attempt not found')
+      if (
+        attempt.externalCallStatus !== 'completed' ||
+        attempt.providerRequestId !== parsed.providerRequestId ||
+        attempt.totalTokens !== null
+      ) {
+        throw new ConflictException(
+          'usage reconciliation requires a completed attempt with matching request ID and unknown Provider usage',
+        )
+      }
+      const [existing] = await tx
+        .select()
+        .from(evaluationShadowUsageReconciliations)
+        .where(eq(evaluationShadowUsageReconciliations.attemptId, attemptId))
+        .limit(1)
+      if (existing) {
+        const same =
+          existing.source === parsed.source &&
+          existing.providerRequestId === parsed.providerRequestId &&
+          existing.totalTokens === parsed.totalTokens &&
+          existing.textInputTokens === parsed.textInputTokens &&
+          existing.imageInputTokens === parsed.imageInputTokens
+        if (!same)
+          throw new ConflictException('usage reconciliation already exists with other facts')
+        return attempt.shadowRunId
+      }
+      await tx.insert(evaluationShadowUsageReconciliations).values({
+        id: randomUUID(),
+        attemptId,
+        source: parsed.source,
+        providerRequestId: parsed.providerRequestId,
+        totalTokens: parsed.totalTokens,
+        textInputTokens: parsed.textInputTokens,
+        imageInputTokens: parsed.imageInputTokens,
+        estimatedCostCny: estimatedCostCny.toString(),
+        observedAt: new Date(),
+      })
+      return attempt.shadowRunId
+    })
+    const run = await this.get(shadowRunId)
+    return run.attempts.find((attempt) => attempt.id === attemptId)!
   }
 
   async get(id: string) {
@@ -684,6 +1204,20 @@ export class ShadowRerankService implements OnModuleInit {
       .from(evaluationShadowAttempts)
       .where(eq(evaluationShadowAttempts.shadowRunId, id))
       .orderBy(asc(evaluationShadowAttempts.createdAt))
+    const usageReconciliations = attempts.length
+      ? await this.db
+          .select()
+          .from(evaluationShadowUsageReconciliations)
+          .where(
+            inArray(
+              evaluationShadowUsageReconciliations.attemptId,
+              attempts.map((attempt) => attempt.id),
+            ),
+          )
+      : []
+    const usageReconciliationByAttempt = new Map(
+      usageReconciliations.map((row) => [row.attemptId, row]),
+    )
     const rankings = attempts.length
       ? await this.db
           .select()
@@ -742,6 +1276,7 @@ export class ShadowRerankService implements OnModuleInit {
       model_snapshot: run.modelSnapshot,
       region: run.region,
       protocol_version: run.protocolVersion,
+      execution_number: run.executionNumber,
       query_count: run.queryCount,
       succeeded_count: run.succeededCount,
       failed_count: run.failedCount,
@@ -752,7 +1287,8 @@ export class ShadowRerankService implements OnModuleInit {
       output_tokens: run.outputTokens,
       total_tokens: run.totalTokens,
       latency_ms: run.latencyMs,
-      billed_cost_cny: Number(run.billedCostCny),
+      billed_cost_cny: run.billedCostCny === null ? null : Number(run.billedCostCny),
+      estimated_cost_cny: run.estimatedCostCny === null ? null : Number(run.estimatedCostCny),
       review_status: 'not_run',
       error:
         run.errorCode && run.errorMessage
@@ -762,6 +1298,7 @@ export class ShadowRerankService implements OnModuleInit {
       attempts: attempts.map((attempt) => {
         const attemptRankings = rankings.filter((ranking) => ranking.attemptId === attempt.id)
         const query = queryById.get(attempt.queryId)
+        const usageReconciliation = usageReconciliationByAttempt.get(attempt.id)
         return {
           id: attempt.id,
           query_id: attempt.queryId,
@@ -781,6 +1318,19 @@ export class ShadowRerankService implements OnModuleInit {
           total_tokens: attempt.totalTokens,
           latency_ms: attempt.latencyMs,
           billed_cost_cny: attempt.billedCostCny === null ? null : Number(attempt.billedCostCny),
+          estimated_cost_cny:
+            attempt.estimatedCostCny === null ? null : Number(attempt.estimatedCostCny),
+          usage_reconciliation: usageReconciliation
+            ? {
+                source: usageReconciliation.source,
+                provider_request_id: usageReconciliation.providerRequestId,
+                total_tokens: usageReconciliation.totalTokens,
+                text_input_tokens: usageReconciliation.textInputTokens,
+                image_input_tokens: usageReconciliation.imageInputTokens,
+                estimated_cost_cny: Number(usageReconciliation.estimatedCostCny),
+                observed_at: usageReconciliation.observedAt.toISOString(),
+              }
+            : null,
           actual_candidate_count: attempt.actualCandidateCount,
           actual_result_count: attempt.actualResultCount,
           error:
@@ -969,6 +1519,15 @@ function safeFingerprint(value: unknown) {
   return encoded === undefined ? null : createHash('sha256').update(encoded).digest('hex')
 }
 
+/** 同时识别内部 fake 的 results 与 DashScope 原始 output.results，只统计数组长度。 */
+function providerResultCount(value: unknown) {
+  if (!isRecord(value)) return 0
+  if (Array.isArray(value.results)) return value.results.length
+  return isRecord(value.output) && Array.isArray(value.output.results)
+    ? value.output.results.length
+    : 0
+}
+
 /**
  * 审计字段逐项收窄；非法字段保存 null，合法字段仍保留。随后整体 Schema 会拒绝
  * 这次 Provider 返回，因此这个函数不会把部分有效计量误当成成功结果。
@@ -990,10 +1549,14 @@ function independentlySafeProviderAudit(value: Record<string, unknown>) {
     region: safeNullableString(value.region, 200),
     inputTokens,
     outputTokens,
+    // 官方允许只返回 total_tokens，此时独立保留；若 Provider 同时提供输入/输出拆分，
+    // 三者必须先一致，否则错误总数本身也不能作为安全审计事实保存。
     totalTokens:
-      inputTokens !== null && outputTokens !== null && rawTotalTokens === inputTokens + outputTokens
+      inputTokens === null || outputTokens === null
         ? rawTotalTokens
-        : null,
+        : rawTotalTokens === inputTokens + outputTokens
+          ? rawTotalTokens
+          : null,
     billedCostCny:
       typeof value.billedCostCny === 'number' &&
       Number.isFinite(value.billedCostCny) &&
@@ -1001,6 +1564,30 @@ function independentlySafeProviderAudit(value: Record<string, unknown>) {
         ? value.billedCostCny
         : null,
   }
+}
+
+function nullableNumberString(value: number | null) {
+  return value === null ? null : value.toString()
+}
+
+/** 图片单价最小步进为 0.0000018 元/token；固定 7 位小数避免浮点尾差污染审计。 */
+function estimatedImageCostCny(totalTokens: number) {
+  return (totalTokens * IMAGE_INPUT_COST_CNY_PER_TOKEN).toFixed(7)
+}
+
+/**
+ * 运行级计量只汇总真正发出过的请求；从未 dispatched 的本地校验失败不产生费用。
+ * 但只要任一外发尝试缺少该字段，整体就必须是 null，不能把未知按零或部分总量展示。
+ */
+function aggregateExternalMetric<T extends { externalCallStatus: string }>(
+  attempts: T[],
+  read: (attempt: T) => number | null,
+) {
+  const dispatched = attempts.filter((attempt) => attempt.externalCallStatus !== 'not_dispatched')
+  if (dispatched.length === 0) return 0
+  const values = dispatched.map(read)
+  if (values.some((value) => value === null)) return null
+  return (values as number[]).reduce((sum, value) => sum + value, 0)
 }
 
 class ShadowRerankError extends Error {

@@ -226,7 +226,7 @@ Phase D 在候选冻结之后增加一条完全本地的派生数据链，不改
 
 ```text
 用户在 Agent 或 Evaluation 页面明确点击“准备本地证据”
-→ CandidateEvidenceModule 重新校验候选、文件 generation、场景和代表帧 Asset
+→ CandidateEvidenceModule 重新校验候选、文件 generation、场景和证据锚点 Asset
 → PostgreSQL 事务创建或复用 candidate_evidence 与 build_candidate_evidence Job
 → Python Worker 异步领取 Job，再次读取并校验当前 PostgreSQL 文件、场景和已索引帧事实
 → 按稳定时间顺序重新物化这些已有索引时间点，不新增时间点、不读取邻帧、不重新采样
@@ -242,6 +242,12 @@ manifest（实际帧清单）、SHA-256 指纹、私有文件位置、状态和�
 没有目录级自动清理，避免越界删除。Server 负责身份、幂等和 HTTP；Worker 负责耗时图像处理与
 文件发布；PostgreSQL 负责重启恢复和审计；Qdrant 不读取也不写入。`queued → running →
 succeeded|failed|cancelled` 均从数据库恢复，运行中取消先进入 `cancel_requested`。
+
+Evaluation 的视频候选可能由 Caption 通道单独召回，此时冻结候选仍保留 Caption Asset，不能为了
+证据构建改写检索快照。CandidateEvidenceModule 会先验证 Caption 与冻结 file/scene 一致，再按
+`(frame_time_seconds, asset_id)` 选择同场景第一条非 stale 且已有 indexed
+`video_frame_vectors` 引用的帧作为 Worker 身份锚点；联系表仍包含该场景全部已索引帧。Agent
+候选不走这条转换，仍要求其冻结 Asset 本身就是视频帧。
 
 `contact_sheet_v1` 使用 1600×900 RGB PNG、深灰背景、8 像素单格留白、保持宽高比的 contain
 缩放和左下角 `T+HH:MM:SS.mmm` 时间戳。时间戳使用协议内置的 5×7 像素字形，渲染器固定为
@@ -272,8 +278,11 @@ Phase E 只在 Evaluation 中比较冻结的 RRF Top-20 和专用 `qwen3-vl-rera
 ```
 
 Server 负责发起请求、严格 Schema 校验和状态恢复；PostgreSQL 保存 run、attempt、
-ranking、Provider/request ID、请求/返回模型、区域、三类指纹、字节数、token、毫秒、
-人民币费用和结构化错误。Qdrant 和 Python Worker 不参与 Phase E；`/search`、
+ranking、Provider/request ID、请求/返回模型、区域、三类指纹、实际供应商 JSON 字节数、
+token、毫秒、供应商账单费用、本地保守费用估算和结构化错误。官方响应只提供
+`usage.total_tokens` 与 `request_id`，因此输入/输出 token 拆分、响应模型和账单费用必须
+保存为 null，不能用零值或请求配置伪造。保守估算按全部 token 使用图片最高单价计算，
+并与账单事实分列。Qdrant 和 Python Worker 不参与 Phase E；`/search`、
 `evaluation_candidates.rrf_rank` 和 `agent_run_candidates.rank` 不写入。Provider 返回的
 `relevance_score` 不是概率，只能在同一次 Top-20 请求中比较。为计算 nDCG@20
 和 MRR，影子 Top-10 之后按原 RRF 顺序接上未入选候选，该口径仅用于报告。
@@ -281,11 +290,30 @@ ranking、Provider/request ID、请求/返回模型、区域、三类指纹、�
 PNG 编码，不产生临时文件。报告同时展示技术成功样本的宏平均，以及把失败
 查询按原 RRF 回退计算的完整产品样本宏平均，避免通过删除失败样本夸大改善。
 
+Provider 成功正文只对项目依赖的 `output.results[].index/relevance_score`、`request_id`
+做强类型提取；供应商新增且项目不使用的字段会被丢弃，不再因为外层扩展导致整包失败。
+核心 index/score 仍由 Shared Top-10 Schema 拒绝缺失、重复、越界、非有限值和顺序矛盾。
+`usage.total_tokens` 缺失或类型漂移时排名仍可原子保存，但 Provider token 保持 null、预算门
+停止后续外发。若维护者随后从阿里云模型监控核对到同一 Request ID 的文本/图片/总 Token，
+则写入独立的 `evaluation_shadow_usage_reconciliations` 一对一事实；它不会冒充 Provider
+响应字段，只用分项标准价恢复预算判断，并在 Web 中明确标为“人工核对”。
+同一冻结 Evaluation 的再次 smoke 使用递增 `execution_number` 创建全新的 shadow run 和
+attempt；旧 attempt 永不重开或覆盖。新 attempt 派发前还必须匹配上一执行的 query/evidence
+指纹，从而既复用同一 Top-20，又完整保留第一次调用的 request ID、错误和费用审计。
+报告读取在主区域展示最新 execution，并携带全部 `execution_history`；Web 的“历史执行审计”
+持续显示旧 request ID、状态和人工核对 Token，不会因后续成功而隐藏第一次失败事实。
+
 幂等由唯一运行身份、每查询唯一 attempt 和条件更新共同保证。未 dispatched 的
 pending attempt 可在 Server 重启后继续；已 dispatched 但没有确认结果的 attempt
-只能转为 `outcome_unknown`，禁止自动重放以避免重复费用。当前真实 Provider
-默认禁用，没有新增 Provider 环境变量；测试只注入本地 fake。用户重新授权前
-不会外发查询或图像，也不执行 Phase F VLM 审核。
+只能转为 `outcome_unknown`，禁止自动重放以避免重复费用。阿里云北京专属适配器由
+`SHADOW_RERANK_PROVIDER=dashscope` 显式选择，并要求同地域的
+`DASHSCOPE_WORKSPACE_ID` 与 `DASHSCOPE_API_KEY`；默认仍为 `disabled`，仅配置凭证不会
+启用。适配器只外发查询文本和 20 张 Data URI PNG，不外发候选 Key、指纹、路径、Caption
+或转录。明确 HTTP 错误/畸形响应记为 `completed/failed`；只有无明确响应的网络失败才记为
+`outcome_unknown`。首次 smoke 默认最多 1 次；以后即使另行授权也最多 4 次、累计预算不超过
+¥0.5。每次派发通过 PostgreSQL 表锁，跨所有 Evaluation run 对同一 Phase E 协议执行原子次数/预算检查，并按单请求理论最高 ¥0.216 预留；新建 run 不能重置额度。只因策略门被拦截且从未外发的 attempt 可在后续明确扩大授权后恢复，已外发或结果未知的请求绝不重放；
+任一已外发 attempt 缺用量时停止，汇总计量保持 null。用户重新授权前不会外发查询或图像，
+也不执行 Phase F VLM 审核。
 
 NestJS AgentModule 组织：
 

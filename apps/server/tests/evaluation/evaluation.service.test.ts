@@ -45,6 +45,7 @@ describe('Phase 6 evaluation runtime', () => {
       'evaluation_shadow_attempts',
       'evaluation_shadow_rankings',
       'evaluation_shadow_runs',
+      'evaluation_shadow_usage_reconciliations',
       'evaluation_versions',
     ])
   })

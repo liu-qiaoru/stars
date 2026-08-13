@@ -79,7 +79,42 @@ export class EvaluationController {
     return this.shadowRerank.startAndSchedule(id)
   }
 
+  /** 显式创建新的执行身份；旧 attempt 保持只读，避免第二次 smoke 覆盖第一次审计。 */
+  @Post('runs/:id/shadow-rerank/retry')
+  retryShadowRerank(@Param('id') id: string) {
+    return this.shadowRerank.retryAndSchedule(id)
+  }
+
   @Get('runs/:id/shadow-rerank') getShadowRerank(@Param('id') id: string) {
     return this.shadowRerank.findByEvaluationRun(id)
+  }
+
+  @Get('runs/:id/shadow-rerank/preflight') previewShadowRerank(@Param('id') id: string) {
+    return this.shadowRerank.preview(id)
+  }
+
+  /**
+   * 记录维护者从阿里云模型监控核对到的用量。API 使用 snake_case，Service 再转换为
+   * 领域字段；该接口只补充预算审计，不修改 Provider 响应、排名或 Evaluation 标签。
+   */
+  @Post('shadow-rerank/attempts/:id/usage-reconciliation')
+  reconcileShadowUsage(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      source: 'aliyun_model_monitor'
+      provider_request_id: string
+      total_tokens: number
+      text_input_tokens: number
+      image_input_tokens: number
+    },
+  ) {
+    return this.shadowRerank.reconcileUsage(id, {
+      source: body.source,
+      providerRequestId: body.provider_request_id,
+      totalTokens: body.total_tokens,
+      textInputTokens: body.text_input_tokens,
+      imageInputTokens: body.image_input_tokens,
+    })
   }
 }

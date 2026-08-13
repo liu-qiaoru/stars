@@ -39,6 +39,11 @@ describe('createSettings', () => {
       deepseekBaseUrl: 'https://api.deepseek.com',
       deepseekApiKey: undefined,
       deepseekModel: 'deepseek-v4-flash',
+      shadowRerankProvider: 'disabled',
+      dashscopeWorkspaceId: undefined,
+      dashscopeApiKey: undefined,
+      shadowRerankMaxCalls: 1,
+      shadowRerankMaxCostCny: 0.5,
       captionIndexingEnabled: false,
       captionSearchEnabled: false,
       localVlmEnabled: false,
@@ -95,6 +100,62 @@ describe('createSettings', () => {
         QUERY_EXPANSION_MAX_VARIANTS: '0',
       }),
     ).toThrow('QUERY_EXPANSION_MAX_VARIANTS must be between 1 and 10')
+  })
+
+  test('影子重排默认禁用且启用 DashScope 时要求完整北京地域配置', () => {
+    expect(
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        DASHSCOPE_API_KEY: 'present-but-not-authorized',
+      }),
+    ).toMatchObject({
+      shadowRerankProvider: 'disabled',
+      dashscopeWorkspaceId: undefined,
+      dashscopeApiKey: 'present-but-not-authorized',
+      shadowRerankMaxCalls: 1,
+      shadowRerankMaxCostCny: 0.5,
+    })
+
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        SHADOW_RERANK_PROVIDER: 'dashscope',
+        DASHSCOPE_API_KEY: 'test-key',
+      }),
+    ).toThrow('DASHSCOPE_WORKSPACE_ID is required when SHADOW_RERANK_PROVIDER=dashscope')
+
+    expect(
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        SHADOW_RERANK_PROVIDER: 'dashscope',
+        DASHSCOPE_WORKSPACE_ID: 'ws-test',
+        DASHSCOPE_API_KEY: 'test-key',
+      }),
+    ).toMatchObject({
+      shadowRerankProvider: 'dashscope',
+      dashscopeWorkspaceId: 'ws-test',
+      dashscopeApiKey: 'test-key',
+      shadowRerankMaxCalls: 1,
+      shadowRerankMaxCostCny: 0.5,
+    })
+
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        SHADOW_RERANK_MAX_CALLS: '5',
+      }),
+    ).toThrow('SHADOW_RERANK_MAX_CALLS must be between 1 and 4')
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        SHADOW_RERANK_MAX_COST_CNY: '0.5001',
+      }),
+    ).toThrow('SHADOW_RERANK_MAX_COST_CNY must be greater than 0 and at most 0.5')
   })
 
   test('读取 Agent 外部模型配置并保留默认关闭', () => {

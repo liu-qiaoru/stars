@@ -14,6 +14,9 @@ describe('evaluation controller dependency injection', () => {
     }
     const shadowRerank = {
       findByEvaluationRun: vi.fn().mockResolvedValue(null),
+      preview: vi.fn().mockResolvedValue({ external_call_count: 0, items: [] }),
+      reconcileUsage: vi.fn().mockResolvedValue({ id: 'attempt-1' }),
+      retryAndSchedule: vi.fn().mockResolvedValue({ id: 'shadow-run-2', execution_number: 2 }),
     }
     const moduleRef = await Test.createTestingModule({
       controllers: [EvaluationController],
@@ -40,6 +43,31 @@ describe('evaluation controller dependency injection', () => {
         versionId: undefined,
       })
       await expect(controller.getShadowRerank('run-id')).resolves.toBeNull()
+      await expect(controller.previewShadowRerank('run-id')).resolves.toMatchObject({
+        external_call_count: 0,
+      })
+      expect(shadowRerank.preview).toHaveBeenCalledWith('run-id')
+      const reconciliationBody = {
+        source: 'aliyun_model_monitor' as const,
+        provider_request_id: 'provider-request-1',
+        total_tokens: 25_640,
+        text_input_tokens: 1_200,
+        image_input_tokens: 24_440,
+      }
+      await expect(
+        controller.reconcileShadowUsage('attempt-1', reconciliationBody),
+      ).resolves.toEqual({ id: 'attempt-1' })
+      expect(shadowRerank.reconcileUsage).toHaveBeenCalledWith('attempt-1', {
+        source: 'aliyun_model_monitor',
+        providerRequestId: 'provider-request-1',
+        totalTokens: 25_640,
+        textInputTokens: 1_200,
+        imageInputTokens: 24_440,
+      })
+      await expect(controller.retryShadowRerank('run-id')).resolves.toMatchObject({
+        execution_number: 2,
+      })
+      expect(shadowRerank.retryAndSchedule).toHaveBeenCalledWith('run-id')
     } finally {
       await moduleRef.close()
     }

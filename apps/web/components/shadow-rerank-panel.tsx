@@ -92,7 +92,9 @@ export function ShadowRerankPanel({
     try {
       setRun(
         parseShadowRerankRun(
-          await apiClient.startEvaluationShadowRerank(evaluationRunId, controller.signal),
+          await (run?.status === 'failed'
+            ? apiClient.retryEvaluationShadowRerank(evaluationRunId, controller.signal)
+            : apiClient.startEvaluationShadowRerank(evaluationRunId, controller.signal)),
         ),
       )
       // 首次读取 null 时没有定时器；显式启动后通过 epoch 立即重建轮询。
@@ -118,13 +120,13 @@ export function ShadowRerankPanel({
             relevance_score 不是概率，只能在同一次请求的候选之间比较。
           </p>
         </div>
-        {canStart && !run ? (
+        {canStart && (!run || run.status === 'failed') ? (
           <button
             className="primary-action focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
             disabled={loading}
             onClick={() => void start()}
           >
-            {loading ? '读取中…' : '运行影子重排'}
+            {loading ? '读取中…' : run?.status === 'failed' ? '重新运行影子重排' : '运行影子重排'}
           </button>
         ) : null}
       </div>
@@ -154,13 +156,56 @@ function ShadowRunDetail({ run }: { run: ShadowRerankRun }) {
           {run.actual_sample_count} · 不适用 {run.not_applicable_count}
         </span>
       </div>
+      {run.execution_history && run.execution_history.length > 1 ? (
+        <section aria-labelledby="shadow-execution-history" className="space-y-2">
+          <h3 id="shadow-execution-history" className="font-semibold text-neutral-950">
+            历史执行审计
+          </h3>
+          {run.execution_history.map((execution) => (
+            <div
+              key={execution.id}
+              className="rounded-md border border-neutral-200 bg-white p-3 text-sm"
+            >
+              <p className="font-medium">
+                第 {execution.execution_number} 次执行 · {statusLabel(execution.status)}
+              </p>
+              <p className="muted mt-1 break-all">
+                Request ID：{execution.attempts[0]?.provider_request_id ?? '未外发'}
+              </p>
+              <p className="muted">
+                Provider Token：
+                {execution.attempts[0]?.total_tokens?.toLocaleString() ?? '未提供'}
+              </p>
+              <p className="muted">
+                人工核对 Token：
+                {execution.attempts[0]?.usage_reconciliation?.total_tokens.toLocaleString() ?? '无'}
+              </p>
+            </div>
+          ))}
+        </section>
+      ) : null}
       <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="模型" value={run.requested_model} />
         <Stat label="协议" value={run.protocol_version} />
-        <Stat label="Token" value={run.total_tokens.toLocaleString()} />
+        <Stat
+          label="Token"
+          value={run.total_tokens === null ? '计量不完整' : run.total_tokens.toLocaleString()}
+        />
         <Stat label="请求大小" value={formatBytes(run.request_bytes)} />
-        <Stat label="总耗时" value={`${run.latency_ms.toLocaleString()} ms`} />
-        <Stat label="费用" value={`¥${run.billed_cost_cny.toFixed(4)}`} />
+        <Stat
+          label="总耗时"
+          value={run.latency_ms === null ? '计量不完整' : `${run.latency_ms.toLocaleString()} ms`}
+        />
+        <Stat
+          label="账单费用"
+          value={
+            run.billed_cost_cny === null ? 'Provider 未提供' : `¥${run.billed_cost_cny.toFixed(4)}`
+          }
+        />
+        <Stat
+          label="保守估算"
+          value={run.estimated_cost_cny === null ? '尚无' : `¥${run.estimated_cost_cny.toFixed(4)}`}
+        />
         <Stat label="Provider" value={run.provider} />
         <Stat label="VLM 审核" value="尚未执行" />
       </dl>
@@ -180,7 +225,13 @@ function ShadowRunDetail({ run }: { run: ShadowRerankRun }) {
             <span className={statusClass(attempt.status)}>{statusLabel(attempt.status)}</span>
           </div>
           <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="响应模型" value={attempt.response_model ?? '尚无响应'} />
+            <Stat
+              label="响应模型"
+              value={
+                attempt.response_model ??
+                (attempt.external_call_status === 'completed' ? 'Provider 未提供' : '尚无响应')
+              }
+            />
             <Stat label="模型快照" value={attempt.model_snapshot ?? 'Provider 未提供'} />
             <Stat label="区域" value={attempt.region ?? 'Provider 未提供'} />
             <Stat label="请求 ID" value={attempt.provider_request_id ?? '尚无'} />
@@ -188,10 +239,47 @@ function ShadowRunDetail({ run }: { run: ShadowRerankRun }) {
               label="候选/结果"
               value={`${attempt.actual_candidate_count}/${attempt.actual_result_count}`}
             />
-            <Stat label="Token" value={String(attempt.total_tokens ?? 0)} />
-            <Stat label="耗时" value={`${attempt.latency_ms ?? 0} ms`} />
-            <Stat label="费用" value={`¥${(attempt.billed_cost_cny ?? 0).toFixed(4)}`} />
+            <Stat
+              label="Token"
+              value={
+                attempt.total_tokens === null ? 'Provider 未提供' : String(attempt.total_tokens)
+              }
+            />
+            <Stat
+              label="耗时"
+              value={attempt.latency_ms === null ? '尚无' : `${attempt.latency_ms} ms`}
+            />
+            <Stat
+              label="账单费用"
+              value={
+                attempt.billed_cost_cny === null
+                  ? 'Provider 未提供'
+                  : `¥${attempt.billed_cost_cny.toFixed(4)}`
+              }
+            />
+            <Stat
+              label="保守估算"
+              value={
+                attempt.estimated_cost_cny === null
+                  ? '尚无'
+                  : `¥${attempt.estimated_cost_cny.toFixed(4)}`
+              }
+            />
           </dl>
+          {attempt.usage_reconciliation ? (
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+              <p className="font-medium">阿里云模型监控人工核对</p>
+              <p className="mt-1">
+                总计 {attempt.usage_reconciliation.total_tokens.toLocaleString()} Token · 文本{' '}
+                {attempt.usage_reconciliation.text_input_tokens.toLocaleString()} · 图片{' '}
+                {attempt.usage_reconciliation.image_input_tokens.toLocaleString()} · 标准原价估算 ¥
+                {attempt.usage_reconciliation.estimated_cost_cny.toFixed(6)}
+              </p>
+              <p className="mt-1 text-xs">
+                这是控制台核对事实，不是 Provider 响应字段；实际应付金额仍以阿里云账单为准。
+              </p>
+            </div>
+          ) : null}
           <Fingerprint label="查询指纹" value={attempt.query_fingerprint} />
           <Fingerprint label="证据指纹" value={attempt.evidence_fingerprint} />
           <Fingerprint label="响应指纹" value={attempt.response_fingerprint} />
@@ -390,11 +478,7 @@ function parseShadowRerankRun(value: unknown): ShadowRerankRun | null {
     'not_applicable_count',
     'actual_sample_count',
     'request_bytes',
-    'input_tokens',
-    'output_tokens',
-    'total_tokens',
-    'latency_ms',
-    'billed_cost_cny',
+    'execution_number',
   ]
   if (
     !statuses.has(String(value.status)) ||
@@ -409,6 +493,12 @@ function parseShadowRerankRun(value: unknown): ShadowRerankRun | null {
     !isNullableString(value.response_model) ||
     !isNullableString(value.model_snapshot) ||
     !isNullableString(value.region) ||
+    !isNonnegativeNumberOrNull(value.input_tokens) ||
+    !isNonnegativeNumberOrNull(value.output_tokens) ||
+    !isNonnegativeNumberOrNull(value.billed_cost_cny) ||
+    !isNonnegativeNumberOrNull(value.estimated_cost_cny) ||
+    !isNonnegativeNumberOrNull(value.total_tokens) ||
+    !isNonnegativeNumberOrNull(value.latency_ms) ||
     !isStructuredErrorOrNull(value.error) ||
     typeof value.created_at !== 'string' ||
     !isNullableString(value.finished_at) ||
@@ -417,6 +507,19 @@ function parseShadowRerankRun(value: unknown): ShadowRerankRun | null {
     !isMetricSummary(value.metric_summary)
   ) {
     throw new Error('影子重排 API 响应不符合 Phase E 协议')
+  }
+  if (
+    value.execution_history !== undefined &&
+    (!Array.isArray(value.execution_history) ||
+      !value.execution_history.every((execution) => {
+        try {
+          return parseShadowRerankRun(execution) !== null
+        } catch {
+          return false
+        }
+      }))
+  ) {
+    throw new Error('影子重排响应中的 execution_history 不符合契约')
   }
   return value as unknown as ShadowRerankRun
 }
@@ -438,6 +541,7 @@ function isShadowAttempt(value: unknown) {
     'total_tokens',
     'latency_ms',
     'billed_cost_cny',
+    'estimated_cost_cny',
   ]
   return (
     isRecord(value) &&
@@ -454,6 +558,7 @@ function isShadowAttempt(value: unknown) {
     isNullableFingerprint(value.evidence_fingerprint) &&
     isNullableFingerprint(value.response_fingerprint) &&
     nullableNumbers.every((key) => isNonnegativeNumberOrNull(value[key])) &&
+    isUsageReconciliationOrNull(value.usage_reconciliation) &&
     isNonnegativeInteger(value.actual_candidate_count) &&
     isNonnegativeInteger(value.actual_result_count) &&
     (value.metrics === null ||
@@ -466,6 +571,23 @@ function isShadowAttempt(value: unknown) {
     isNullableString(value.applicability_reason) &&
     Array.isArray(value.rankings) &&
     value.rankings.every(isShadowRanking)
+  )
+}
+
+function isUsageReconciliationOrNull(value: unknown) {
+  if (value === null) return true
+  return (
+    isRecord(value) &&
+    value.source === 'aliyun_model_monitor' &&
+    typeof value.provider_request_id === 'string' &&
+    isNonnegativeInteger(value.total_tokens) &&
+    isNonnegativeInteger(value.text_input_tokens) &&
+    isNonnegativeInteger(value.image_input_tokens) &&
+    value.total_tokens === value.text_input_tokens + value.image_input_tokens &&
+    typeof value.estimated_cost_cny === 'number' &&
+    Number.isFinite(value.estimated_cost_cny) &&
+    value.estimated_cost_cny >= 0 &&
+    typeof value.observed_at === 'string'
   )
 }
 

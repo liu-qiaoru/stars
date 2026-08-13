@@ -8,6 +8,20 @@ afterEach(() => {
 })
 
 describe('typed API client', () => {
+  test('treats a successful empty shadow-rerank response as the documented not-run null state', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }))
+    const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })
+
+    await expect(client.getEvaluationShadowRerank('run-1')).resolves.toBeNull()
+  })
+
+  test('still rejects a non-empty malformed shadow-rerank response', async () => {
+    fetchMock.mockResolvedValueOnce(new Response('{malformed', { status: 200 }))
+    const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })
+
+    await expect(client.getEvaluationShadowRerank('run-1')).rejects.toBeInstanceOf(SyntaxError)
+  })
+
   test('requests libraries and creates scan jobs with stable routes', async () => {
     fetchMock
       .mockResolvedValueOnce(

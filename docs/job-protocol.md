@@ -367,6 +367,10 @@ Server 在同一 PostgreSQL 事务中创建或复用 `candidate_evidence` 与 Jo
 位于场景范围、ID/时间不重复、数量为 1～12。排序固定为
 `(frame_time_seconds, asset_id)`；任何失败都写稳定 `error_code`，不能换用新 generation 或降级。
 
+若 Evaluation 候选由 Caption 通道单独召回，Server 保留原候选 Caption Asset，并在创建 Job 前
+验证其 file/scene 后，从同场景 indexed 视频帧中按上述稳定顺序选择第一条作为 `asset_id` 锚点。
+Worker 仍只接收并二次验证视频帧 Asset；这不会把 Caption 文本写入 Job，也不会修改候选排名。
+
 Worker 只在已有索引帧时间点重新物化画面，不选择新时间点、不取邻帧、不做运动峰值或重新抽样。
 每帧先标准化为 RGB PNG 并计算 SHA-256。规范化 JSON 使用 UTF-8、键名排序、无多余空白和末尾
 LF；帧秒值使用 IEEE 754 binary64 浮点数的 17 位有效数字往返格式，保证任一可表示的时间变化
@@ -432,6 +436,11 @@ Provider 响应，但 HTTP 创建接口先返回可轮询的 PostgreSQL 事实�
 自动重试。Python Worker 不被调用，Qdrant 不读写，也不会重新搜索、抽帧或索引。
 只有 `evaluation_shadow_runs/attempts/rankings` 三类规范化 PostgreSQL 事实发生状态
 变化；普通 `jobs` 表和候选排名不变。
+
+真实 DashScope HTTP 仍由 Server 适配器执行，不增加 Python Job 或跨语言 Schema。
+默认 `SHADOW_RERANK_PROVIDER=disabled`；显式选择 `dashscope` 时才读取同属北京地域的
+业务空间 ID/API Key。只读 preflight 可以在禁用状态下按真实 wire JSON 计算请求字节数，
+但不会创建 attempt 或发出网络请求。
 
 ### export_clip
 

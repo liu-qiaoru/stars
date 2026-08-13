@@ -13,6 +13,7 @@ import {
   createLibrary,
   createMediaAsset,
   createMediaFile,
+  createVectorRef,
 } from '../../src/database/repositories.js'
 import {
   agentRunCandidates,
@@ -110,7 +111,14 @@ describe('candidate evidence service', () => {
       sceneEndSeconds: '30',
       rank: 1,
     })
-    return { runId, fileId: file.id, sceneId, assetId: asset.id, candidateKey: `video:${sceneId}` }
+    return {
+      runId,
+      libraryId: library.id,
+      fileId: file.id,
+      sceneId,
+      assetId: asset.id,
+      candidateKey: `video:${sceneId}`,
+    }
   }
 
   test('reuses one evidence record and one Job for repeated requests of the same frozen candidate', async () => {
@@ -387,5 +395,95 @@ describe('candidate evidence service', () => {
     expect(row.retentionClass).toBe('evaluation_frozen')
     expect(row.expiresAt).toBeNull()
     expect(row.frozenAt).toBeInstanceOf(Date)
+  })
+
+  test('builds Evaluation evidence for a caption-only video candidate from an indexed frame in the same frozen scene', async () => {
+    const fixture = await createFrozenAgentVideoCandidate()
+    const captionAsset = await createMediaAsset(db, {
+      fileId: fixture.fileId,
+      assetType: 'caption',
+      sceneId: fixture.sceneId,
+      textContent: '有人在海边走路',
+      contentHash: 'scene-caption',
+      metadataJson: { prompt_version: 'scene-caption-v2', stale: false },
+    })
+    await createVectorRef(db, {
+      assetId: fixture.assetId,
+      fileId: fixture.fileId,
+      libraryId: fixture.libraryId,
+      collectionName: 'video_frame_vectors',
+      pointId: randomUUID(),
+      modelName: 'siglip2',
+      modelVersion: 'test',
+      vectorKind: 'video_frame_embedding',
+      vectorDim: 768,
+      distance: 'Cosine',
+      contentHash: 'frame-1',
+      indexProfile: 'test',
+      status: 'indexed',
+    })
+    const setId = randomUUID()
+    const versionId = randomUUID()
+    const queryId = randomUUID()
+    const evaluationRunId = randomUUID()
+    const candidateId = randomUUID()
+    await db.insert(evaluationSets).values({ id: setId, name: 'Caption candidate' })
+    await db.insert(evaluationVersions).values({
+      id: versionId,
+      setId,
+      version: 1,
+      status: 'frozen',
+    })
+    await db.insert(evaluationQueries).values({
+      id: queryId,
+      versionId,
+      queryText: '有人在海边走路',
+      queryType: 'discovery',
+      searchScope: 'visual',
+      intentCategory: 'visual',
+      mustHaveJson: ['有人在海边走路'],
+    })
+    await db.insert(evaluationRuns).values({
+      id: evaluationRunId,
+      versionId,
+      status: 'ready_for_labeling',
+      configJson: {},
+    })
+    await db.insert(evaluationCandidates).values({
+      id: candidateId,
+      runId: evaluationRunId,
+      queryId,
+      candidateKey: fixture.sceneId,
+      assetId: captionAsset.id,
+      fileId: fixture.fileId,
+      sceneId: fixture.sceneId,
+      fileGeneration: 3,
+      mediaType: 'video',
+      startTimeSeconds: '10',
+      endTimeSeconds: '30',
+      rrfRank: 1,
+      blindOrder: 1,
+    })
+
+    const created = await service.createEvidence({
+      source: { type: 'evaluation_candidate', run_id: evaluationRunId, candidate_id: candidateId },
+      candidate_key: fixture.sceneId,
+      strategies: ['contact_sheet_v1'],
+    })
+    const [evidence] = await db
+      .select()
+      .from(candidateEvidence)
+      .where(eq(candidateEvidence.id, created.items[0].id))
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, created.items[0].job_id!))
+    const [frozenCandidate] = await db
+      .select()
+      .from(evaluationCandidates)
+      .where(eq(evaluationCandidates.id, candidateId))
+
+    expect(created.items[0]).toMatchObject({ status: 'queued', asset_id: fixture.assetId })
+    expect(evidence.assetId).toBe(fixture.assetId)
+    expect(job.inputJson).toMatchObject({ asset_id: fixture.assetId, scene_id: fixture.sceneId })
+    // 检索快照仍保留 Caption Asset；只有本地证据 Job 使用同场景的已索引帧作为锚点。
+    expect(frozenCandidate.assetId).toBe(captionAsset.id)
   })
 })

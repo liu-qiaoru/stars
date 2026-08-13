@@ -273,17 +273,20 @@ export interface ShadowRerankRun {
   model_snapshot: string | null
   region: string | null
   protocol_version: string
+  execution_number: number
+  execution_history?: ShadowRerankRun[]
   query_count: number
   succeeded_count: number
   failed_count: number
   not_applicable_count: number
   actual_sample_count: number
   request_bytes: number
-  input_tokens: number
-  output_tokens: number
-  total_tokens: number
-  latency_ms: number
-  billed_cost_cny: number
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  latency_ms: number | null
+  billed_cost_cny: number | null
+  estimated_cost_cny: number | null
   review_status: 'not_run'
   error: { code: string; message: string; details: unknown } | null
   metric_summary: {
@@ -317,6 +320,16 @@ export interface ShadowRerankRun {
     total_tokens: number | null
     latency_ms: number | null
     billed_cost_cny: number | null
+    estimated_cost_cny: number | null
+    usage_reconciliation: {
+      source: 'aliyun_model_monitor'
+      provider_request_id: string
+      total_tokens: number
+      text_input_tokens: number
+      image_input_tokens: number
+      estimated_cost_cny: number
+      observed_at: string
+    } | null
     actual_candidate_count: number
     actual_result_count: number
     metrics: {
@@ -535,7 +548,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
   ).replace(/\/$/, '')
   const fetcher = options.fetcher ?? fetch
 
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async function request<T>(
+    path: string,
+    init: RequestInit = {},
+    options: { emptySuccessAsNull?: boolean } = {},
+  ): Promise<T> {
     // 当前 MVP 的错误处理只抛状态码；需要用户可见错误时在具体 workspace 里转换为文案。
     const response = await fetcher(`${baseUrl}${path}`, {
       ...init,
@@ -546,6 +563,13 @@ export function createApiClient(options: ApiClientOptions = {}) {
     })
     if (!response.ok) {
       throw new Error(`API request failed: ${response.status}`)
+    }
+    if (options.emptySuccessAsNull) {
+      const body = await response.text()
+      // NestJS 的 Express 适配器会把 Controller 返回的 null 编码为 200 + 空正文，
+      // 且测试/代理不一定保留 Content-Length。只有契约明确允许 null 的读取接口才
+      // 读取正文并处理空值；非空内容仍严格 JSON.parse，不掩盖畸形响应。
+      return (body.length === 0 ? null : JSON.parse(body)) as T
     }
     return (await response.json()) as T
   }
@@ -664,11 +688,20 @@ export function createApiClient(options: ApiClientOptions = {}) {
         method: 'POST',
         signal,
       }),
-    getEvaluationShadowRerank: (id: string, signal?: AbortSignal) =>
-      request<ShadowRerankRun | null>(`/evaluation/runs/${id}/shadow-rerank`, {
-        method: 'GET',
+    retryEvaluationShadowRerank: (id: string, signal?: AbortSignal) =>
+      request<ShadowRerankRun>(`/evaluation/runs/${id}/shadow-rerank/retry`, {
+        method: 'POST',
         signal,
       }),
+    getEvaluationShadowRerank: (id: string, signal?: AbortSignal) =>
+      request<ShadowRerankRun | null>(
+        `/evaluation/runs/${id}/shadow-rerank`,
+        {
+          method: 'GET',
+          signal,
+        },
+        { emptySuccessAsNull: true },
+      ),
     getMedia: (id: string) =>
       request<MediaDetail>(`/media/${id}?include_assets=true&assets_limit=50&assets_offset=0`, {
         method: 'GET',

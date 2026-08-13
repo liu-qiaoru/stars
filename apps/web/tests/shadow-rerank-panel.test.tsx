@@ -40,6 +40,46 @@ describe('Phase E shadow rerank panel', () => {
     expect(api.getEvaluationShadowRerank.mock.calls.length).toBeGreaterThan(1)
   })
 
+  test('creates a new execution when the user explicitly retries a failed smoke', async () => {
+    const api = client(run('failed'))
+    render(<ShadowRerankPanel evaluationRunId="run-1" canStart apiClient={api} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '重新运行影子重排' }))
+    await waitFor(() =>
+      expect(api.retryEvaluationShadowRerank).toHaveBeenCalledWith(
+        'run-1',
+        expect.any(AbortSignal),
+      ),
+    )
+    expect(api.startEvaluationShadowRerank).not.toHaveBeenCalled()
+  })
+
+  test('keeps an older failed execution and its reconciled tokens visible', async () => {
+    const latest = { ...run('succeeded'), execution_number: 2 }
+    const first = run('failed')
+    first.id = 'shadow-first'
+    first.attempts[0]!.provider_request_id = 'request-first'
+    first.attempts[0]!.total_tokens = null
+    first.attempts[0]!.usage_reconciliation = {
+      source: 'aliyun_model_monitor',
+      provider_request_id: 'request-first',
+      total_tokens: 25_640,
+      text_input_tokens: 1_200,
+      image_input_tokens: 24_440,
+      estimated_cost_cny: 0.044832,
+      observed_at: '2026-08-13T08:57:43.126Z',
+    }
+    latest.execution_history = [{ ...latest }, first]
+    render(
+      <ShadowRerankPanel evaluationRunId="run-1" canStart={false} apiClient={client(latest)} />,
+    )
+
+    expect(await screen.findByRole('heading', { name: '历史执行审计' })).toBeInTheDocument()
+    expect(screen.getByText('Request ID：request-first')).toBeInTheDocument()
+    expect(screen.getByText('Provider Token：未提供')).toBeInTheDocument()
+    expect(screen.getByText('人工核对 Token：25,640')).toBeInTheDocument()
+  })
+
   test.each([
     ['pending', '未运行'],
     ['running', '运行中'],
@@ -74,6 +114,75 @@ describe('Phase E shadow rerank panel', () => {
     expect(screen.getAllByText('RRF MRR').length).toBeGreaterThan(0)
     expect(screen.getAllByText('影子 MRR').length).toBeGreaterThan(0)
     expect(screen.getByText(/完整产品样本/)).toBeInTheDocument()
+  })
+
+  test('renders Provider-omitted token splits and billed cost as unavailable instead of zero', async () => {
+    const official = run('succeeded')
+    official.response_model = null
+    official.model_snapshot = null
+    official.input_tokens = null
+    official.output_tokens = null
+    official.total_tokens = 321
+    official.billed_cost_cny = null
+    official.estimated_cost_cny = 0.0005778
+    Object.assign(official.attempts[0]!, {
+      response_model: null,
+      model_snapshot: null,
+      input_tokens: null,
+      output_tokens: null,
+      total_tokens: 321,
+      billed_cost_cny: null,
+      estimated_cost_cny: 0.0005778,
+    })
+    const api = client(official)
+
+    render(<ShadowRerankPanel evaluationRunId="run-1" canStart={false} apiClient={api} />)
+
+    expect((await screen.findAllByText('Provider 未提供')).length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText('¥0.0000')).not.toBeInTheDocument()
+    expect(screen.getAllByText('¥0.0006').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('321').length).toBeGreaterThanOrEqual(1)
+  })
+
+  test('renders incomplete run-level usage as unknown instead of a partial zero total', async () => {
+    const unknown = run('failed')
+    unknown.total_tokens = null
+    unknown.latency_ms = null
+    unknown.billed_cost_cny = null
+    unknown.estimated_cost_cny = null
+    const api = client(unknown)
+
+    render(<ShadowRerankPanel evaluationRunId="run-1" canStart={false} apiClient={api} />)
+
+    expect((await screen.findAllByText('计量不完整')).length).toBe(2)
+    expect(screen.queryByText('0 ms')).not.toBeInTheDocument()
+  })
+
+  test('shows console-reconciled usage separately from unavailable Provider usage', async () => {
+    const reconciled = run('failed')
+    Object.assign(reconciled.attempts[0]!, {
+      total_tokens: null,
+      estimated_cost_cny: null,
+      usage_reconciliation: {
+        source: 'aliyun_model_monitor',
+        provider_request_id: 'request-1',
+        total_tokens: 25_640,
+        text_input_tokens: 1_200,
+        image_input_tokens: 24_440,
+        estimated_cost_cny: 0.044832,
+        observed_at: '2026-08-13T08:00:00.000Z',
+      },
+    })
+    const api = client(reconciled)
+
+    render(<ShadowRerankPanel evaluationRunId="run-1" canStart={false} apiClient={api} />)
+
+    expect(await screen.findByText('阿里云模型监控人工核对')).toBeInTheDocument()
+    expect(screen.getByText(/总计 25,640/)).toBeInTheDocument()
+    expect(screen.getByText(/文本 1,200/)).toBeInTheDocument()
+    expect(screen.getByText(/图片 24,440/)).toBeInTheDocument()
+    expect(screen.getByText(/¥0.044832/)).toBeInTheDocument()
+    expect(screen.getAllByText('Provider 未提供').length).toBeGreaterThan(0)
   })
 
   test('surfaces a malformed API response instead of presenting it as not run', async () => {
@@ -186,9 +295,13 @@ function client(initial: ShadowRerankRun | null) {
   return {
     getEvaluationShadowRerank: vi.fn().mockResolvedValue(initial),
     startEvaluationShadowRerank: vi.fn().mockResolvedValue(run('pending')),
+    retryEvaluationShadowRerank: vi
+      .fn()
+      .mockResolvedValue({ ...run('pending'), execution_number: 2 }),
   } as unknown as ReturnType<(typeof import('../lib/api-client'))['createApiClient']> & {
     getEvaluationShadowRerank: ReturnType<typeof vi.fn>
     startEvaluationShadowRerank: ReturnType<typeof vi.fn>
+    retryEvaluationShadowRerank: ReturnType<typeof vi.fn>
   }
 }
 
@@ -203,6 +316,7 @@ function run(status: ShadowRerankRun['status']): ShadowRerankRun {
     model_snapshot: 'snapshot-1',
     region: 'cn-beijing',
     protocol_version: 'qwen3-vl-rerank-top20-v1',
+    execution_number: 1,
     query_count: 2,
     succeeded_count: status === 'succeeded' ? 2 : 1,
     failed_count: status === 'completed_with_errors' || status === 'failed' ? 1 : 0,
@@ -214,6 +328,7 @@ function run(status: ShadowRerankRun['status']): ShadowRerankRun {
     total_tokens: 210,
     latency_ms: 1234,
     billed_cost_cny: 0.01,
+    estimated_cost_cny: 0.01,
     review_status: 'not_run',
     metric_summary: {
       successful_samples: { n: 1, rrf: knownTargetMetrics(0.25), shadow: knownTargetMetrics(1) },
@@ -247,6 +362,8 @@ function run(status: ShadowRerankRun['status']): ShadowRerankRun {
         total_tokens: 210,
         latency_ms: 1234,
         billed_cost_cny: 0.01,
+        estimated_cost_cny: 0.01,
+        usage_reconciliation: null,
         actual_candidate_count: 20,
         actual_result_count: 10,
         applicability_reason: null,
@@ -306,6 +423,8 @@ function run(status: ShadowRerankRun['status']): ShadowRerankRun {
               total_tokens: null,
               latency_ms: null,
               billed_cost_cny: null,
+              estimated_cost_cny: null,
+              usage_reconciliation: null,
               actual_candidate_count: 19,
               actual_result_count: 0,
               metrics: null,

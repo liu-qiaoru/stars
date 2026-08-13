@@ -22,12 +22,22 @@ describe('database migration chain', () => {
       '0001_agent_v1_phase_a.sql',
       '0002_agent_v1_phase_d_candidate_evidence.sql',
       '0003_happy_morlun.sql',
+      '0004_mute_meggan.sql',
+      '0005_friendly_mister_sinister.sql',
+      '0006_new_ghost_rider.sql',
+      '0007_phase_e_shadow_usage_reconciliation.sql',
+      '0008_strong_karen_page.sql',
     ])
     expect(metadataFiles).toEqual([
       '0000_snapshot.json',
       '0001_snapshot.json',
       '0002_snapshot.json',
       '0003_snapshot.json',
+      '0004_snapshot.json',
+      '0005_snapshot.json',
+      '0006_snapshot.json',
+      '0007_snapshot.json',
+      '0008_snapshot.json',
       '_journal.json',
     ])
     const journal = JSON.parse(await readFile(resolve('drizzle/meta/_journal.json'), 'utf8')) as {
@@ -38,6 +48,11 @@ describe('database migration chain', () => {
       '0001_agent_v1_phase_a',
       '0002_agent_v1_phase_d_candidate_evidence',
       '0003_happy_morlun',
+      '0004_mute_meggan',
+      '0005_friendly_mister_sinister',
+      '0006_new_ghost_rider',
+      '0007_phase_e_shadow_usage_reconciliation',
+      '0008_strong_karen_page',
     ])
 
     const sql = await readFile(resolve('drizzle', migrationFiles[0]!), 'utf8')
@@ -175,6 +190,74 @@ describe('database migration chain', () => {
         'evaluation_shadow_runs',
         'evaluation_shadow_attempts',
         'evaluation_shadow_rankings',
+      ]),
+    )
+  })
+
+  test('applies smoke preflight migrations without rewriting Phase E history', async () => {
+    client = new PGlite()
+    for (const file of [
+      '0000_final_baseline.sql',
+      '0001_agent_v1_phase_a.sql',
+      '0002_agent_v1_phase_d_candidate_evidence.sql',
+      '0003_happy_morlun.sql',
+      '0004_mute_meggan.sql',
+      '0005_friendly_mister_sinister.sql',
+      '0006_new_ghost_rider.sql',
+      '0007_phase_e_shadow_usage_reconciliation.sql',
+      '0008_strong_karen_page.sql',
+    ]) {
+      await client.exec(await readFile(resolve('drizzle', file), 'utf8'))
+    }
+
+    const columns = await client.query<{ column_name: string; is_nullable: string }>(
+      `select column_name, is_nullable
+       from information_schema.columns
+       where table_name='evaluation_shadow_runs'
+         and column_name in ('input_tokens', 'output_tokens', 'total_tokens', 'latency_ms', 'billed_cost_cny', 'estimated_cost_cny')
+       order by column_name`,
+    )
+    expect(columns.rows).toEqual([
+      { column_name: 'billed_cost_cny', is_nullable: 'YES' },
+      { column_name: 'estimated_cost_cny', is_nullable: 'YES' },
+      { column_name: 'input_tokens', is_nullable: 'YES' },
+      { column_name: 'latency_ms', is_nullable: 'YES' },
+      { column_name: 'output_tokens', is_nullable: 'YES' },
+      { column_name: 'total_tokens', is_nullable: 'YES' },
+    ])
+    const attemptColumns = await client.query<{ column_name: string }>(
+      "select column_name from information_schema.columns where table_name='evaluation_shadow_attempts'",
+    )
+    expect(attemptColumns.rows.map((row) => row.column_name)).toContain('estimated_cost_cny')
+    const reconciliationConstraints = await client.query<{ constraint_name: string }>(
+      `select constraint_name
+       from information_schema.table_constraints
+       where table_name='evaluation_shadow_usage_reconciliations'
+       order by constraint_name`,
+    )
+    const constraintNames = reconciliationConstraints.rows.map((row) => row.constraint_name)
+    expect(constraintNames).toContain('evaluation_shadow_usage_reconciliations_pkey')
+    // PostgreSQL 标识符最多 63 字节，自动生成的外键名称会被稳定截断。
+    expect(
+      constraintNames.some((name) =>
+        name.startsWith('evaluation_shadow_usage_reconciliations_attempt_id_evaluation_'),
+      ),
+    ).toBe(true)
+    const indexes = await client.query<{ indexname: string; indexdef: string }>(
+      `select indexname, indexdef
+       from pg_indexes
+       where tablename in ('evaluation_shadow_runs', 'evaluation_shadow_usage_reconciliations')`,
+    )
+    expect(indexes.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          indexname: 'evaluation_shadow_usage_reconciliations_attempt_unique',
+          indexdef: expect.stringContaining('UNIQUE'),
+        }),
+        expect.objectContaining({
+          indexname: 'evaluation_shadow_runs_identity_unique',
+          indexdef: expect.stringContaining('execution_number'),
+        }),
       ]),
     )
   })

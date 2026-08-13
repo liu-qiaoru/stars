@@ -354,6 +354,9 @@ export const evaluationShadowRuns = pgTable(
       .notNull()
       .references(() => evaluationRuns.id, { onDelete: 'cascade' }),
     protocolVersion: text('protocol_version').notNull(),
+    // 同一冻结 Evaluation 可以显式重跑，但每次真实外发必须拥有独立 run/attempt，
+    // 这样第二次 smoke 不会覆盖第一次 request ID、指纹、错误和人工用量核对。
+    executionNumber: integer('execution_number').notNull().default(1),
     status: text('status').notNull().default('pending'),
     provider: text('provider').notNull().default('dashscope'),
     requestedModel: text('requested_model').notNull().default('qwen3-vl-rerank'),
@@ -366,11 +369,12 @@ export const evaluationShadowRuns = pgTable(
     notApplicableCount: integer('not_applicable_count').notNull().default(0),
     actualSampleCount: integer('actual_sample_count').notNull().default(0),
     requestBytes: bigint('request_bytes', { mode: 'number' }).notNull().default(0),
-    inputTokens: integer('input_tokens').notNull().default(0),
-    outputTokens: integer('output_tokens').notNull().default(0),
-    totalTokens: integer('total_tokens').notNull().default(0),
-    latencyMs: bigint('latency_ms', { mode: 'number' }).notNull().default(0),
-    billedCostCny: numeric('billed_cost_cny').notNull().default('0'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    latencyMs: bigint('latency_ms', { mode: 'number' }),
+    billedCostCny: numeric('billed_cost_cny'),
+    estimatedCostCny: numeric('estimated_cost_cny'),
     errorCode: text('error_code'),
     errorMessage: text('error_message'),
     errorDetailsJson: jsonb('error_details_json'),
@@ -381,6 +385,7 @@ export const evaluationShadowRuns = pgTable(
     uniqueIndex('evaluation_shadow_runs_identity_unique').on(
       table.evaluationRunId,
       table.protocolVersion,
+      table.executionNumber,
     ),
     index('evaluation_shadow_runs_status_idx').on(table.status, table.createdAt),
   ],
@@ -414,6 +419,7 @@ export const evaluationShadowAttempts = pgTable(
     totalTokens: integer('total_tokens'),
     latencyMs: bigint('latency_ms', { mode: 'number' }),
     billedCostCny: numeric('billed_cost_cny'),
+    estimatedCostCny: numeric('estimated_cost_cny'),
     actualCandidateCount: integer('actual_candidate_count').notNull().default(0),
     actualResultCount: integer('actual_result_count').notNull().default(0),
     errorCode: text('error_code'),
@@ -428,6 +434,30 @@ export const evaluationShadowAttempts = pgTable(
     uniqueIndex('evaluation_shadow_attempts_query_unique').on(table.shadowRunId, table.queryId),
     uniqueIndex('evaluation_shadow_attempts_idempotency_unique').on(table.idempotencyKey),
     index('evaluation_shadow_attempts_status_idx').on(table.status, table.createdAt),
+  ],
+)
+
+// Provider 响应未通过 Schema 时，API 返回的 token 必须保持 null。若维护者随后从阿里云
+// 模型监控核对到用量，则在独立的一对一事实中记录来源和分项，既能恢复预算判断，也不会
+// 把人工核对值冒充为 Provider 响应字段。
+export const evaluationShadowUsageReconciliations = pgTable(
+  'evaluation_shadow_usage_reconciliations',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    attemptId: uuid('attempt_id')
+      .notNull()
+      .references(() => evaluationShadowAttempts.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    providerRequestId: text('provider_request_id').notNull(),
+    totalTokens: integer('total_tokens').notNull(),
+    textInputTokens: integer('text_input_tokens').notNull(),
+    imageInputTokens: integer('image_input_tokens').notNull(),
+    estimatedCostCny: numeric('estimated_cost_cny').notNull(),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('evaluation_shadow_usage_reconciliations_attempt_unique').on(table.attemptId),
   ],
 )
 

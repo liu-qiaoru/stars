@@ -196,6 +196,53 @@ Review：
   warning，Phase E 23 个可格式化文件单独通过，全仓 format check 仍由 31 个既有文件阻断，
   `git diff --check` 通过。以 `a1f23c4` 为固定点的 Standards/Spec 首轮阻断项已修复，最终
   复审结论记录在本次交付报告中；实现严格停在 Phase E。
+- 2026-08-13 真实 smoke 前置：已按阿里云官方北京专属协议增加默认禁用的 DashScope
+  适配器、严格成功/错误响应边界和只读 preflight；官方未返回的响应模型、token 拆分与
+  账单费用保存 null，另存图片最高单价保守估算。首次调用上限默认 1，后续即使另行授权
+  也只能配置到 4；每次派发前以 PostgreSQL 表锁跨 Evaluation run 统计同一协议，并按单请求理论最高 ¥0.216 预留累计 ¥0.5 预算，新建 run 不能重置额度。既有调用用量
+  未知时停止且 run 汇总保持 null。迁移前备份位于
+  `/private/tmp/stars-phase-e-smoke-preflight-20260813.dump`；迁移后 PostgreSQL 媒体数量与
+  Qdrant 8 / 5,629 / 1,927 Point 均未变化。随后按用户提供的“有人在海边走路”创建并冻结一条
+  `search_scope=visual` 的 discovery 查询，本地检索得到完整 RRF Top-20，并成功生成 20 份
+  `contact_sheet_v1` Evaluation 证据。真实数据暴露 Caption-only 视频候选原本被 Phase D 帧 Asset
+  校验错误拒绝；已用公开 API 回归测试修复为保留冻结 Caption Asset、只为证据 Job 确定性选择同
+  scene indexed 帧锚点。当前运行处于 `ready_for_labeling`，current/RRF 两个 Top-20 的并集共有
+  27 个候选等待人工判断；在用户完成标签和 finalize 前不会生成 preflight。真实 Provider 调用、
+  图片外发和费用仍为 0。
+- 2026-08-13 用户完成 27/27 人工判断后，实际 `reported` run 为
+  `bd5ebb5d-503b-4f1b-a6ce-88c5aae44994`；此前交付的旧详情链接仍指向未标注 run，两个事实没有
+  混写。修复 NestJS `null` 被编码成 200 空正文时 Web 无条件 `response.json()` 导致的
+  `Unexpected end of JSON input`：只有影子读取这一明确可空契约把成功空正文解释为 `null`，非空
+  畸形 JSON 继续快速失败。为正确 reported run 生成 20/20 成功双指纹证据后，只读 preflight
+  得到完整 20-document 请求 **18,530,463 bytes**，查询/证据指纹均已冻结；外部调用、图片外发、
+  费用和 Qdrant 写入仍为 0。
+- 2026-08-13 用户明确授权首轮单次真实 smoke 后，使用一次性进程配置完成 1 次北京
+  `qwen3-vl-rerank` Top-20 请求并关闭临时 Server，持久 `.env` 仍默认禁用 Provider。请求外发
+  20 张派生 PNG，HTTP 200、耗时 2,689 ms、Provider request ID 已保存，正文包含 10 个结果；
+  但供应商成功正文没有通过严格运行时 Schema，所以尝试按 `completed/failed` 收敛且写入排名 0，
+  不重试、不补位、不改变 Search/Agent。`total_tokens`、实际账单和估算费用保持 null；理论最高
+  ¥0.216 不是实际费用，用量未知预算门将阻止后续派发，需按 request ID 在阿里云控制台复核账单
+  并先诊断真实响应协议漂移。
+- 2026-08-13 首次 smoke 复盘修复：通过红→绿回归证明 DashScope 无害扩展字段会被旧版
+  `.strict()` 误判；适配器现只提取所需字段，核心 Top-10 仍严格校验，畸形核心只持久化字段
+  路径/错误类型。Provider 用量缺失不再丢弃合法排名，但保持 null 并停止后续预算。新增 `0007`
+  一对一用量核对表和本地 API，独立保存用户从阿里云模型监控核对的 25,640 总 Token（文本
+  1,200、图片 24,440）及标准原价估算 ¥0.044832，未覆盖第一次 Provider 字段或失败排名。
+  迁移前备份 `/private/tmp/stars-phase-e-rerank-fix-20260813.dump`；迁移前后 PostgreSQL
+  `35 / 7,940 / 1,919 / 7,564`、Qdrant `8 / 5,629 / 1,927` 均不变。Provider 仍禁用，
+  第二次真实调用必须再次明确授权。
+  同一冻结 Top-20 的第二次 smoke 已增加递增 `execution_number` 和显式 retry：使用新
+  run/attempt，派发前核对 query/evidence 指纹，第一次 request ID、错误和人工用量保持只读。
+  `0008` 迁移前备份 `/private/tmp/stars-phase-e-retry-20260813.dump`；迁移前后 PostgreSQL
+  `35 / 7,940 / 1,919 / 7,564 / 1 attempt / 0 ranking / 1 reconciliation` 不变，三个
+  Qdrant Collection 仍为 `8 / 5,629 / 1,927`。
+- 2026-08-13 用户明确授权第二次 smoke：对同一 reported Evaluation/冻结 Top-20 创建
+  `execution_number=2`，一次北京 `qwen3-vl-rerank` 调用成功。Provider request ID
+  `2878ae48-26f3-993c-ad0e-f29b2747a44b`，20 候选/10 结果，保存 20 条审计排名（10 条有
+  shadow rank），25,640 tokens、3,138 ms、18,530,463 bytes，保守估算 ¥0.046152。
+  单查询 n=1：Precision@5 从 0.60 提升到 0.80，Precision@10 从 0.50 提升到 0.70，
+  nDCG@10 从 0.579 提升到 0.710。历史累计恰好 2 次外发，临时 Server 已停止；未进入 VLM
+  Review，未改变 Search/Agent 排序，未写 Qdrant。
 
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 

@@ -677,6 +677,11 @@ Evaluation 来源把 `source` 改为
 候选属于该 run，当前文件仍是视频且 `index_generation` 未变化，场景与代表帧 Asset 身份一致。
 过期 generation 返回 HTTP 409 和 `STALE_FILE_GENERATION`，不会改用新 generation。
 
+RRF Top-20 中由 Caption 单独召回的视频候选继续保留原 Caption Asset，不能改写冻结快照。Server
+验证 Caption 属于同一冻结 file/scene 后，确定性选择该场景第一条非 stale 且已有 indexed
+`video_frame_vectors` 引用的帧作为证据 Job 锚点；Agent 候选仍要求原冻结 Asset 本身是视频帧。
+找不到合格帧时返回 409，不删除候选、不补位或重新搜索。
+
 响应为 `{ "items": [...] }`，每项使用 snake_case，包含 `id`、`candidate_key`、
 `file_generation`、`job_id`、`status`、`strategy`、`protocol_version`、`manifest`、
 `frame_count`、`artifact_url`、`error`、期限和冻结时间。`artifact_url` 只在 `succeeded` 时出现；
@@ -750,11 +755,26 @@ current/RRF 名次；人工标注完成前普通读取隐藏这些证据。运�
 ### Phase E 影子重排
 
 - `POST /evaluation/runs/{id}/shadow-rerank`：只允许已生成 `reported` 报告的运行。以
-  `(evaluation_run_id, qwen3-vl-rerank-top20-v1)` 幂等创建或复用影子 run，先返回
+  `(evaluation_run_id, qwen3-vl-rerank-top20-v1, execution_number=1)` 幂等创建或复用影子 run，先返回
   PostgreSQL 事实，再由 Server 后台执行。重复或并发 POST 不会创建第二个
   attempt。
+- `POST /evaluation/runs/{id}/shadow-rerank/retry`：只允许上一次影子执行失败后显式调用。
+  为同一 Evaluation 创建递增 `execution_number` 的新 run/attempt，继续读取原冻结查询、RRF
+  Top-20 与证据，并在派发前核对 query/evidence 指纹。旧 request ID、错误和用量事实不覆盖；
+  已成功执行不能重试。
 - `GET /evaluation/runs/{id}/shadow-rerank`：返回已保存事实；尚未运行时返回
-  `null`。历史读取不调 Provider、不读取 Qdrant，也不会从文件重算排名。
+  `null`。有多次执行时，主字段展示最新 execution，并在 `execution_history` 返回各次完整只读
+  PostgreSQL 快照。历史读取不调 Provider、不读取 Qdrant，也不会从文件重算排名。
+- `GET /evaluation/runs/{id}/shadow-rerank/preflight`：只读组装视觉查询的冻结 Top-20，
+  返回候选/文档数、真实 DashScope JSON UTF-8 字节数和查询/证据指纹。响应固定
+  `external_call_count=0`，不创建 shadow run、不调用 Provider，也不返回查询文本、Base64、
+  文件名或路径；用于真实 smoke 授权前确认准确外发规模。
+- `POST /evaluation/shadow-rerank/attempts/{id}/usage-reconciliation`：仅用于 Provider
+  响应未通过 Schema、token 保持 null 后，由维护者把阿里云模型监控中的同一 Request ID
+  用量另行核对入库。请求固定为 `source=aliyun_model_monitor`、`provider_request_id`、
+  `total_tokens`、`text_input_tokens`、`image_input_tokens`；三项必须为非负整数且总数等于
+  文本与图片之和。它不修改 Provider 响应字段、attempt 结果或排名，只为预算门提供有来源的
+  已知费用事实；相同内容幂等，冲突内容拒绝。
 
 run 状态为 `pending | running | succeeded | completed_with_errors | failed |
 not_applicable`；attempt 还可以为 `outcome_unknown`。`spoken`、`all` 或未冻结范围的
@@ -771,21 +791,23 @@ not_applicable`；attempt 还可以为 `outcome_unknown`。`spoken`、`all` 或�
   "status": "succeeded",
   "provider": "dashscope",
   "requested_model": "qwen3-vl-rerank",
-  "response_model": "qwen3-vl-rerank",
-  "model_snapshot": "provider-snapshot-or-null",
-  "region": "provider-region-or-null",
+  "response_model": null,
+  "model_snapshot": null,
+  "region": "cn-beijing",
   "protocol_version": "qwen3-vl-rerank-top20-v1",
+  "execution_number": 1,
   "query_count": 1,
   "succeeded_count": 1,
   "failed_count": 0,
   "not_applicable_count": 0,
   "actual_sample_count": 1,
   "request_bytes": 123456,
-  "input_tokens": 1234,
-  "output_tokens": 10,
+  "input_tokens": null,
+  "output_tokens": null,
   "total_tokens": 1244,
   "latency_ms": 2300,
-  "billed_cost_cny": 0.01,
+  "billed_cost_cny": null,
+  "estimated_cost_cny": 0.0022392,
   "review_status": "not_run",
   "error": null,
   "attempts": [
@@ -798,6 +820,7 @@ not_applicable`；attempt 还可以为 `outcome_unknown`。`spoken`、`all` 或�
       "response_fingerprint": "sha256",
       "actual_candidate_count": 20,
       "actual_result_count": 10,
+      "usage_reconciliation": null,
       "metrics": { "rrf": {}, "shadow": {} },
       "rankings": [
         {
@@ -820,8 +843,12 @@ not_applicable`；attempt 还可以为 `outcome_unknown`。`spoken`、`all` 或�
 
 `relevance_score` 不是概率，不设阈值，也不能跨请求比较。非有限分数、非法或
 重复 index、非按 score 非递增排序、少于/多于 10 条返回都使整个 attempt 失败，
-不保存部分排名；但仍保存脱敏 Provider 请求 ID、模型、用量、耗时、费用、
+不保存部分排名；但仍保存脱敏 Provider 请求 ID、已提供的模型/用量、耗时、费用、
 实际返回数和响应指纹，并把 `external_call_status` 明确标为 `completed`。
+`billed_cost_cny` 只表示供应商实际账单；官方响应未提供时为 null。
+`estimated_cost_cny` 是按图片最高单价计算的本地保守预算，不得当成实际账单。
+运行汇总的 `total_tokens`、`latency_ms`、`billed_cost_cny` 与 `estimated_cost_cny` 均可为
+null：只要任一已外发 attempt 缺少对应事实，汇总就保持未知，不能返回部分总量或零。
 API 和普通日志不返回绝对路径、Base64、文件名、Caption、转录或图片字节。
 `review_status` 固定为 `not_run`，表示尚未执行 Phase F VLM 审核。
 

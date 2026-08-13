@@ -29,6 +29,13 @@ export interface Settings {
   deepseekBaseUrl: string
   deepseekApiKey?: string
   deepseekModel: string
+  // 可选是为了兼容测试中的手工 Settings double；缺失在装配工厂中等同 disabled。
+  // 真实进程始终由 createSettings 填入明确值。
+  shadowRerankProvider?: 'disabled' | 'dashscope'
+  dashscopeWorkspaceId?: string
+  dashscopeApiKey?: string
+  shadowRerankMaxCalls?: number
+  shadowRerankMaxCostCny?: number
   captionIndexingEnabled: boolean
   captionSearchEnabled: boolean
   localVlmEnabled: boolean
@@ -262,6 +269,46 @@ const settingsSchema = z.object({
     .default('https://api.deepseek.com'),
   DEEPSEEK_API_KEY: z.string().min(1).optional(),
   DEEPSEEK_MODEL: z.string().min(1).default('deepseek-v4-flash'),
+  // Provider 选择是独立的视觉外发授权闸门。仅配置 API Key 仍保持 disabled；
+  // workspace ID 会成为北京专属域名的一部分，因此只接受单个合法 DNS label，
+  // 防止配置值注入斜杠、端口或另一个主机名。
+  SHADOW_RERANK_PROVIDER: z.enum(['disabled', 'dashscope']).default('disabled'),
+  DASHSCOPE_WORKSPACE_ID: z
+    .string()
+    .regex(
+      /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/,
+      'DASHSCOPE_WORKSPACE_ID must be a valid DNS label',
+    )
+    .optional(),
+  DASHSCOPE_API_KEY: z.string().min(1).optional(),
+  SHADOW_RERANK_MAX_CALLS: z
+    .string()
+    .default('1')
+    .transform((value, context) => {
+      const count = Number(value)
+      if (!Number.isInteger(count) || count < 1 || count > 4) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SHADOW_RERANK_MAX_CALLS must be between 1 and 4',
+        })
+        return z.NEVER
+      }
+      return count
+    }),
+  SHADOW_RERANK_MAX_COST_CNY: z
+    .string()
+    .default('0.5')
+    .transform((value, context) => {
+      const cost = Number(value)
+      if (!Number.isFinite(cost) || cost <= 0 || cost > 0.5) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SHADOW_RERANK_MAX_COST_CNY must be greater than 0 and at most 0.5',
+        })
+        return z.NEVER
+      }
+      return cost
+    }),
   CAPTION_INDEXING_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
@@ -353,6 +400,14 @@ export function createSettings(env: Env = process.env): Settings {
       'AGENT_LEASE_DURATION_MS must be at least max(AGENT_ACTIVITY_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS) + 5000',
     )
   }
+  if (parsed.SHADOW_RERANK_PROVIDER === 'dashscope') {
+    if (!parsed.DASHSCOPE_WORKSPACE_ID) {
+      throw new Error('DASHSCOPE_WORKSPACE_ID is required when SHADOW_RERANK_PROVIDER=dashscope')
+    }
+    if (!parsed.DASHSCOPE_API_KEY) {
+      throw new Error('DASHSCOPE_API_KEY is required when SHADOW_RERANK_PROVIDER=dashscope')
+    }
+  }
 
   return {
     serverHost: parsed.SERVER_HOST,
@@ -383,6 +438,11 @@ export function createSettings(env: Env = process.env): Settings {
     deepseekBaseUrl: parsed.DEEPSEEK_BASE_URL,
     deepseekApiKey: parsed.DEEPSEEK_API_KEY,
     deepseekModel: parsed.DEEPSEEK_MODEL,
+    shadowRerankProvider: parsed.SHADOW_RERANK_PROVIDER,
+    dashscopeWorkspaceId: parsed.DASHSCOPE_WORKSPACE_ID,
+    dashscopeApiKey: parsed.DASHSCOPE_API_KEY,
+    shadowRerankMaxCalls: parsed.SHADOW_RERANK_MAX_CALLS,
+    shadowRerankMaxCostCny: parsed.SHADOW_RERANK_MAX_COST_CNY,
     captionIndexingEnabled: parsed.CAPTION_INDEXING_ENABLED,
     captionSearchEnabled: parsed.CAPTION_SEARCH_ENABLED,
     localVlmEnabled: parsed.LOCAL_VLM_ENABLED,

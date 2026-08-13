@@ -19,6 +19,7 @@ import {
   jobs,
   mediaAssets,
   mediaFiles,
+  vectorRefs,
   videoScenes,
 } from '../database/schema.js'
 
@@ -350,7 +351,10 @@ export class CandidateEvidenceService {
       )
       .limit(1)
     if (!candidate) throw new NotFoundException('Frozen Evaluation candidate not found')
-    return this.validateIdentity(db, candidate)
+    // Evaluation 的 RRF Top-20 可能由 Caption 通道单独召回。此时冻结 asset_id 必须
+    // 继续指向 Caption 以保留检索事实，但联系表协议需要一个已索引 video_frame 作为
+    // Worker 的身份锚点。Agent 候选没有这个转换，仍执行原来的严格帧身份校验。
+    return this.validateIdentity(db, candidate, true)
   }
 
   private async validateIdentity(
@@ -362,6 +366,7 @@ export class CandidateEvidenceService {
       assetId: string
       sceneId: string | null
     },
+    allowEvaluationCaptionAnchor = false,
   ) {
     if (!candidate.sceneId) {
       throw new BadRequestException('Phase D candidate evidence only supports video scenes')
@@ -404,12 +409,41 @@ export class CandidateEvidenceService {
       !asset ||
       asset.fileId !== candidate.fileId ||
       asset.sceneId !== candidate.sceneId ||
-      asset.assetType !== 'video_frame' ||
       (asset.metadataJson as { stale?: unknown }).stale === true
     ) {
       throw new ConflictException('Candidate asset does not match the frozen video scene')
     }
-    return candidate as typeof candidate & { sceneId: string }
+    if (asset.assetType === 'video_frame') {
+      return candidate as typeof candidate & { sceneId: string }
+    }
+    if (!allowEvaluationCaptionAnchor || asset.assetType !== 'caption') {
+      throw new ConflictException('Candidate asset does not match the frozen video scene')
+    }
+
+    // contact_sheet_v1 会读取这个场景的全部 indexed 帧；anchor 只用于让 Server 与
+    // Worker 对“该冻结场景至少仍有一个可检索帧”做两次一致性校验。按时间和 UUID
+    // 选择第一条使重启、重复请求和多 Server 进程得到完全相同的 evidence 身份。
+    const indexedFrames = await db
+      .select({ id: mediaAssets.id, metadataJson: mediaAssets.metadataJson })
+      .from(mediaAssets)
+      .innerJoin(vectorRefs, eq(vectorRefs.assetId, mediaAssets.id))
+      .where(
+        and(
+          eq(mediaAssets.fileId, candidate.fileId),
+          eq(mediaAssets.sceneId, candidate.sceneId),
+          eq(mediaAssets.assetType, 'video_frame'),
+          eq(vectorRefs.collectionName, 'video_frame_vectors'),
+          eq(vectorRefs.status, 'indexed'),
+        ),
+      )
+      .orderBy(asc(mediaAssets.frameTimeSeconds), asc(mediaAssets.id))
+    const anchor = indexedFrames.find(
+      (frame) => (frame.metadataJson as { stale?: unknown }).stale !== true,
+    )
+    if (!anchor) {
+      throw new ConflictException('Frozen video scene has no indexed frame for candidate evidence')
+    }
+    return { ...candidate, assetId: anchor.id } as typeof candidate & { sceneId: string }
   }
 
   private toResponse(row: typeof candidateEvidence.$inferSelect) {
