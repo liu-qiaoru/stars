@@ -1,0 +1,2710 @@
+{
+  "schema_version": "phase-f-vlm-candidate-review-v1",
+  "proposals": [
+    {
+      "proposal_id": "phase-f-exact_match-01",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "8840d9b6-9f6d-4ba4-856b-4037549c3d78",
+      "query_text": "穿白衬衫的人在户外拿着手持摄像机",
+      "candidate_key": "b23eed34-f082-4527-ad27-5f46a673a420",
+      "file_id": "c9027b4d-3722-4394-b88f-48c1ee2778a3",
+      "scene_id": "b23eed34-f082-4527-ad27-5f46a673a420",
+      "start_time_seconds": 255.133333,
+      "end_time_seconds": 285.133333,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 4；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见穿白色衬衫的人物"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物位于户外"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物手中拿着手持摄像机"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "背景可见汽车或树木"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物只拿手机"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有摄像机没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-02",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "ae78ba7a-db9e-47c1-925a-394766aa890f",
+      "query_text": "有生日氛围的画面",
+      "candidate_key": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "file_id": "e81f235e-322a-4744-af4f-d382603642da",
+      "scene_id": "a4d34416-7d03-48d4-b9ca-d1a7a9fbe05a",
+      "start_time_seconds": 34,
+      "end_time_seconds": 34.5,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 1；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "画面存在可见的庆祝或生日布置"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "气球"
+        },
+        {
+          "condition_id": "optional-2",
+          "kind": "optional",
+          "source_text": "花朵"
+        },
+        {
+          "condition_id": "optional-3",
+          "kind": "optional",
+          "source_text": "生日文字"
+        },
+        {
+          "condition_id": "optional-4",
+          "kind": "optional",
+          "source_text": "蛋糕"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通人物近景且没有任何庆祝线索"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-03",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "87253f46-ad72-418f-bb95-67ca3333fb82",
+      "query_text": "A person in a white top sitting behind a drum kit and actively playing",
+      "candidate_key": "84497e03-57d2-42e2-9adf-dcdfcb19c519",
+      "file_id": "d0acd6ab-0c3c-4398-86bf-38859826e223",
+      "scene_id": "84497e03-57d2-42e2-9adf-dcdfcb19c519",
+      "start_time_seconds": 133.2,
+      "end_time_seconds": 163.2,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 2；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "A person in a white top is visible"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "The person is sitting behind a drum kit"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "Active playing is evident from continuous frames"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "Drumsticks and cymbals are visible"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "A drum kit without a person"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "The person is not playing"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-04",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "8258e3a7-ab64-450a-bbd5-7fc9ee15f684",
+      "query_text": "人物戴着造型夸张的眼镜",
+      "candidate_key": "9b9f14e2-3ed1-4c2a-9c5b-eaeb26d3c1f8",
+      "file_id": "c14b70d2-6934-4b0b-8b98-89a848a11f11",
+      "scene_id": "9b9f14e2-3ed1-4c2a-9c5b-eaeb26d3c1f8",
+      "start_time_seconds": 59.566667,
+      "end_time_seconds": 61.5,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 4；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物佩戴明显装饰性或造型夸张的眼镜"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "彩色镜框"
+        },
+        {
+          "condition_id": "optional-2",
+          "kind": "optional",
+          "source_text": "舞台环境"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通细框眼镜"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物手拿眼镜但没有佩戴"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-05",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "f9b5f711-bccc-4813-be3b-d8280d0fcd55",
+      "query_text": "戴着王冠的人拿着麦克风",
+      "candidate_key": "c53ebe21-9ed1-44b1-9563-e641b7bd7d52",
+      "file_id": "7788b3d5-d494-4f02-b501-2b46e3a2dd40",
+      "scene_id": "c53ebe21-9ed1-44b1-9563-e641b7bd7d52",
+      "start_time_seconds": 686.233333,
+      "end_time_seconds": 695.666667,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 3；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物头戴王冠或冠状头饰"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物手持麦克风"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "舞台环境"
+        },
+        {
+          "condition_id": "optional-2",
+          "kind": "optional",
+          "source_text": "蓝色装饰"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只有王冠没有人物"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物没有拿麦克风"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-06",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "feae9dd4-6abf-4fe9-b282-7a8a2d940aad",
+      "query_text": "舞台上的人物拿着麦克风表演",
+      "candidate_key": "d9fa83c6-53aa-4763-82ed-1d3b7a7a5ddd",
+      "file_id": "bfc8a9a8-4f0d-4506-972b-0d21c17159a8",
+      "scene_id": "d9fa83c6-53aa-4763-82ed-1d3b7a7a5ddd",
+      "start_time_seconds": 69.333333,
+      "end_time_seconds": 76.433333,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 2；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物手持麦克风"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "可见舞台、演出灯光或表演背景"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物正在唱歌"
+        },
+        {
+          "condition_id": "optional-2",
+          "kind": "optional",
+          "source_text": "观众或舞台装饰"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通室内讲话"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有麦克风没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-07",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "b33b3700-9574-4493-89fa-ab8cc02f4b34",
+      "query_text": "A person in a light blue puffer jacket holding a blue kite",
+      "candidate_key": "df4ebde6-0e1a-49f1-b68c-0ae7acd7bdb3",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "df4ebde6-0e1a-49f1-b68c-0ae7acd7bdb3",
+      "start_time_seconds": 36.466667,
+      "end_time_seconds": 41.4,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 2；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "A person in a light blue puffer jacket is visible"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "The person is holding a blue kite"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "An outdoor background"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "The kite is not held by the person"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "The person is not wearing a light blue puffer jacket"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-08",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "49b1ff40-2c90-4987-95a9-227764fedbd6",
+      "query_text": "A scene with birthday decorations",
+      "candidate_key": "58498b8e-6416-4bc2-b96b-58b42ab9ad9a",
+      "file_id": "e81f235e-322a-4744-af4f-d382603642da",
+      "scene_id": "58498b8e-6416-4bc2-b96b-58b42ab9ad9a",
+      "start_time_seconds": 37.333333,
+      "end_time_seconds": 38.266667,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 4；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "Visible celebration or birthday decorations are present"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "Balloons"
+        },
+        {
+          "condition_id": "optional-2",
+          "kind": "optional",
+          "source_text": "Flowers"
+        },
+        {
+          "condition_id": "optional-3",
+          "kind": "optional",
+          "source_text": "Birthday text"
+        },
+        {
+          "condition_id": "optional-4",
+          "kind": "optional",
+          "source_text": "A cake"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "An ordinary close-up of a person with no celebration cues"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-09",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "1662cc0e-f6b2-4826-a4a7-6869d3cfb602",
+      "query_text": "有人靠在门框边摆姿势",
+      "candidate_key": "fbc727d5-6f25-4365-9c7e-06035054cd2b",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "fbc727d5-6f25-4365-9c7e-06035054cd2b",
+      "start_time_seconds": 264.04,
+      "end_time_seconds": 266.2,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 3；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物位于门口或门框边"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物身体或手臂接触门框并保持摆姿势状态"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物双腿交叉"
+        },
+        {
+          "condition_id": "optional-2",
+          "kind": "optional",
+          "source_text": "室内走廊"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物只是经过门口"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有门框没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-10",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "8f84002e-51e4-4bcb-81e1-4ba15bd9eacb",
+      "query_text": "人物和大型玩偶面对面",
+      "candidate_key": "d0a7011c-568f-4bfb-90bc-d7cb9d4d47d7",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "d0a7011c-568f-4bfb-90bc-d7cb9d4d47d7",
+      "start_time_seconds": 828.44,
+      "end_time_seconds": 856.28,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 4；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "可见体积接近人物的大型玩偶"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物面部或身体朝向玩偶"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物与玩偶距离较近"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通小玩具"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有玩偶没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-11",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "90b6e7cb-30e4-4eb7-a899-f2018dd5fce4",
+      "query_text": "有人坐在电脑桌前",
+      "candidate_key": "55269227-5cb7-4444-a21f-7813e8d6ac31",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "55269227-5cb7-4444-a21f-7813e8d6ac31",
+      "start_time_seconds": 469.4,
+      "end_time_seconds": 472.16,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 3；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物处于坐姿"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物位于电脑或显示器旁的桌前"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "可见键盘或桌面设备"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只有电脑没有人物"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物站在桌前"
+        },
+        {
+          "condition_id": "exclusion-3",
+          "kind": "exclusion",
+          "source_text": "人物远离桌面"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exact_match-12",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "a44608f4-6635-458a-84e1-82492bae1fca",
+      "query_text": "室内有人面对镜头讲话",
+      "candidate_key": "19c3e28f-09d0-48a6-aefe-f9d28e8ff603",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "19c3e28f-09d0-48a6-aefe-f9d28e8ff603",
+      "start_time_seconds": 452.88,
+      "end_time_seconds": 455.84,
+      "proposed_group": "exact_match",
+      "selection_basis": "本地抽样建议：RRF 名次 2；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "室内至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物面部或身体朝向镜头"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "能从口型、声音或连续画面判断人物正在讲话"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "画面带字幕"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "空房间"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有人物背影"
+        },
+        {
+          "condition_id": "exclusion-3",
+          "kind": "exclusion",
+          "source_text": "人物面对镜头但没有讲话"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-01",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "38a8c7e0-fd8a-4af2-a788-f71f88d3a91b",
+      "query_text": "穿白色无袖上衣的人拿着一袋小龙虾",
+      "candidate_key": "ca10a3a6-3658-478f-9d0e-de1a9cd43469",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "ca10a3a6-3658-478f-9d0e-de1a9cd43469",
+      "start_time_seconds": 531.266667,
+      "end_time_seconds": 534.066667,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 23；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见穿白色无袖上衣的人物"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物手中拿着袋子"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "袋中可见小龙虾"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物低头查看或指向食物"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "袋中不是小龙虾"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物没有拿着袋子"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-02",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "1d7d93e2-3eb0-4457-864a-a5d229b8ef60",
+      "query_text": "有人用筷子从分格餐盒里夹食物",
+      "candidate_key": "fd1e47c3-ef4d-4c5d-9494-9db93d7a48a3",
+      "file_id": "3c249a5c-8615-44a0-94f0-f1888a305091",
+      "scene_id": "fd1e47c3-ef4d-4c5d-9494-9db93d7a48a3",
+      "start_time_seconds": 565.266667,
+      "end_time_seconds": 569.633333,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 8；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见人物或人物手部"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "可见筷子和分格餐盒"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物正在从餐盒夹取食物"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "餐盒中可见米饭和肉类"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只有餐盒没有夹取动作"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "使用其他餐具"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-03",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "fb20032e-de72-43ba-ba02-13cdf383b070",
+      "query_text": "有人盘腿坐在蓝色生日布置前比耶",
+      "candidate_key": "959e9e91-2257-4ba4-a22c-92300cc317c6",
+      "file_id": "7788b3d5-d494-4f02-b501-2b46e3a2dd40",
+      "scene_id": "959e9e91-2257-4ba4-a22c-92300cc317c6",
+      "start_time_seconds": 523.966667,
+      "end_time_seconds": 526.266667,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 20；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见人物盘腿坐在地面"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "背景有蓝色气球或花朵等庆祝布置"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物做出 V 字手势"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "背景有音乐播放器样式文字"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物站立"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "没有蓝色庆祝布置"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-04",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "7fd95f21-fc62-4d47-8e61-3e26ca8d3ea5",
+      "query_text": "有人在户外市场把比耶手势伸向镜头",
+      "candidate_key": "854a51e0-4e65-483b-8318-e8de37c27d59",
+      "file_id": "bfc8a9a8-4f0d-4506-972b-0d21c17159a8",
+      "scene_id": "854a51e0-4e65-483b-8318-e8de37c27d59",
+      "start_time_seconds": 5,
+      "end_time_seconds": 5.933333,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 8；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见人物"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "背景具有户外市场或摊位线索"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物把 V 字手势伸向镜头"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "手部靠近镜头形成前景"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通街道但没有市场线索"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物没有比耶"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-05",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "0d8869f5-f8b2-458f-8274-f37f73812c81",
+      "query_text": "穿白衬衫的人在户外拿着手持摄像机",
+      "candidate_key": "5ea18354-3ae0-4bb0-8aac-a4eff8ef1c8d",
+      "file_id": "80ab788e-5690-4d98-8fe7-c85549142bd1",
+      "scene_id": "5ea18354-3ae0-4bb0-8aac-a4eff8ef1c8d",
+      "start_time_seconds": 90.2,
+      "end_time_seconds": 91.033333,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 33；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见穿白色衬衫的人物"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物位于户外"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物手中拿着手持摄像机"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "背景可见汽车或树木"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物只拿手机"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有摄像机没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-06",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "221a2db5-19eb-45a5-8daa-b9657d23a75a",
+      "query_text": "人物和大型玩偶面对面",
+      "candidate_key": "54a23476-7a46-41c2-a77a-3d1cd097a36d",
+      "file_id": "d411dcce-3417-4c66-b4e3-933e5d21d99e",
+      "scene_id": "54a23476-7a46-41c2-a77a-3d1cd097a36d",
+      "start_time_seconds": 436.6,
+      "end_time_seconds": 440.133333,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 15；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "可见体积接近人物的大型玩偶"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物面部或身体朝向玩偶"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物与玩偶距离较近"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通小玩具"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有玩偶没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-07",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "d0f62615-9fe6-4546-8797-7e0b32f3bdcc",
+      "query_text": "黑白花猫站在临水的岩石上",
+      "candidate_key": "e7d02a03-24be-48e7-8b0c-d1493a786163",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "e7d02a03-24be-48e7-8b0c-d1493a786163",
+      "start_time_seconds": 476.266667,
+      "end_time_seconds": 478.1,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 18；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见黑白相间的猫"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "猫站在岩石或石块上"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "背景能看到水面"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "黄昏光线"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "猫站在室内地板上"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有岩石和水没有猫"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-08",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "b2559444-335c-4ab5-b9aa-2918444cb747",
+      "query_text": "舞台上的表演者撑着白色雨伞",
+      "candidate_key": "cb2c25f4-994a-4742-874f-2e861df5df4f",
+      "file_id": "7788b3d5-d494-4f02-b501-2b46e3a2dd40",
+      "scene_id": "cb2c25f4-994a-4742-874f-2e861df5df4f",
+      "start_time_seconds": 830.566667,
+      "end_time_seconds": 834.133333,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 20；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见舞台或演出灯光"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "至少一名表演者手持白色雨伞"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "其他人也拿着雨伞"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "户外下雨打伞"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "雨伞不是白色"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-09",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "b15d35b0-70a7-426d-8702-6506f45b1396",
+      "query_text": "红发人物坐在浴缸里泡澡",
+      "candidate_key": "93b80110-2ae2-4f7f-91dd-0b0e7f184fb0",
+      "file_id": "74dc366b-a75a-48da-ac4b-a003072d6a96",
+      "scene_id": "93b80110-2ae2-4f7f-91dd-0b0e7f184fb0",
+      "start_time_seconds": 123.3,
+      "end_time_seconds": 124.3,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 29；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见红发人物坐在浴缸内"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "背景是浴室或砖墙环境"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "画面带监控录像样式"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物站在浴缸旁"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有浴缸没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-10",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "a9e5ae3a-c156-4c74-ae7b-a629de053058",
+      "query_text": "红发人物在桌前捏蓝色黏土模型",
+      "candidate_key": "131c170b-ec67-4afa-86eb-46ac602bc416",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "131c170b-ec67-4afa-86eb-46ac602bc416",
+      "start_time_seconds": 1333.4,
+      "end_time_seconds": 1334.92,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 23；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见红发人物坐在桌前"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "桌面上有蓝色黏土或软质材料"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物正在捏制或塑形"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "桌面有多种工具"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只是展示完成品"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "没有人物参与制作"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-11",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "6f113adf-eb7f-44b0-9673-49ef160463bb",
+      "query_text": "穿蓝色长袍的人在海边展开白色风筝",
+      "candidate_key": "d757403c-18f7-4023-987b-825f92ce7da6",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "d757403c-18f7-4023-987b-825f92ce7da6",
+      "start_time_seconds": 486.766667,
+      "end_time_seconds": 489.3,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 20；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物穿蓝色长衣或长袍并位于海边"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "地面上有白色风筝框架"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物正在整理并展开风筝"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "光线从白天变暗"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物只是举着已经完成的风筝"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "没有海边背景"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-exclusion_hit-12",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "1db1671c-bd41-4d12-b483-66c3d554b747",
+      "query_text": "穿红衣的人在厨房捏饺子边缘",
+      "candidate_key": "e52e2907-1fd3-4fa1-b5d8-3c9f4613a49d",
+      "file_id": "3c249a5c-8615-44a0-94f0-f1888a305091",
+      "scene_id": "e52e2907-1fd3-4fa1-b5d8-3c9f4613a49d",
+      "start_time_seconds": 494.5,
+      "end_time_seconds": 495.9,
+      "proposed_group": "exclusion_hit",
+      "selection_basis": "本地抽样建议：RRF 名次 14；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物穿红色上衣并位于厨房"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "手中有饺子皮和馅料"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物正在捏合饺子边缘"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "桌上有面粉和馅料"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只是在煮饺子"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只展示包好的饺子"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-01",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "4013ca6f-bcb2-4331-bd44-e000ff627660",
+      "query_text": "穿红外套的人用扫帚清扫摄影棚地面",
+      "candidate_key": "e8d66b4f-696a-4cfc-8f56-984b9d299901",
+      "file_id": "80ab788e-5690-4d98-8fe7-c85549142bd1",
+      "scene_id": "e8d66b4f-696a-4cfc-8f56-984b9d299901",
+      "start_time_seconds": 92.9,
+      "end_time_seconds": 93.666667,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 1 张，场景时长 0.8 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物穿红色外套"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物手持扫帚清扫地面"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "背景可见幕布或摄影设备"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "地面散落纸张"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "户外扫地"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物拿拖把而非扫帚"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-02",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "a2e14410-e0c8-4707-a3bf-7356cab28514",
+      "query_text": "穿白西装的人坐在户外专心写字",
+      "candidate_key": "c9f96b47-2994-4058-945e-0926bb6d526d",
+      "file_id": "e81f235e-322a-4744-af4f-d382603642da",
+      "scene_id": "c9f96b47-2994-4058-945e-0926bb6d526d",
+      "start_time_seconds": 21.066667,
+      "end_time_seconds": 22.266667,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 1 张，场景时长 1.2 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物穿白色西装或白色正式服装"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物坐在户外"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "手中拿笔并做出书写动作"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "背景有建筑栏杆"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物站立签名"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只拿笔没有书写"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-03",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "394a4e91-e320-49f5-8dac-97ef2234fd6c",
+      "query_text": "穿深红运动服的人在百叶窗前跳舞",
+      "candidate_key": "bbd552ec-ecf8-4d56-8db9-7c7cd361bbc2",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "bbd552ec-ecf8-4d56-8db9-7c7cd361bbc2",
+      "start_time_seconds": 856.28,
+      "end_time_seconds": 861.24,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 2 张，场景时长 5.0 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物穿深红色运动套装"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "背景可见百叶窗"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物正在摆动手臂或跳舞"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物面带微笑"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物只是站立摆姿势"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "没有百叶窗背景"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-04",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "e5ab7276-19b6-47fe-971c-5eb9778c3b96",
+      "query_text": "穿彩色衣服的小猫在沙发上和人互动",
+      "candidate_key": "b0ad8764-4cf3-4ae2-8dd6-914615abe9b0",
+      "file_id": "6b19221d-da11-47a2-a1f7-c431b4af03d9",
+      "scene_id": "b0ad8764-4cf3-4ae2-8dd6-914615abe9b0",
+      "start_time_seconds": 186.7,
+      "end_time_seconds": 189.366667,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 2 张，场景时长 2.7 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见穿彩色衣服的小猫"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "猫位于沙发上"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "旁边的人用手逗弄或触碰猫"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "灰色窗帘背景"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "猫没有穿衣服"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有猫没有人物互动"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-05",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "f75406ec-120f-4d78-80db-f1d4aeabb697",
+      "query_text": "穿厨师服的人用勺子喂猫头鹰玩偶",
+      "candidate_key": "6189e1a1-d333-4695-a81b-a3652e9983e2",
+      "file_id": "5bad4a97-e55b-4019-b02e-f4210988705c",
+      "scene_id": "6189e1a1-d333-4695-a81b-a3652e9983e2",
+      "start_time_seconds": 120.9,
+      "end_time_seconds": 123,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 1 张，场景时长 2.1 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物穿着厨师服或厨师风格服装"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "手中有猫头鹰造型玩偶"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物用勺子做出喂食动作"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "厨房背景"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "给真实动物喂食"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只拿玩偶没有勺子"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-06",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "62b895a1-be3c-468c-bba0-434ebed05b5d",
+      "query_text": "男子夜晚站在沙滩上微笑",
+      "candidate_key": "907b9398-17f4-4247-8644-f12201edf18c",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "907b9398-17f4-4247-8644-f12201edf18c",
+      "start_time_seconds": 441.366667,
+      "end_time_seconds": 442.966667,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 1 张，场景时长 1.6 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见一名男性站在沙滩"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "环境处于夜晚或明显昏暗"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物面带微笑"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "远处有点状灯光"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "白天海边场景"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物正在走路而非停留"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-07",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "79393d73-dcf3-44cf-ba69-546e6ac282b9",
+      "query_text": "演唱会后台有人背对镜头操作控制台",
+      "candidate_key": "7a5c9299-5add-4db7-b0be-f1f61d10cb8d",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "7a5c9299-5add-4db7-b0be-f1f61d10cb8d",
+      "start_time_seconds": 565.88,
+      "end_time_seconds": 569.08,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 2 张，场景时长 3.2 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人背对镜头"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物面前有电脑或演出控制设备"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "远处能看到舞台或观众灯光"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物是红发"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通办公室使用电脑"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有控制台没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-08",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "ebce94e6-dd96-43ac-9084-652c8438ada5",
+      "query_text": "海边有人指向远处后转身微笑",
+      "candidate_key": "d9423134-1f2c-4ec0-948e-bb9938e7a483",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "d9423134-1f2c-4ec0-948e-bb9938e7a483",
+      "start_time_seconds": 536.9,
+      "end_time_seconds": 540.633333,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 2 张，场景时长 3.7 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物位于海边"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物先指向海面或远处"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "随后转向镜头并微笑"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物穿白色外套"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物始终背对镜头"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只站着看海没有指向动作"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-09",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "9fe0caa3-f4fd-4759-b455-c6d5d1847624",
+      "query_text": "有人背对镜头站在海边看落日",
+      "candidate_key": "907b9398-17f4-4247-8644-f12201edf18c",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "907b9398-17f4-4247-8644-f12201edf18c",
+      "start_time_seconds": 441.366667,
+      "end_time_seconds": 442.966667,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 1 张，场景时长 1.6 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人背对或侧背镜头"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物站在海边"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "天空或海面呈现日落暖色"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物穿白色羽绒服"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "白天海边行走"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有落日海景没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-10",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "27b201a4-44eb-4918-9e5e-895363b7d3f5",
+      "query_text": "有人端着写有小麦面粉的盘子介绍食材",
+      "candidate_key": "f53e2e77-9a28-460d-b970-81cdfd20bf9d",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "f53e2e77-9a28-460d-b970-81cdfd20bf9d",
+      "start_time_seconds": 768.28,
+      "end_time_seconds": 769.28,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 1 张，场景时长 1.0 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人手持盘子或容器"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "容器上能识别出小麦面粉相关文字"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物正在面向镜头展示或讲解"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物穿红色上衣"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只有面粉包装没有人物"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物没有拿着食材"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-11",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "771cf17e-4e8e-45f7-b077-fa7ab8cdc73d",
+      "query_text": "有人用工具在蓝色黏土上刻出纹路",
+      "candidate_key": "b80e99c2-40a5-4e86-93ce-61d3b97c803e",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "b80e99c2-40a5-4e86-93ce-61d3b97c803e",
+      "start_time_seconds": 1440.56,
+      "end_time_seconds": 1442.48,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 1 张，场景时长 1.9 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "双手正在操作蓝色黏土"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "至少一只手使用细小工具"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "黏土表面正在形成纹路或图案"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "蓝色工作垫"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只用手捏黏土"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "在纸上绘画"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-insufficient_evidence-12",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "27e3e2ce-696e-4ad9-9880-eef13059cff3",
+      "query_text": "有人把锅里的饺子翻动起来",
+      "candidate_key": "a74af2c5-4f77-4a35-b290-9c9a7185f6a1",
+      "file_id": "3c249a5c-8615-44a0-94f0-f1888a305091",
+      "scene_id": "a74af2c5-4f77-4a35-b290-9c9a7185f6a1",
+      "start_time_seconds": 632.866667,
+      "end_time_seconds": 635.8,
+      "proposed_group": "insufficient_evidence",
+      "selection_basis": "本地抽样建议：当前独立索引帧 2 张，场景时长 2.9 秒；需人工确认是否真的证据不足。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见装有饺子的锅"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "有人用筷子或厨具翻动锅内食物"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "水正在沸腾"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只展示装盘后的饺子"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "锅内没有饺子"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-01",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "1efb365b-49c6-4ee3-a10a-e474656c405e",
+      "query_text": "A person eating a boxed meal with chopsticks",
+      "candidate_key": "7d30b2aa-5140-4cc2-a323-aa9ec3808578",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "7d30b2aa-5140-4cc2-a323-aa9ec3808578",
+      "start_time_seconds": 328.466667,
+      "end_time_seconds": 339.9,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 16；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "At least one person is visible"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "Chopsticks are visible"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "A boxed or compartmented meal is visible"
+        },
+        {
+          "condition_id": "must-4",
+          "kind": "must_have",
+          "source_text": "The person is picking up food or eating"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "Rice or dishes are visible in the box"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "Food without a person"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "Chopsticks without a boxed meal"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-02",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "37f2b3af-37c1-4247-80d1-acc5eaa43606",
+      "query_text": "人物旁边挂着衣服",
+      "candidate_key": "2b6b2777-29bf-42d3-a959-e3a66dec84fa",
+      "file_id": "74dc366b-a75a-48da-ac4b-a003072d6a96",
+      "scene_id": "2b6b2777-29bf-42d3-a959-e3a66dec84fa",
+      "start_time_seconds": 35.266667,
+      "end_time_seconds": 59.166667,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 27；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物附近可见悬挂的衣服"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "可见衣架或衣架杆"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只有人物没有衣服"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "衣服穿在人物身上但旁边没有悬挂衣物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-03",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "5821fe80-2f7f-406f-9211-35c04a1efd77",
+      "query_text": "室内有人面对镜头讲话",
+      "candidate_key": "a9c79304-9e0d-4304-8768-269b5fcc32a1",
+      "file_id": "74dc366b-a75a-48da-ac4b-a003072d6a96",
+      "scene_id": "a9c79304-9e0d-4304-8768-269b5fcc32a1",
+      "start_time_seconds": 87.466667,
+      "end_time_seconds": 91.633333,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 20；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "室内至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物面部或身体朝向镜头"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "能从口型、声音或连续画面判断人物正在讲话"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "画面带字幕"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "空房间"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有人物背影"
+        },
+        {
+          "condition_id": "exclusion-3",
+          "kind": "exclusion",
+          "source_text": "人物面对镜头但没有讲话"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-04",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "edb1e971-0a97-4b26-a073-5cce2602e04e",
+      "query_text": "人物戴着造型夸张的眼镜",
+      "candidate_key": "5252ccde-7620-42b0-a25f-f052b40193f0",
+      "file_id": "45d7ab5f-1296-4557-bfb4-b52e750c004d",
+      "scene_id": "5252ccde-7620-42b0-a25f-f052b40193f0",
+      "start_time_seconds": 27.966667,
+      "end_time_seconds": 29.166667,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 26；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物佩戴明显装饰性或造型夸张的眼镜"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "彩色镜框"
+        },
+        {
+          "condition_id": "optional-2",
+          "kind": "optional",
+          "source_text": "舞台环境"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通细框眼镜"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物手拿眼镜但没有佩戴"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-05",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "52bb260d-36f4-4a1a-87e0-fe5b8f27d115",
+      "query_text": "戴针织帽的人蹲着面对大型蓝色鱼玩偶",
+      "candidate_key": "a35181b6-aec8-4d38-b0b0-481538c2a119",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "a35181b6-aec8-4d38-b0b0-481538c2a119",
+      "start_time_seconds": 1311.92,
+      "end_time_seconds": 1313.32,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 27；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见戴针织帽的人物"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物保持下蹲或弯身姿势"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物面对大型蓝色鱼形玩偶"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "冷色舞台或布景"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通小鱼玩具"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物没有朝向玩偶"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-06",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "9d30553e-4c63-43d0-b3e0-a486db3653bb",
+      "query_text": "有人在户外市场对镜头比耶",
+      "candidate_key": "ea599b62-4e1c-4b0a-97f0-3055ba7ba9b0",
+      "file_id": "80ab788e-5690-4d98-8fe7-c85549142bd1",
+      "scene_id": "ea599b62-4e1c-4b0a-97f0-3055ba7ba9b0",
+      "start_time_seconds": 13.5,
+      "end_time_seconds": 17.3,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 28；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "可见户外市场或摊位环境"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物对镜头做出 V 字手势"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "背景可见行人或车辆"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通街道但没有市场线索"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物没有做 V 字手势"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-07",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "ff1f3745-28f5-467a-a8c4-4c924f5e99e8",
+      "query_text": "A person using chopsticks to pick up food from a compartmented lunch box",
+      "candidate_key": "f1610c37-acef-4974-b1b8-d125b72f2572",
+      "file_id": "9c116d16-68af-46cf-a752-3d895c2a41c8",
+      "scene_id": "f1610c37-acef-4974-b1b8-d125b72f2572",
+      "start_time_seconds": 4.033333,
+      "end_time_seconds": 13.233333,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 24；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "A person or the person's hands are visible"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "Chopsticks and a compartmented lunch box are visible"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "The person is picking up food from the box"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "Rice and meat are visible in the box"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "The box is visible without a picking-up action"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "Different utensils are used"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-08",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "6963b780-685a-4625-a214-16c020fa9db3",
+      "query_text": "从车里拍摄正在经过的城市道路",
+      "candidate_key": "b39d3e89-c251-4b03-b829-d117f5b789b3",
+      "file_id": "7788b3d5-d494-4f02-b501-2b46e3a2dd40",
+      "scene_id": "b39d3e89-c251-4b03-b829-d117f5b789b3",
+      "start_time_seconds": 16.2,
+      "end_time_seconds": 33.633333,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 23；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "拍摄视角位于车辆内部或紧邻车辆"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "可见城市道路"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "能从连续画面判断车辆正在移动"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "可见建筑、绿化或护栏"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "停车场静止画面"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有道路但没有行驶证据"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-09",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "eacbfbfe-17fb-4802-a59a-f28d186aebda",
+      "query_text": "红发歌手戴着蓝色眼镜拿橙色麦克风",
+      "candidate_key": "72488558-a499-4dbe-ba2f-ef11a6e7561d",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "72488558-a499-4dbe-ba2f-ef11a6e7561d",
+      "start_time_seconds": 991.24,
+      "end_time_seconds": 992.4,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 13；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见红色或粉红色头发的歌手"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物佩戴蓝色造型眼镜"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物手持橙色麦克风"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "蓝色舞台背景"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "缺少眼镜或麦克风"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "不是舞台表演人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-10",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "11dff31a-c56f-4357-9931-60ef11227229",
+      "query_text": "A person in a white shirt holding a handheld camcorder outdoors",
+      "candidate_key": "9cfee271-1055-4ed8-93aa-2c72dc038704",
+      "file_id": "45d7ab5f-1296-4557-bfb4-b52e750c004d",
+      "scene_id": "9cfee271-1055-4ed8-93aa-2c72dc038704",
+      "start_time_seconds": 0,
+      "end_time_seconds": 5,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 30；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "A person in a white shirt is visible"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "The person is outdoors"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "The person is holding a handheld camcorder"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "Cars or trees are visible in the background"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "The person is only holding a phone"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "A camcorder without a person"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-11",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "28ff3604-27b9-4e93-8176-b77ae245b8b7",
+      "query_text": "A person in a light blue puffer jacket holding a blue kite",
+      "candidate_key": "2adee287-b0dc-4d73-9df5-dca4f2faafa8",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "2adee287-b0dc-4d73-9df5-dca4f2faafa8",
+      "start_time_seconds": 525.56,
+      "end_time_seconds": 526.36,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 34；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "A person in a light blue puffer jacket is visible"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "The person is holding a blue kite"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "An outdoor background"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "The kite is not held by the person"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "The person is not wearing a light blue puffer jacket"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-missing_must_have-12",
+      "source_evaluation_run_id": "86d3cd3a-152e-46a6-887e-d549a0ee8411",
+      "source_candidate_id": "c523e1b8-afbd-44e4-836f-4347b97574c5",
+      "query_text": "粉色头发的人坐在沙发上讲话",
+      "candidate_key": "c19d8294-f166-4624-a1f2-eb5ed7fd8ece",
+      "file_id": "bfc8a9a8-4f0d-4506-972b-0d21c17159a8",
+      "scene_id": "c19d8294-f166-4624-a1f2-eb5ed7fd8ece",
+      "start_time_seconds": 392.066667,
+      "end_time_seconds": 408.766667,
+      "proposed_group": "missing_must_have",
+      "selection_basis": "本地抽样建议：RRF 名次 24；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见粉色头发人物"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物坐在沙发上"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "能从连续画面判断人物正在讲话"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物穿西装外套"
+        },
+        {
+          "condition_id": "optional-2",
+          "kind": "optional",
+          "source_text": "人物有手势动作"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物站立"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物没有讲话"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-01",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "0a21ea70-cc93-46df-bed1-7a33b4ec4e00",
+      "query_text": "有人把橙色小猫抱在怀里",
+      "candidate_key": "8067a095-249d-48ec-a553-09332874fe24",
+      "file_id": "d411dcce-3417-4c66-b4e3-933e5d21d99e",
+      "scene_id": "8067a095-249d-48ec-a553-09332874fe24",
+      "start_time_seconds": 118.266667,
+      "end_time_seconds": 123.466667,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 6；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "可见橙色或橘色小猫"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物将猫抱起或抱在手臂上"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "室内灰色窗帘"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物只是在旁边摸猫"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有猫没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-02",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "02f798b0-e021-4afe-a155-f3fba6619325",
+      "query_text": "有人把小猫举起来亲吻",
+      "candidate_key": "2769138d-d49a-4513-b5d7-4b79a367b97e",
+      "file_id": "d411dcce-3417-4c66-b4e3-933e5d21d99e",
+      "scene_id": "2769138d-d49a-4513-b5d7-4b79a367b97e",
+      "start_time_seconds": 63.7,
+      "end_time_seconds": 88.266667,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 8；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人抱起小猫"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物将面部靠近并亲吻猫"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "室内玻璃隔断背景"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只是抚摸猫"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "猫仍在地面上"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-03",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "f2e8b871-20ed-4a24-a109-a3cbea8651e2",
+      "query_text": "有人坐在床边托着下巴看打开的书",
+      "candidate_key": "2223c844-1f0b-40e1-88ac-38b7f6421a4d",
+      "file_id": "aab3a061-e894-4a74-a0b4-690e2ecaf7c3",
+      "scene_id": "2223c844-1f0b-40e1-88ac-38b7f6421a4d",
+      "start_time_seconds": 271.633333,
+      "end_time_seconds": 290.666667,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 8；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物坐在床上或床边"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "面前有一本打开的书"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物用手托着下巴并看向书"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "人物穿蓝色条纹毛衣"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物使用电脑"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有书没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-04",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "415a8f40-166a-4b9e-93f6-71743afea829",
+      "query_text": "有人在自助点餐屏幕前选择菜品",
+      "candidate_key": "44ab3e2b-d518-46f0-ac34-b636cd8e71af",
+      "file_id": "74dc366b-a75a-48da-ac4b-a003072d6a96",
+      "scene_id": "44ab3e2b-d518-46f0-ac34-b636cd8e71af",
+      "start_time_seconds": 14.533333,
+      "end_time_seconds": 18.033333,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 8；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少一人坐在或站在点餐设备前"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "可见带菜品选项的屏幕"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物用手指向或操作屏幕"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "手中还有平板设备"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "操作普通电脑"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有点餐屏幕没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-05",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "1183f735-3efa-4d71-ab06-a2a2e6103387",
+      "query_text": "昏暗房间里穿蓝毛衣的人举手跳舞",
+      "candidate_key": "cf91f88c-5dad-4495-bece-5fb2191d2ea0",
+      "file_id": "c14b70d2-6934-4b0b-8b98-89a848a11f11",
+      "scene_id": "cf91f88c-5dad-4495-bece-5fb2191d2ea0",
+      "start_time_seconds": 98.033333,
+      "end_time_seconds": 118.8,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 10；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "室内光线昏暗并有明显侧光"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "人物穿蓝色上衣"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物举起手臂并做舞蹈动作"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "墙面出现人物剪影"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "明亮舞台表演"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "人物静止不动"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-06",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "585c3618-d411-4178-9075-852b2c555a29",
+      "query_text": "户外有人对着成排人物旗帜拍照",
+      "candidate_key": "753a38ab-5f28-4df2-b114-d6ff372c4a05",
+      "file_id": "7788b3d5-d494-4f02-b501-2b46e3a2dd40",
+      "scene_id": "753a38ab-5f28-4df2-b114-d6ff372c4a05",
+      "start_time_seconds": 980.766667,
+      "end_time_seconds": 990.7,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 10；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "户外可见成排竖立的旗帜"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "旗帜上印有人物图像"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "至少一人用手机拍摄或观看旗帜"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "草地和树木"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "普通国旗或广告旗"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "没有观众"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-07",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "2d278a15-33f9-489a-93cb-77cd08596fca",
+      "query_text": "戴帽子的人在餐厅用筷子夹面条",
+      "candidate_key": "90932d34-0f1d-4060-9ba3-df7430bc0f9a",
+      "file_id": "24429ab1-b7b6-47f5-b714-4622069b5550",
+      "scene_id": "90932d34-0f1d-4060-9ba3-df7430bc0f9a",
+      "start_time_seconds": 61.066667,
+      "end_time_seconds": 87.266667,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 7；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "人物戴着帽子坐在餐厅"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "桌面有餐食"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "人物使用筷子夹起面条"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "背景有竹子装饰"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "用筷子吃盒饭"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "没有面条"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-08",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "10cee9be-1c79-4f4c-b1cb-0ecd017282e6",
+      "query_text": "女性用紫色化妆刷给穿西装的男子上妆",
+      "candidate_key": "dbb334a2-09fa-4fd6-af5e-5c8490d89795",
+      "file_id": "f9570df4-765f-43e6-9f23-8d451550f54e",
+      "scene_id": "dbb334a2-09fa-4fd6-af5e-5c8490d89795",
+      "start_time_seconds": 28.966667,
+      "end_time_seconds": 39.966667,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 5；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "同时出现一名女性和一名男性"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "男性穿西装或正式外套"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "女性使用紫色化妆刷接触男性面部"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "男性表情惊讶"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物自己化妆"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只整理头发没有化妆刷"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-09",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "e42795cf-ea61-49ff-8dc8-5313d85b9584",
+      "query_text": "夜里有人弯腰系鞋带",
+      "candidate_key": "6d4dfe0d-95ba-4689-9b57-612f7dbc0017",
+      "file_id": "364d2efb-bafb-4482-9116-152202a0e5e8",
+      "scene_id": "6d4dfe0d-95ba-4689-9b57-612f7dbc0017",
+      "start_time_seconds": 374.566667,
+      "end_time_seconds": 382.433333,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 5；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "画面处于夜间或昏暗街道环境"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "至少一人弯腰接触鞋子"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "能看出正在整理或系鞋带"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "地面有灯光倒影"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "人物只是弯腰捡东西"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有鞋子没有人物"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-10",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "f8a7074f-a51b-4406-b8ef-0f22f51e4e60",
+      "query_text": "双手从容器里挤出蓝色液体",
+      "candidate_key": "fc937cf1-9ac0-4072-b560-15bffa627c0b",
+      "file_id": "bafb4548-fe94-4e7d-949d-35b41c78282b",
+      "scene_id": "fc937cf1-9ac0-4072-b560-15bffa627c0b",
+      "start_time_seconds": 1178.48,
+      "end_time_seconds": 1180.44,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 7；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "可见双手操作容器"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "容器中有蓝色液体或膏状物"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "蓝色内容物正从开口被挤出"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "使用工具剪开小口"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只是搅拌蓝色液体"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "没有液体流出"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-11",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "9a523e8c-4296-42b7-875e-fc0a161cb53b",
+      "query_text": "两个男歌手在同一舞台上合唱",
+      "candidate_key": "82706c13-5aeb-4186-bb95-90b5973f6491",
+      "file_id": "bfc8a9a8-4f0d-4506-972b-0d21c17159a8",
+      "scene_id": "82706c13-5aeb-4186-bb95-90b5973f6491",
+      "start_time_seconds": 138.566667,
+      "end_time_seconds": 161.133333,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 6；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "舞台上同时出现两名男性表演者"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "两人都在使用麦克风或明显唱歌"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "能看出共同表演"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "背景有乐器和灯光"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只有一名歌手"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "两人只是站着没有演唱"
+        }
+      ]
+    },
+    {
+      "proposal_id": "phase-f-partial_relevance-12",
+      "source_evaluation_run_id": "1965dbe7-fb53-4f05-9366-da42aad167af",
+      "source_candidate_id": "42ce14f1-9993-4914-bb66-1eaf52e60266",
+      "query_text": "两个人并排弹电子琴",
+      "candidate_key": "90f743e3-df67-45cd-85b0-2006e13ef752",
+      "file_id": "7e292022-fc26-4bb5-a1be-f2b58ab6e640",
+      "scene_id": "90f743e3-df67-45cd-85b0-2006e13ef752",
+      "start_time_seconds": 311.266667,
+      "end_time_seconds": 327.966667,
+      "proposed_group": "partial_relevance",
+      "selection_basis": "本地抽样建议：RRF 名次 9；组别仅为候选分层，需人工播放后确认。",
+      "conditions": [
+        {
+          "condition_id": "must-1",
+          "kind": "must_have",
+          "source_text": "至少两个人同时出现"
+        },
+        {
+          "condition_id": "must-2",
+          "kind": "must_have",
+          "source_text": "两人位于电子琴或键盘乐器前"
+        },
+        {
+          "condition_id": "must-3",
+          "kind": "must_have",
+          "source_text": "能看出正在共同演奏"
+        },
+        {
+          "condition_id": "optional-1",
+          "kind": "optional",
+          "source_text": "室内木质背景"
+        },
+        {
+          "condition_id": "exclusion-1",
+          "kind": "exclusion",
+          "source_text": "只有一人弹琴"
+        },
+        {
+          "condition_id": "exclusion-2",
+          "kind": "exclusion",
+          "source_text": "只有钢琴或电子琴没有人物"
+        }
+      ]
+    }
+  ]
+}

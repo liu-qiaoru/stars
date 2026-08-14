@@ -1,6 +1,6 @@
-import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ShadowRerankPanel } from '../../../../components/shadow-rerank-panel'
+import { EvaluationBreadcrumbs } from '../../../../components/evaluation-breadcrumbs'
 import { createApiClient } from '../../../../lib/api-client'
 
 export const dynamic = 'force-dynamic'
@@ -21,23 +21,13 @@ export default async function EvaluationRunDetailPage({
   }
   return (
     <section className="space-y-6">
-      <nav aria-label="面包屑" className="flex flex-wrap items-center gap-2 text-sm">
-        <Link
-          className="text-blue-700 underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-blue-600"
-          href="/evaluation"
-        >
-          评测主页
-        </Link>
-        <span aria-hidden="true">/</span>
-        <Link
-          className="text-blue-700 underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-blue-600"
-          href="/evaluation/reports"
-        >
-          历史报告
-        </Link>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">运行详情</span>
-      </nav>
+      <EvaluationBreadcrumbs
+        items={[
+          { label: '评测主页', href: '/evaluation' },
+          { label: '历史报告', href: '/evaluation/reports' },
+          { label: '运行详情' },
+        ]}
+      />
       <header>
         <p className="eyebrow">Evaluation 运行详情</p>
         <h1 className="page-title">运行 {run.id}</h1>

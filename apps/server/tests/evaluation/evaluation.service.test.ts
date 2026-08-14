@@ -32,7 +32,7 @@ describe('Phase 6 evaluation runtime', () => {
     expect(requiresCandidateJudgment('discovery', null, 21)).toBe(false)
   })
 
-  test('PGlite migration creates baseline and Phase E evaluation tables', async () => {
+  test('PGlite migration creates baseline, Phase E and Phase F evaluation tables', async () => {
     const rows = await context.client.query<{ tablename: string }>(
       "select tablename from pg_tables where schemaname='public' and tablename like 'evaluation_%'",
     )
@@ -47,6 +47,12 @@ describe('Phase 6 evaluation runtime', () => {
       'evaluation_shadow_runs',
       'evaluation_shadow_usage_reconciliations',
       'evaluation_versions',
+      'evaluation_vlm_blind_cases',
+      'evaluation_vlm_blind_conditions',
+      'evaluation_vlm_blind_datasets',
+      'evaluation_vlm_blind_fake_results',
+      'evaluation_vlm_blind_fake_runs',
+      'evaluation_vlm_blind_labeling_sessions',
     ])
   })
 

@@ -506,6 +506,165 @@ export interface AgentSettingsResponse {
   persistence: 'process'
 }
 
+export type VlmBlindGroup =
+  | 'exact_match'
+  | 'missing_must_have'
+  | 'exclusion_hit'
+  | 'partial_relevance'
+  | 'insufficient_evidence'
+
+export interface VlmBlindCandidateReviewPacket {
+  schema_version: 'phase-f-vlm-candidate-review-v1'
+  proposals: Array<{
+    proposal_id: string
+    source_evaluation_run_id: string
+    source_candidate_id: string
+    query_text: string
+    candidate_key: string
+    file_id: string
+    scene_id: string
+    start_time_seconds: number
+    end_time_seconds: number
+    proposed_group: VlmBlindGroup
+    selection_basis: string
+    conditions: Array<{
+      condition_id: string
+      kind: 'must_have' | 'optional' | 'exclusion'
+      source_text: string
+    }>
+  }>
+}
+
+export interface VlmBlindDataset {
+  id: string
+  name: string
+  schema_version: string
+  status: 'candidate_review' | 'labeling' | 'frozen'
+  proposal_fingerprint: string
+  frozen_fingerprint: string | null
+  summary: {
+    pending: number
+    accepted: number
+    rejected: number
+    historical_rejected: number
+    historical_accepted: number
+  }
+  cases: Array<{
+    id: string
+    replaces_case_id: string | null
+    is_active: boolean
+    proposal_id: string
+    source_evaluation_run_id: string
+    source_candidate_id: string
+    query_text: string
+    candidate_key: string
+    file_id: string
+    scene_id: string
+    start_time_seconds: number
+    end_time_seconds: number
+    proposed_group: VlmBlindGroup
+    reviewed_group: VlmBlindGroup | null
+    review_status: 'pending' | 'accepted' | 'rejected'
+    selection_basis: string
+    review_notes: string | null
+    conditions: Array<{
+      condition_id: string
+      kind: 'must_have' | 'optional' | 'exclusion'
+      source_text: string
+    }>
+    human_labels: Array<{ condition_id: string; verdict: 'yes' | 'no' | 'uncertain' }>
+  }>
+}
+
+export type VlmBlindLabelStage = 'first' | 'second' | 'final'
+export type VlmBlindVerdict = 'yes' | 'no' | 'uncertain'
+export interface VlmBlindLabelingState {
+  dataset_id: string
+  candidate_status: 'frozen'
+  session_id: string | null
+  labels_status:
+    | 'evidence_pending'
+    | 'evidence_preparing'
+    | 'evidence_failed'
+    | 'first_pass'
+    | 'second_pass'
+    | 'adjudication'
+    | 'ready_to_freeze'
+    | 'labels_frozen'
+  labels_fingerprint: string | null
+  labels_frozen_at: string | null
+  evidence_summary: {
+    total: number
+    missing: number
+    queued: number
+    running: number
+    succeeded: number
+    failed: number
+  }
+  label_progress: {
+    total: number
+    first: number
+    second: number
+    adjudication_required: number
+    final: number
+    resolved: number
+  }
+  cases: Array<{
+    id: string
+    proposal_id: string
+    source_evaluation_run_id: string
+    source_candidate_id: string
+    query_text: string
+    candidate_key: string
+    file_id: string
+    scene_id: string
+    start_time_seconds: number
+    end_time_seconds: number
+    evidence: {
+      id: string
+      status: CandidateEvidenceStatus
+      frame_count: number | null
+      error: { code: string; message: string | null } | null
+    } | null
+    conditions: Array<{
+      id: string
+      condition_id: string
+      kind: 'must_have' | 'optional' | 'exclusion'
+      source_text: string
+      first: VlmBlindVerdict | null
+      second: VlmBlindVerdict | null
+      final: VlmBlindVerdict | null
+      needs_adjudication: boolean
+      resolved: 'yes' | 'no' | null
+    }>
+  }>
+  fake_report: {
+    id: string
+    status: 'running' | 'succeeded' | 'completed_with_errors'
+    provider: 'fake'
+    protocol_version: string
+    case_count: number
+    succeeded_count: number
+    failed_count: number
+    not_applicable_count: number
+    external_call_count: 0
+    metrics: {
+      condition_total: number
+      condition_correct: number
+      condition_accuracy: number | null
+      case_total: number
+      case_status_correct: number
+      case_status_accuracy: number | null
+    } | null
+    results: Array<{
+      case_id: string
+      status: string
+      output: unknown
+      error: unknown
+    }>
+  } | null
+}
+
 export type CandidateEvidenceStatus =
   | 'queued'
   | 'running'
@@ -702,6 +861,77 @@ export function createApiClient(options: ApiClientOptions = {}) {
         },
         { emptySuccessAsNull: true },
       ),
+    listVlmBlindDatasets: () =>
+      request<
+        Array<{
+          id: string
+          name: string
+          status: string
+          proposal_fingerprint: string
+          created_at: string
+        }>
+      >('/evaluation/vlm-blind/datasets', { method: 'GET' }),
+    getVlmBlindDataset: (id: string) =>
+      request<VlmBlindDataset>(`/evaluation/vlm-blind/datasets/${id}`, { method: 'GET' }),
+    importVlmBlindCandidateReviewPacket: (name: string, packet: VlmBlindCandidateReviewPacket) =>
+      request<VlmBlindDataset>('/evaluation/vlm-blind/datasets', {
+        method: 'POST',
+        body: JSON.stringify({ name, packet }),
+      }),
+    reviewVlmBlindCandidate: (
+      datasetId: string,
+      caseId: string,
+      input:
+        | { decision: 'accepted'; reviewed_group: VlmBlindGroup; notes?: string }
+        | { decision: 'rejected'; notes?: string },
+    ) =>
+      request<VlmBlindDataset>(
+        `/evaluation/vlm-blind/datasets/${datasetId}/cases/${caseId}/review`,
+        { method: 'POST', body: JSON.stringify(input) },
+      ),
+    generateVlmBlindCandidateReplacements: (
+      datasetId: string,
+      input: { source_evaluation_run_id?: string } = {},
+    ) =>
+      request<VlmBlindDataset>(`/evaluation/vlm-blind/datasets/${datasetId}/replacements`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    rebalanceVlmBlindCandidateGroups: (datasetId: string) =>
+      request<VlmBlindDataset>(`/evaluation/vlm-blind/datasets/${datasetId}/rebalance`, {
+        method: 'POST',
+      }),
+    freezeVlmBlindCandidateReview: (datasetId: string) =>
+      request<VlmBlindDataset>(`/evaluation/vlm-blind/datasets/${datasetId}/freeze`, {
+        method: 'POST',
+      }),
+    getVlmBlindLabeling: (datasetId: string) =>
+      request<VlmBlindLabelingState>(`/evaluation/vlm-blind/datasets/${datasetId}/labeling`, {
+        method: 'GET',
+      }),
+    prepareVlmBlindEvidence: (datasetId: string) =>
+      request<VlmBlindLabelingState>(`/evaluation/vlm-blind/datasets/${datasetId}/evidence`, {
+        method: 'POST',
+      }),
+    saveVlmBlindConditionLabel: (
+      datasetId: string,
+      caseId: string,
+      conditionId: string,
+      stage: VlmBlindLabelStage,
+      input: { verdict: VlmBlindVerdict; notes?: string },
+    ) =>
+      request<VlmBlindLabelingState>(
+        `/evaluation/vlm-blind/datasets/${datasetId}/cases/${caseId}/conditions/${conditionId}/labels/${stage}`,
+        { method: 'POST', body: JSON.stringify(input) },
+      ),
+    freezeVlmBlindLabels: (datasetId: string) =>
+      request<VlmBlindLabelingState>(`/evaluation/vlm-blind/datasets/${datasetId}/labels/freeze`, {
+        method: 'POST',
+      }),
+    runVlmBlindFake: (datasetId: string) =>
+      request<VlmBlindLabelingState>(`/evaluation/vlm-blind/datasets/${datasetId}/fake-run`, {
+        method: 'POST',
+      }),
     getMedia: (id: string) =>
       request<MediaDetail>(`/media/${id}?include_assets=true&assets_limit=50&assets_offset=0`, {
         method: 'GET',

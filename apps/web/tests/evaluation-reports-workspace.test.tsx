@@ -80,12 +80,25 @@ describe('evaluation reports workspace', () => {
     )
 
     render(<EvaluationReportsWorkspace initialRuns={initialRuns} total={1} />)
+    const breadcrumbs = screen.getByRole('navigation', { name: '面包屑' })
+    expect(breadcrumbs).toHaveTextContent('评测主页')
+    expect(breadcrumbs).toHaveTextContent('历史报告')
     fireEvent.click(screen.getByRole('button', { name: '查看报告' }))
 
     expect((await screen.findAllByText('有人在草地上放风筝')).length).toBeGreaterThan(0)
     expect(screen.getByRole('cell', { name: '60.0%' })).toBeInTheDocument()
     expect(screen.getByRole('cell', { name: '90.0%' })).toBeInTheDocument()
     expect(screen.getByText('4 → 1')).toBeInTheDocument()
+    const video = screen.getByLabelText('播放候选视频片段：有人在草地上放风筝')
+    expect(video.tagName).toBe('VIDEO')
+    expect(video).toHaveAttribute(
+      'src',
+      expect.stringContaining('/media/11111111-1111-4111-8111-111111111111/content#t=3,9'),
+    )
+    expect(screen.getByRole('link', { name: '打开候选媒体详情' })).toHaveAttribute(
+      'href',
+      '/media/11111111-1111-4111-8111-111111111111',
+    )
     expect(await screen.findByText(/尚未运行；历史页面不会自动调用 Provider/)).toBeInTheDocument()
   })
 })

@@ -315,6 +315,73 @@ pending attempt 可在 Server 重启后继续；已 dispatched 但没有确认�
 任一已外发 attempt 缺用量时停止，汇总计量保持 null。用户重新授权前不会外发查询或图像，
 也不执行 Phase F VLM 审核。
 
+### Phase F 候选审核与 VLM 协议准备
+
+Phase F 在真实 VLM 之前增加独立的人工候选审核门。本地抽样器只从一次完整
+Evaluation 快照读取查询、条件、候选 UUID、场景时间与索引帧数，确定性生成
+5 组各 12 对的建议包。候选审核发现查询语义陈旧时，系统会先建立一份新的冻结
+Evaluation，再只用该 run 中的新查询替换待审核案例；不能把旧查询去重或改写同义词后
+冒充新查询。当前批次保留 30 个已审核案例，并用 30 条全新查询分别替换 30 个 pending
+案例；后续拒绝文本淘汰与配额再平衡继续保持至少 50 条唯一查询、每条查询最多出现两次。
+分组依据仍只是名次、时长与帧数的抽样启发，不是人工真值。候选审核进行中需要调整
+多样性时，只允许替换 `pending` 案例，已接受或拒绝的人工事实保持只读。新旧查询文本
+重合、新 run 查询数不足或无法让每个 pending 案例使用不同新查询时必须整体失败。
+
+用户完成一轮审核后，被拒案例不会被改回 `pending` 或覆盖候选身份。人工 `rejected` 表示
+查询文本不适合进入盲测：该文本成为数据集级永久排除事实，所有仍使用它的 active 叶子都要
+退出，而不只是用户点击拒绝的那一个视频。Server 为每个退出叶子追加新案例行，并用
+`replaces_case_id` 指向前代；因此旧 rejected、accepted 或 pending 行都保留为历史审计。
+替代只能来自数据集已有冻结 Evaluation runs 中未拒绝、未使用的查询—候选，同时维持每查询
+最多两对和至少 50 个唯一查询；任何一条找不到合法替代都会使整个事务回滚。
+若旧 runs 的未拒绝查询不足，系统不能静默降低多样性门槛。维护者先把用户提供的新原文建立为
+独立冻结 Evaluation，并完成本地召回；替代请求再显式传入该 run UUID。Service 会验证 run 已
+完整到达 `ready_for_labeling | labeled | reported`，随后只扩展冻结候选读取范围，不自动扫描其他
+Evaluation，也不在替代事务中触发 Search 或 Provider。
+
+候选全部接受后，人工改组可能使五组不再各有 12 条。配额再平衡在锁定 dataset 与案例行后，
+把超额组中的 accepted 叶子作为只读父记录，从父记录同一冻结 run、同一 query 的未使用候选中
+寻找能补足缺额组的后继。匹配必须一次覆盖全部缺额，否则不写任何行；成功后页面同时显示
+当前 pending/accepted 与历史 accepted/rejected，避免把保留的人工审核误认为被覆盖。该过程只读
+PostgreSQL 冻结候选，不调用 Search、Provider 或 Qdrant；若 active 叶子仍使用历史拒绝文本，
+必须先完成查询丢弃替代，不能通过配额再平衡把它带回盲测池。
+
+PostgreSQL 将数据拆成 `evaluation_vlm_blind_datasets`、`evaluation_vlm_blind_cases` 和
+`evaluation_vlm_blind_conditions`：批次表保存数量与指纹，案例表保存查询—候选快照以及
+用户的接受/拒绝/改组，条件表预留一审、二审和最终 `yes/no/uncertain`。仅当
+60 对全部通过候选审核后，后续步骤才能使用现有 `build_candidate_evidence` Job 构建
+`all_indexed_frames_v1`；被拒绝的建议不抽帧。
+建议包指纹在 PostgreSQL 中具有唯一索引；并发导入由数据库选择唯一胜者，其他请求读取
+同一批次，因此双击或多个 Server 不会生成两套 60 对数据。
+
+候选审核的最后一步是冻结，而不是直接调用模型。Server 在一个 PostgreSQL 事务中重新锁定
+批次与全部案例，按后继关系找出 60 个有效叶子，再核对全部 accepted、五组各 12、候选唯一、
+查询多样性、历史拒绝文本排除和条件完整性。只有全部成立才把规范化快照计算为 SHA-256
+指纹并写入 `status=frozen`；任何一项不成立都整体回滚并返回冲突错误。重复冻结返回同一指纹，
+冻结后的审核与替代入口保持关闭。该状态只说明人工候选池已经不可变，不代表已经构建证据或
+执行 VLM；真实模型运行仍需后续独立授权与实现。
+
+VLM 协议的 TypeScript/Zod Schema 固定 `qwen3.7-plus`、用户完整原文、Server 分配的
+条件 ID 和 1～12 张独立索引帧。Server 严格对照候选、条件和帧 ID，然后用固定规则
+派生状态。当前只有可注入 fake Provider 与测试，没有真实 HTTP Provider 适配器或运行
+入口，因此打开页面、导入批次和审核候选都不会外发图片。
+
+候选冻结后的人工条件盲标使用独立 `evaluation_vlm_blind_labeling_sessions`，候选 dataset 继续
+保持 `frozen`。Web 明确请求证据准备后，NestJS Server 逐条复用冻结 Evaluation candidate 身份，
+由现有 CandidateEvidenceService 创建 `build_candidate_evidence`；Python Worker 异步读取当前
+场景的 1～12 张已索引帧并发布 `all_indexed_frames_v1`。这条链路只重新物化既有帧时间点，不
+调用 Search、不访问外部 Provider、不写 Qdrant。
+
+证据全部成功后，Server 才开放 `first → second → final` 人工阶段。复核开始后锁定一审；final
+只处理两轮不一致或含 `uncertain` 的条件。两轮一致的 `yes/no` 与人工 final 共同形成 resolved
+verdict，冻结时写入独立标签指纹，候选指纹不变。会话行同时承担保存与冻结的事务锁，避免并发
+保存落在标签指纹之后。
+
+标签冻结后可运行一次 `evaluation_vlm_blind_fake_runs` 本地协议演练。Server 校验 bundle manifest、
+每帧 SHA-256 和相对路径边界，再只在内存组装 Base64；当前依赖图唯一注册
+`FakeVlmReviewProvider`，它没有 URL、凭证或 HTTP 客户端，真实调用恒为 0。持久化结果不含图片、
+路径、Caption 或转录。该演练只验证请求/输出 Schema、固定状态派生、失败记录和指标报告，不能
+作为真实 `qwen3.7-plus` 能力结论，也不进入 Phase G。
+
 NestJS AgentModule 组织：
 
 ```text

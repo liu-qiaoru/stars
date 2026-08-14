@@ -10,6 +10,17 @@
 
 ## 当前进度
 
+- Agent 接入后续实施以
+  `docs/superpowers/plans/2026-08-05-agent-integration-plan.md` 为单一执行方案；顺序为协议冻结
+  → Agent 协议、数据库与逐步持久化 Loop → RightAPI `qwen3.7-plus` AgentIntent Runner
+  → Web 与安全导出闭环 → 帧证据构建器
+  → `qwen3-vl-rerank` 影子模式
+  → 报告指标 → Top-3 VLM 未见盲测 → 显式小流量接入。
+- 2026-08-12 决策：AgentIntent 与 Top-3 VLM 条件复核都使用 RightAPI `qwen3.7-plus`，
+  但保持独立 Runner、Tool Schema 和文本/视觉授权；Agent V1 不接入 DeepSeek。单条 AgentIntent
+  强制 Tool Call smoke 已返回 HTTP 200 且结构正确，正式质量仍以歧义与安全默认盲测为准。
+- 当前 Agent 阶段：从冻结方案 Phase A 开始，只实施 Agent 协议、数据库、租约、恢复状态机和
+  Phase A API；Phase A 验收并经用户确认后，才能进入 Phase B 的真实 Provider 接入。
 - 当前阶段：视频检索重建 Phase 9A-C2 已完成；两个 Qwen 云模型均未达到生产多帧复核
   要求，Phase 9B～9D 继续跳过。
 - 最近更新：2026-08-02，30 条新盲测中 Qwen3-VL-Plus 多数票答对 16 条，Flash 答对
@@ -33,7 +44,7 @@
 - [x] 实现带 `lease_version` 隔离令牌的条件领取、过期接管和迟到结果拒绝。
 - [x] 实现固定状态迁移、等待到期、活动超时、崩溃恢复与 `outcome_unknown` 显式重试边界。
 - [x] 实现 `GET /agent/capabilities`、`POST /resume`、`POST /cancel` 和
-  `POST /retry-unknown`。
+      `POST /retry-unknown`。
 - [x] 同步 Agent 架构、API 契约和数据库迁移说明。
 - [x] 运行 Phase A 测试、空库迁移验证、完整检查与双轴 Review。
 
@@ -59,14 +70,14 @@ Review：
   精确外发数据、次数和最坏费用并等待用户授权。
 
 - [x] 新增独立、可注入的 Qwen AgentIntent Runner，固定 `qwen3.7-plus`、非思考模式和
-  唯一强制 `extract_agent_intent` Tool Call。
+      唯一强制 `extract_agent_intent` Tool Call。
 - [x] 严格校验 HTTP/响应模型/`stop_reason`/唯一工具名/Zod Schema/长度/原文连续子串，
-  只允许 NFC、CRLF→LF 和 `source_text` 两端空白归一化。
+      只允许 NFC、CRLF→LF 和 `source_text` 两端空白归一化。
 - [x] 由 Server 本地解析素材库 UUID 并限制媒体/素材库范围；不存在、重名或越权时明确失败。
 - [x] 固定使用完整原文、`query_expansion_mode=original` 和 `ranking_mode=rrf` 搜索一次，
-  并在同一短事务中冻结候选身份、文件 generation、场景边界、排名和召回证据。
+      并在同一短事务中冻结候选身份、文件 generation、场景边界、排名和召回证据。
 - [x] Provider 调用前持久化 `dispatched`、输入指纹和 `step_attempt_id`；不明结果进入
-  `outcome_unknown`，只有显式 `/retry-unknown` 才生成新尝试。
+      `outcome_unknown`，只有显式 `/retry-unknown` 才生成新尝试。
 - [x] 同步架构、API、环境变量和真实数据库迁移审计，并完成定向/全量验证与双轴 Review。
 
 Review：
@@ -167,19 +178,19 @@ Review：
   Standards/Spec 双轴 Review。
 
 - [x] 冻结完整 Top-20/唯一 Top-10 请求响应 Schema，拒绝非法 index、重复、非有限
-  score 和不完整输出。
+      score 和不完整输出。
 - [x] 新增规范化 shadow run/attempt/ranking 事实、冻结 `search_scope` 和增量迁移。
 - [x] 实现候选/证据身份与 SHA-256 校验、单请求调度、严格 Provider 输出校验、
-  幂等并发与 dispatched/unknown 重启恢复边界。
+      幂等并发与 dispatched/unknown 重启恢复边界。
 - [x] 保存/展示 RRF 与影子名次及指标、模型协议、token、请求字节、耗时、
-  费用、Provider request ID、三类指纹、实际样本数和结构化错误。
+      费用、Provider request ID、三类指纹、实际样本数和结构化错误。
 - [x] Web 覆盖未运行、运行中、成功、部分失败、失败与不适用；实现页面隐藏
-  暂停轮询、恢复立即刷新、终态停止和卸载取消。
+      暂停轮询、恢复立即刷新、终态停止和卸载取消。
 - [x] 审计 `apps/web/app` 全部用户可访问页面，补齐 Evaluation 主页、运行详情、
-  报告和历史 Phase 9 页的可见入口/返回路径及 Web 完整性测试。
+      报告和历史 Phase 9 页的可见入口/返回路径及 Web 完整性测试。
 - [x] 迁移前备份 PostgreSQL，迁移后核对媒体数据和三个 Qdrant Collection。
 - [x] 完成定向/全量验证、lint、format、`git diff --check` 和双轴复审后只提交
-  Phase E 文件。
+      Phase E 文件。
 
 Review：
 
@@ -244,6 +255,162 @@ Review：
   nDCG@10 从 0.579 提升到 0.710。历史累计恰好 2 次外发，临时 Server 已停止；未进入 VLM
   Review，未改变 Search/Agent 排序，未写 Qdrant。
 
+## Agent V1 Phase F：VLM 人工盲测准备
+
+- Start：2026-08-13。本次只准备候选审核数据、共享 Schema、Server 本地数据集 API、
+  fake Provider 和测试；不实现真实 VLM Provider，不调用 `qwen3.7-plus`，不进入
+  Top-3 产品模拟或 Phase G。
+- [x] 以当前索引重跑既有 50 条冻结查询，产生不受旧 generation 污染的 Evaluation 快照。
+- [x] 确定性生成 60 对待审核建议，五组各 12 对；抽样依据明确标注为建议，
+      不冒充人工真值。首次多样性复核调整为覆盖全部 50 条旧冻结查询、每条最多 2 对；
+      用户随后明确要求查询语义本身也必须是新的，不能只对旧查询去重。
+- [x] 实现可播放视频、对照原子条件、接受/拒绝/改组的候选审核页，并建立可见入口与面包屑。
+- [x] 新增规范化批次/案例/条件表与增量 `0009` 迁移；`0010` 为建议包指纹增加唯一索引，
+      并发或重复导入只产生一个批次，候选审核与条件级人工标签分开。
+- [x] 冻结 `qwen3.7-plus` 请求/输出 Schema，严格拒绝条件和证据帧 ID 缺失、重复、改写或发明。
+- [x] 实现本地 fake Provider 和 Server 固定状态派生规则，fake 记录请求但外部调用计数恒为 0。
+- [x] 用户逐条审核 60 对候选；拒绝文本全部永久退出有效池，最终候选通过完整性门并冻结为
+      只读快照。本阶段仍未进入条件级人工盲标、证据构建或真实 VLM 调用。
+
+Review（候选审核准备里程碑）：
+
+- Result：候选审核批次已保存并冻结到 PostgreSQL。首次创建时为待审核 60、已接受 0、
+  已拒绝 0；最终为有效 accepted 60、pending/rejected 0，五组各 12，并保留全部替代历史。
+  Web 明确显示“真实 VLM 调用：0”“尚未执行 VLM 审核”和只读冻结状态。后续若进入条件级
+  人工盲标与 `all_indexed_frames_v1` 证据构建，应作为独立步骤继续，不能把候选冻结误认为
+  已经执行模型审核。
+- Notes：迁移前备份为 `/private/tmp/stars-phase-f-pre-migration-20260813.dump`；迁移前后 PostgreSQL
+  媒体文件 35、Asset 7,940、Vector Ref 7,564 不变，Qdrant 三个 Collection Point 仍为
+  8 / 5,629 / 1,927。新候选 Evaluation run 为 `86d3cd3a-152e-46a6-887e-d549a0ee8411`。
+  生成、导入与页面验收只读本地媒体和 Qdrant，真实 Provider 调用、图片外发、费用和 Qdrant 写入均为 0。
+  `0010` 前另备份 `/private/tmp/stars-phase-f-identity-pre-migration-20260813.dump`；迁移后仍为
+  1 个候选批次、60 对案例和 364 条条件，媒体与 Qdrant 数量不变。
+  2026-08-13 用户审核至接受 12、拒绝 18、待审核 30 时发现跨组查询重复偏多；调整前备份
+  `/private/tmp/stars-phase-f-query-diversity-pre-refresh-20260813.dump`，只替换 30 个 pending
+  案例。调整后 60 个候选身份仍全部唯一，覆盖 50 条唯一查询且每条最多 2 对，条件共 363 条；
+  已审核 30 对的整行 SHA-256 校验和前后一致，Qdrant 点数仍为 8 / 5,629 / 1,927。
+  这次调整随后被用户指出仍复用了旧 Evaluation 文本，因此只保留为历史时点，不能代表
+  当前候选包。
+  2026-08-13 根据用户澄清新建 30 条视觉自然发现查询；它们彼此唯一，与 PostgreSQL
+  既有 Evaluation 文本精确重合数为 0。修改前备份
+  `/private/tmp/stars-phase-f-fresh-queries-pre-refresh-20260813.dump`，新 set/version/run 分别为
+  `1ccae129-dc61-44a9-a0f8-ae5a26b2d965`、`8d0e7145-159f-4da9-bb05-86f6f3f33366`、
+  `1965dbe7-fb53-4f05-9366-da42aad167af`。run 对 30 条查询完整召回 798 个主池候选并进入
+  `ready_for_labeling`；随后只替换 30 个 pending 案例，接受 12/拒绝 18 的旧人工事实不动。
+  当前 60 个候选全部唯一，覆盖 55 条唯一查询；30 个 pending 分别使用 30 条不同的新查询。
+  三个 Qdrant Collection 仍为 8 / 5,629 / 1,927，真实 VLM 调用、图片外发和费用仍为 0。
+  2026-08-13 用户完成首轮 60 对审核：接受 38、拒绝 22、待审核 0。增量 `0011` 前备份
+  `/private/tmp/stars-phase-f-replacements-pre-migration-20260813.dump`；迁移只新增
+  `replaces_case_id` 自关联和唯一索引。随后从各原查询的同一冻结 run 中为 22 条拒绝案例
+  各生成一条未使用候选，旧拒绝审计保持只读。当前有效候选为接受 38、待审核替代 22、
+  拒绝 0，另有历史拒绝 22；总审计行 82、有效叶子仍恰好 60。未重新搜索、未调用真实
+  VLM、未外发图片、未写 Qdrant。
+  第二轮替代审核完成后为接受 53、拒绝 7、待审核 0；第三轮生成前备份
+  `/private/tmp/stars-phase-f-replacements-round3-pre-20260813.dump`。7 条拒绝叶子均成功追加
+  `replacement-2` 后继，且保持同一冻结查询/run。当前有效候选仍为 60 个唯一身份：接受 53、
+  待审核 7、拒绝 0；历史拒绝累计 29，总审计行 89。Qdrant 点数仍为 8 / 5,629 / 1,927，
+  未重搜、未调用真实 VLM、未外发图片。
+  2026-08-14 用户完成第三轮审核后，60 个有效候选均 accepted，但人工组别为
+  10 / 28 / 9 / 7 / 6，未满足五组各 12 条。再平衡前备份
+  `/private/tmp/stars-phase-f-rebalance-pre-20260814.dump`；事务化匹配保留 16 条超额组 accepted
+  历史，并追加 16 条同 run、同 query 的未使用 pending 后继。当前总审计行 105、有效候选仍为
+  60 个唯一身份，按“accepted 的人工组别 + pending 的目标组别”统计五组均为 12；状态为
+  accepted 44、pending 16、rejected 0、历史 rejected 29、历史 accepted 16。真实 VLM 调用、
+  图片外发、费用和 Qdrant 写入仍为 0。
+  用户随后澄清：人工拒绝的是查询文本，而不只是单个视频。修复前只读核对发现 18 个历史拒绝
+  文本仍关联 23 个有效叶子（accepted 15、pending 8）。备份
+  `/private/tmp/stars-phase-f-discard-rejected-queries-pre-20260814.dump` 后，事务化保留这些前代
+  审计并追加 23 个从未被拒绝的冻结查询—候选。当前总审计行 128、有效叶子仍为 60 个唯一
+  候选，且 60 个查询文本全部唯一；与 18 个拒绝文本的重合数为 0。五组仍各 12 条，状态为
+  accepted 29、pending 31、rejected 0、历史 rejected 29、历史 accepted 31。真实 VLM、图片
+  外发、费用和 Qdrant 写入仍为 0。
+  用户完成下一轮审核后新增拒绝 20 条。旧冻结 runs 虽有足够视频候选，但排除累计 38 个拒绝
+  文本后只剩 42 个查询，无法满足至少 50 个唯一查询；首次替代尝试以 409 整体回滚。用户随后
+  提供 13 条新原文，与全部历史及拒绝文本精确重合均为 0。新 set/version/run 分别为
+  `7db14fe0-ae95-4d80-b675-fc291298151c`、`9b73728e-d3a4-4596-a035-447a5ec1863c`、
+  `dcfff4cf-a7c4-4296-8c12-fb70fcdd2c55`；13 次本地检索完整冻结 545 个候选并进入
+  `ready_for_labeling`。替代 API 显式接收该 run 后成功追加 20 个 pending 后继：当前总审计行
+  148、有效候选 60、有效查询 55 个，累计 38 个拒绝文本与有效池重合为 0；accepted 40、
+  pending 20、rejected 0、历史 rejected 49、历史 accepted 31。真实 VLM、图片外发、费用和
+  Qdrant 写入仍为 0。操作前备份为
+  `/private/tmp/stars-phase-f-discard-rejected-round2-pre-20260814.dump`。
+  用户随后接受全部 20 条，有效池达到 accepted 60、拒绝文本重合 0，但人工组别为
+  11 / 16 / 10 / 15 / 8。最终配额再平衡前备份
+  `/private/tmp/stars-phase-f-final-rebalance-pre-20260814.dump`；事务化保留 7 条超额组 accepted
+  历史，并追加完全符合 1、证据不足 2、部分相关 4 条 pending 后继。当前总审计行 155、有效
+  候选仍为 60 个唯一身份、55 个不同查询，五组按 accepted 人工组别与 pending 目标组别合计
+  均为 12；accepted 53、pending 7、rejected 0、历史 rejected 49、历史 accepted 38。真实
+  VLM、图片外发、费用和 Qdrant 写入仍为 0。
+  用户接受首轮 7 条配额候选后，人工组别再次变为 11 / 15 / 11 / 13 / 10。第二次最终
+  再平衡前备份 `/private/tmp/stars-phase-f-final-rebalance-round2-pre-20260814.dump`，随后保留
+  4 条超额组 accepted 历史，并追加完全符合 1、证据不足 1、部分相关 2 条 pending 后继。
+  当前总审计行 159、有效候选 60、五组各 12；accepted 56、pending 4、rejected 0、历史
+  rejected 49、历史 accepted 42。真实 VLM、图片外发、费用和 Qdrant 写入仍为 0。
+  用户接受第二轮 4 条配额候选后，人工组别为 12 / 12 / 13 / 13 / 10。第三次最小再平衡前
+  备份 `/private/tmp/stars-phase-f-final-rebalance-round3-pre-20260814.dump`，保留证据不足与缺少
+  必须条件各 1 条 accepted 历史，并追加 2 条部分相关 pending 后继。当前总审计行 161、有效
+  候选 60、五组各 12；accepted 58、pending 2、rejected 0、历史 rejected 49、历史 accepted
+  44。真实 VLM、图片外发、费用和 Qdrant 写入仍为 0。
+  用户拒绝第三轮 2 条部分相关候选；它们不能因目标配额为 12 而进入盲测。清理前备份
+  `/private/tmp/stars-phase-f-discard-final-two-pre-20260814.dump`，随后永久排除这 2 个文本并
+  追加 2 条未拒绝查询下的部分相关 pending 后继。当前总审计行 163、有效候选 60、不同查询
+  53、拒绝文本重合 0、五组各 12；accepted 58、pending 2、rejected 0、历史 rejected 51、
+  历史 accepted 44。真实 VLM、图片外发、费用和 Qdrant 写入仍为 0。
+  用户接受上述 2 条后，其中 1 条人工改判为命中排除条件，组别为 12 / 13 / 12 / 12 / 11。
+  第四次最小再平衡前备份 `/private/tmp/stars-phase-f-final-rebalance-round4-pre-20260814.dump`，
+  保留 1 条超额排除条件 accepted 历史并追加 1 条部分相关 pending 后继。当前总审计行 164、
+  有效候选 60、五组各 12；accepted 59、pending 1、rejected 0、历史 rejected 51、历史
+  accepted 45。真实 VLM、图片外发、费用和 Qdrant 写入仍为 0。
+  用户拒绝第四轮最后 1 条部分相关候选；该查询文本同时被另一条 accepted 叶子复用，因此按
+  数据集级永久排除规则必须同时退出 2 条。清理前备份
+  `/private/tmp/stars-phase-f-discard-shared-final-query-pre-20260814.dump`，随后保留两条前代审计
+  并追加命中排除条件 1、部分相关 1 条 pending 后继。当前总审计行 166、有效候选 60、不同
+  查询 52、拒绝文本重合 0、五组各 12；accepted 58、pending 2、rejected 0、历史 rejected
+  52、历史 accepted 46。真实 VLM、图片外发、费用和 Qdrant 写入仍为 0。
+  用户接受上述 2 条后，其中命中排除条件候选被人工改判为证据不足，组别变为
+  12 / 11 / 13 / 12 / 12。第五次单条再平衡前备份
+  `/private/tmp/stars-phase-f-final-rebalance-round5-pre-20260814.dump`，保留 1 条超额证据不足
+  accepted 历史并追加 1 条命中排除条件 pending 后继。当前总审计行 167、有效候选 60、
+  五组各 12；accepted 59、pending 1、rejected 0、历史 rejected 52、历史 accepted 47。
+  真实 VLM、图片外发、费用和 Qdrant 写入仍为 0。
+  用户接受最后 1 条后，冻结前只读核对为 accepted 60、pending/rejected 0、历史 rejected 52、
+  历史 accepted 47；60 个有效候选身份全部唯一，覆盖 52 条不同查询，五组各 12。冻结前备份
+  `/private/tmp/stars-phase-f-final-freeze-pre-20260814.dump`（21 MB）。本地冻结 API 在一个
+  PostgreSQL 事务内复核上述事实与条件完整性后，将数据集更新为 `frozen`，指纹为
+  `ba43387caccda3706fbcbf997dcb3a3efd2ac35ca742a4d0128fd139ce037f52`；重复冻结返回同一
+  指纹，未新增案例。页面显示只读冻结状态并禁用审核/改组控件。真实 VLM 调用、图片外发、
+  费用和 Qdrant 写入仍为 0；Phase F 停在人工盲测数据冻结，不进入模型执行或 Phase G。
+
+### Phase F：条件级人工盲标闭环
+
+- Start：2026-08-14。基于已冻结的 60 条候选，复用 Phase D 独立索引帧证据，建立一审、复核、
+  裁决、标签冻结和冻结后 fake 协议演练；真实 Provider、图片外发和 Phase G 保持关闭。
+- [x] 新增独立 labeling session、fake run/result 与条件标注时间的增量 `0012` 迁移；候选 dataset
+      保持 `frozen`。
+- [x] 只用 `source_evaluation_run_id + source_candidate_id` 创建或复用
+      `all_indexed_frames_v1`，不重新搜索、扫描、索引或写 Qdrant。
+- [x] 实现严格 `first / second / final` API、阶段锁、争议裁决、resolved verdict 与人工标签指纹。
+- [x] 实现键盘可操作的条件卡、卡内保存反馈、总进度、可见时轮询、失败重试和状态播报。
+- [x] 标签冻结前隐藏 fake 输出；冻结后只运行本地 fake，保存脱敏结果与条件/案例一致率报告，
+      外部调用数固定为 0。
+- [x] 迁移真实 PostgreSQL 前完成备份；迁移后复核媒体事实、60 条候选和三个 Qdrant Collection。
+- [x] 完成 Shared、Server、Web、Python Worker、仓库 check/lint/format/diff 验证并精确提交。
+
+Review：
+
+- Result：已为冻结候选建立独立人工标签会话；页面可从 60 条 `all_indexed_frames_v1` 证据准备
+  进入一审、复核、争议裁决和标签冻结。标签冻结后才开放本地 fake 演练，持久化条件输出、
+  Server 固定派生状态和两项一致率；候选 dataset/指纹保持不变，真实 Provider 适配器仍不存在。
+- Notes：`0012` 前备份为 `/private/tmp/stars-phase-f-human-labeling-pre-20260814.dump`（4.1 MB，
+  PostgreSQL custom 压缩格式）。迁移记录 18→19；迁移前后 PostgreSQL 均为媒体文件 35、Asset
+  7,940、Vector Ref 7,564、候选审计行 167、条件 992，冻结 dataset UUID/指纹不变；新 labeling
+  session 与 fake run 均为 0。Qdrant Point 前后均为 8 / 5,629 / 1,927。验证通过：
+  `corepack pnpm check`（Shared 26、Web 92、Server 261 个测试及 Next.js 生产构建）、Python Worker
+  `.venv` 133 个测试、lint、本次 37 个文件 format check 与 `git diff --check`。全仓 format check
+  仍报告 31 个未触及的历史文件；lint 仅报告 `repositories.test.ts` 的既有未使用 import 警告。
+  按用户本次明确要求跳过 Standards/Spec 双轴复审。真实 VLM 调用、图片外发、费用、Qdrant 写入
+  和人工标签均为 0；页面停在“可开始准备证据/第一轮盲标”的边界，未进入 Phase G。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run
@@ -257,7 +424,7 @@ Review：
 - [x] 生成不含旧人工等级、来源分数、排名和本地路径的冻结盲标包。
 - [x] 实现逐项 `是 / 否 / 不确定` 标注、自动等级推导、本地暂存和 JSON 导出。
 - [x] 完成第一位标注者的 30 条判断；条件允许时由第二位标注者独立判断，否则由同一人
-  间隔后复标。
+      间隔后复标。
 - [x] 在揭示旧标签或模型结果前完成分歧裁决，冻结新的参考标签和一致性报告。
 - [x] 取得新一轮外发授权后，运行 Qwen3-VL-Plus/Flash 各 3 次并生成独立质量报告。
 - [x] 运行全量验证、双轴审查并使用中文信息提交当前分支。
@@ -294,9 +461,9 @@ Review（本地准备里程碑）：
 - [x] 实现显式外发确认、只从环境变量读取密钥、报告脱敏和临时帧统一清理。
 - [x] 记录复跑命令、指标解释、隐私边界以及“旧样本不能直接充当新正式闸门”。
 - [x] 本机配置两家供应商密钥后执行真实对照并保存 JSON 报告；Qwen 完成，GLM 429 阻塞
-  且失败尝试单独保留，未伪造完整指标。
+      且失败尝试单独保留，未伪造完整指标。
 - [x] 人工逐条复核 Qwen 模型理由；两条歧义标签保持冻结，约 20 条未见盲测样本留作未来
-  新评测，不能在本轮已观察样本上事后补入。
+      新评测，不能在本轮已观察样本上事后补入。
 - [x] 运行全量验证、双轴审查并使用中文信息提交当前分支。
 
 Review：
@@ -347,18 +514,18 @@ Review：
 
 - [x] 审计评测数据库、服务状态和当前素材覆盖。
 - [x] 修复 Evaluation Controller 依赖未注入导致真实 `/evaluation/*` 路由返回 500，
-  并增加 NestJS Controller 回归测试。
+      并增加 NestJS Controller 回归测试。
 - [x] 预先固定查询结构、样本量、盲标等级、A/B 定义、指标口径和 Recall `N/A` 原因。
 - [x] 创建 10 条查询的试标草稿（5 条自然发现、5 条指定目标），保持 `draft` 且不运行。
 - [x] 用户确认试标判断风格，创建收紧讲话、坐姿、实际打鼓和车辆行驶边界的 v2 草稿；
-  回读确认仍为 `draft`，数量为 5 条自然发现 + 5 条指定目标。
+      回读确认仍为 `draft`，数量为 5 条自然发现 + 5 条指定目标。
 - [x] 补充 8 张正式图片并完成 SigLIP2 与 Caption 索引；PostgreSQL 的 16 条图片向量引用
-  与 Qdrant 的 8 个视觉 Point、8 个 Caption Point 数量一致。
+      与 Qdrant 的 8 个视觉 Point、8 个 Caption Point 数量一致。
 - [x] 完成试标复核，建立并冻结 40 条基础查询 + 10 条忠实英文配对查询；图片、视频、
-  4 个短场景和中英文配对完整性检查全部通过。
+      4 个短场景和中英文配对完整性检查全部通过。
 - [x] 运行同快照 current/RRF 召回，完成全部必标池候选盲标；修正后快照共 2,101 个
-  诊断候选，指定目标及两种排序都在 Top-20 之外的项不需要人工等级。
-  必标池为 686 条，686/686 全部完成，`unjudgeable` 为 0。
+      诊断候选，指定目标及两种排序都在 Top-20 之外的项不需要人工等级。
+      必标池为 686 条，686/686 全部完成，`unjudgeable` 为 0。
 - [x] Web 增加按运行 ID 恢复盲标和已标/总数进度，支持刷新后分批继续评测。
 - [x] 生成分类宏平均、通道诊断、失败案例和不可变 Top-K 快照报告。
 - [x] 运行全量验证与双轴审查，使用中文信息提交当前分支。
@@ -395,7 +562,7 @@ Review：
 - Real model：SigLIP2 CPU/MPS 均输出 768 维；CPU 峰值进程内存约 1.50 GiB，MPS 峰值约 0.86 GiB。Caption 文本模型输出 384 维，归一化向量 L2 范数为 1。详细数字、统计口径和限制见 `docs/superpowers/reports/2026-07-30-phase4-siglip2-caption-validation.md`。
 - Tests：`corepack pnpm check` 通过，其中 Shared Schema 6 项测试、Web 39 项测试和生产构建、
   Server 109 项测试全部成功；`PYTHONPATH=apps/worker-py .venv/bin/python -m unittest discover
-  apps/worker-py/tests` 通过 73 项 Python 测试；`git diff --check` 通过。测试使用 fake
+apps/worker-py/tests` 通过 73 项 Python 测试；`git diff --check` 通过。测试使用 fake
   PostgreSQL/Qdrant/VLM 覆盖失败恢复，真实模型数字单独记录在 Phase 4 验证报告中。
 
 ## 视频检索重建 Phase 5：搜索范围与 RRF
@@ -410,10 +577,10 @@ Review：
 - [x] Search API 增加 `search_scope=visual|spoken|all`，默认 `visual`。
 - [x] Search API 增加 `ranking_mode=current|rrf`，默认 `rrf`。
 - [x] `visual` 只调用 SigLIP2 视觉与可用的 Caption 通道，`spoken` 只查询转录全文，
-  `all` 才同时执行三类召回。
+      `all` 才同时执行三类召回。
 - [x] 生产搜索复用公共 `rankByRrf`，按过滤后的连续来源名次计算 `1/(60+rank)`。
 - [x] 图片使用 Asset ID、正式视频候选使用场景 UUID 作为稳定语义身份；同场景视觉与
-  Caption 合并，不能依赖数据库偶然顺序。
+      Caption 合并，不能依赖数据库偶然顺序。
 - [x] RRF 结果保留来源原始分数，并在显式诊断模式返回各通道名次、贡献、最佳帧和时间。
 - [x] 同步 Web API 类型、API 契约、README 和任务记录，不提前实现 Phase 6 搜索控件。
 - [x] 运行完整验证与双轴代码审查，并记录 Review。

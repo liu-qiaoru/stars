@@ -1,20 +1,35 @@
 import { Module } from '@nestjs/common'
 import { SETTINGS, type Settings } from '../config/settings.js'
 import { DatabaseModule } from '../database/database.module.js'
+import { CandidateEvidenceModule } from '../candidate-evidence/candidate-evidence.module.js'
 import { SearchModule } from '../search/search.module.js'
 import { createShadowRerankProvider } from './dashscope-shadow-rerank.provider.js'
 import { EvaluationController } from './evaluation.controller.js'
 import { EvaluationService } from './evaluation.service.js'
 import { SHADOW_RERANK_PROVIDER } from './shadow-rerank.provider.js'
 import { ShadowRerankService } from './shadow-rerank.service.js'
+import { VlmBlindDatasetService } from './vlm-blind-dataset.service.js'
+import { VlmBlindLabelingService } from './vlm-blind-labeling.service.js'
+import {
+  createProtocolExerciseFakeVlmReviewProvider,
+  VLM_REVIEW_PROVIDER,
+} from './vlm-review.provider.js'
 
 // Evaluation 只编排正式 SearchService 并保存快照；它不直接访问 Qdrant，也不实现第二套召回。
 @Module({
-  imports: [DatabaseModule, SearchModule],
+  imports: [DatabaseModule, SearchModule, CandidateEvidenceModule],
   controllers: [EvaluationController],
   providers: [
     EvaluationService,
     ShadowRerankService,
+    VlmBlindDatasetService,
+    VlmBlindLabelingService,
+    {
+      provide: VLM_REVIEW_PROVIDER,
+      // Phase F 本提交有意只注册本地 fake。这里没有 settings、URL 或 API key，
+      // 因而任何 HTTP 路由都不可能退化为真实图片外发。
+      useFactory: createProtocolExerciseFakeVlmReviewProvider,
+    },
     {
       provide: SHADOW_RERANK_PROVIDER,
       inject: [SETTINGS],

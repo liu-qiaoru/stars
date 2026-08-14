@@ -21,7 +21,7 @@ const rules: Record<string, RouteRule> = {
   '/evaluation/reports': {
     entry: [{ source: 'components/evaluation-workspace.tsx', pattern: /\/evaluation\/reports/ }],
     return: [
-      { source: 'components/evaluation-reports-workspace.tsx', pattern: /href="\/evaluation"/ },
+      { source: 'components/evaluation-reports-workspace.tsx', pattern: /href: '\/evaluation'/ },
     ],
   },
   '/evaluation/runs/[id]': {
@@ -36,8 +36,21 @@ const rules: Record<string, RouteRule> = {
       },
     ],
     return: [
-      { source: 'app/evaluation/runs/[id]/page.tsx', pattern: /href="\/evaluation"/ },
-      { source: 'app/evaluation/runs/[id]/page.tsx', pattern: /href="\/evaluation\/reports"/ },
+      { source: 'app/evaluation/runs/[id]/page.tsx', pattern: /href: '\/evaluation'/ },
+      { source: 'app/evaluation/runs/[id]/page.tsx', pattern: /href: '\/evaluation\/reports'/ },
+    ],
+  },
+  '/evaluation/vlm-blind': {
+    entry: [{ source: 'components/evaluation-workspace.tsx', pattern: /\/evaluation\/vlm-blind/ }],
+    return: [
+      {
+        source: 'components/vlm-blind-candidate-review-workspace.tsx',
+        pattern: /href: '\/evaluation'/,
+      },
+      {
+        source: 'components/vlm-blind-candidate-review-workspace.tsx',
+        pattern: /href: '\/evaluation\/reports'/,
+      },
     ],
   },
   '/jobs': shellRule('/jobs'),

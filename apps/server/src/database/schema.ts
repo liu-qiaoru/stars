@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm'
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   customType,
@@ -342,6 +343,178 @@ export const evaluationJudgments = pgTable(
     ...timestamps,
   },
   (table) => [uniqueIndex('evaluation_judgments_candidate_unique').on(table.candidateId)],
+)
+
+// Phase F 先保存“待用户审核的 60 对建议”，再单独保存条件级人工真值。
+// 建议组别不是标签；candidate_review 状态下禁止调用 VLM，也不产生 passed/rejected。
+export const evaluationVlmBlindDatasets = pgTable(
+  'evaluation_vlm_blind_datasets',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    name: text('name').notNull(),
+    schemaVersion: text('schema_version').notNull(),
+    status: text('status').notNull().default('candidate_review'),
+    targetCaseCount: integer('target_case_count').notNull().default(60),
+    proposalFingerprint: text('proposal_fingerprint').notNull(),
+    frozenFingerprint: text('frozen_fingerprint'),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    // 指纹是整份 60 对建议包的内容身份。数据库唯一索引是并发导入的
+    // 最终防线：单凭“先 SELECT 再 INSERT”会让两个 Server 同时各写一份。
+    uniqueIndex('evaluation_vlm_blind_datasets_proposal_fingerprint_unique').on(
+      table.proposalFingerprint,
+    ),
+  ],
+)
+
+export const evaluationVlmBlindCases = pgTable(
+  'evaluation_vlm_blind_cases',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    datasetId: uuid('dataset_id')
+      .notNull()
+      .references(() => evaluationVlmBlindDatasets.id, { onDelete: 'cascade' }),
+    proposalId: text('proposal_id').notNull(),
+    sourceEvaluationRunId: uuid('source_evaluation_run_id').notNull(),
+    sourceCandidateId: uuid('source_candidate_id').notNull(),
+    // 替代案例使用新行保存，并指向被用户拒绝的上一代案例。旧行永远不改回 pending，
+    // 因而人工拒绝、备注和时间仍可审计；null 表示最初导入的 60 条建议。
+    replacesCaseId: uuid('replaces_case_id').references(
+      (): AnyPgColumn => evaluationVlmBlindCases.id,
+      { onDelete: 'restrict' },
+    ),
+    queryText: text('query_text').notNull(),
+    candidateKey: text('candidate_key').notNull(),
+    fileId: uuid('file_id').notNull(),
+    sceneId: uuid('scene_id').notNull(),
+    startTimeSeconds: numeric('start_time_seconds').notNull(),
+    endTimeSeconds: numeric('end_time_seconds').notNull(),
+    proposedGroup: text('proposed_group').notNull(),
+    reviewedGroup: text('reviewed_group'),
+    reviewStatus: text('review_status').notNull().default('pending'),
+    selectionBasis: text('selection_basis').notNull(),
+    reviewNotes: text('review_notes'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('evaluation_vlm_blind_cases_dataset_proposal_unique').on(
+      table.datasetId,
+      table.proposalId,
+    ),
+    uniqueIndex('evaluation_vlm_blind_cases_dataset_candidate_unique').on(
+      table.datasetId,
+      table.sourceCandidateId,
+    ),
+    // 一条被拒案例至多拥有一个直接后继。重复点击生成接口会复用现状，
+    // 并发请求也由数据库唯一约束阻止生成两条替代链分支。
+    uniqueIndex('evaluation_vlm_blind_cases_replaces_unique').on(table.replacesCaseId),
+    index('evaluation_vlm_blind_cases_dataset_status_idx').on(table.datasetId, table.reviewStatus),
+  ],
+)
+
+export const evaluationVlmBlindConditions = pgTable(
+  'evaluation_vlm_blind_conditions',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    caseId: uuid('case_id')
+      .notNull()
+      .references(() => evaluationVlmBlindCases.id, { onDelete: 'cascade' }),
+    conditionId: text('condition_id').notNull(),
+    kind: text('kind').notNull(),
+    sourceText: text('source_text').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    // uncertain 必须由第二人复核；冻结前 Service 会要求 final_verdict 明确写入。
+    firstVerdict: text('first_verdict'),
+    secondVerdict: text('second_verdict'),
+    finalVerdict: text('final_verdict'),
+    labelNotes: text('label_notes'),
+    firstLabeledAt: timestamp('first_labeled_at', { withTimezone: true }),
+    secondLabeledAt: timestamp('second_labeled_at', { withTimezone: true }),
+    finalLabeledAt: timestamp('final_labeled_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('evaluation_vlm_blind_conditions_case_condition_unique').on(
+      table.caseId,
+      table.conditionId,
+    ),
+    uniqueIndex('evaluation_vlm_blind_conditions_case_ordinal_unique').on(
+      table.caseId,
+      table.ordinal,
+    ),
+  ],
+)
+
+// 候选 dataset 的 frozen 状态只表达“60 对身份不可变”。人工条件标签拥有独立会话，
+// 避免为了显示标注进度而把候选状态改回可编辑，或把候选冻结误报成人工真值冻结。
+export const evaluationVlmBlindLabelingSessions = pgTable(
+  'evaluation_vlm_blind_labeling_sessions',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    datasetId: uuid('dataset_id')
+      .notNull()
+      .references(() => evaluationVlmBlindDatasets.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('labeling'),
+    labelsFingerprint: text('labels_fingerprint'),
+    labelsFrozenAt: timestamp('labels_frozen_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('evaluation_vlm_blind_labeling_sessions_dataset_unique').on(table.datasetId),
+  ],
+)
+
+// fake 演练与人工标签分开持久化。一个已冻结标签会话只生成一份演练身份；重复 POST
+// 读取同一结果，不会把本地协议测试伪装成新的模型调用或累计费用。
+export const evaluationVlmBlindFakeRuns = pgTable(
+  'evaluation_vlm_blind_fake_runs',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    labelingSessionId: uuid('labeling_session_id')
+      .notNull()
+      .references(() => evaluationVlmBlindLabelingSessions.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('running'),
+    provider: text('provider').notNull().default('fake'),
+    protocolVersion: text('protocol_version').notNull().default('vlm-review-v1'),
+    caseCount: integer('case_count').notNull().default(0),
+    succeededCount: integer('succeeded_count').notNull().default(0),
+    failedCount: integer('failed_count').notNull().default(0),
+    notApplicableCount: integer('not_applicable_count').notNull().default(0),
+    externalCallCount: integer('external_call_count').notNull().default(0),
+    metricsJson: jsonb('metrics_json'),
+    errorJson: jsonb('error_json'),
+    ...timestamps,
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('evaluation_vlm_blind_fake_runs_session_unique').on(table.labelingSessionId),
+  ],
+)
+
+export const evaluationVlmBlindFakeResults = pgTable(
+  'evaluation_vlm_blind_fake_results',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    fakeRunId: uuid('fake_run_id')
+      .notNull()
+      .references(() => evaluationVlmBlindFakeRuns.id, { onDelete: 'cascade' }),
+    caseId: uuid('case_id')
+      .notNull()
+      .references(() => evaluationVlmBlindCases.id, { onDelete: 'restrict' }),
+    status: text('status').notNull(),
+    outputJson: jsonb('output_json'),
+    errorJson: jsonb('error_json'),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('evaluation_vlm_blind_fake_results_run_case_unique').on(
+      table.fakeRunId,
+      table.caseId,
+    ),
+  ],
 )
 
 // Phase E 的影子重排事实与普通 evaluation_runs 分离：普通 Search/RRF 快照不可变，

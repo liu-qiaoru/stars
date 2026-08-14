@@ -1,0 +1,136 @@
+[
+  {
+    "query_text": "一只小猫穿着衣服躺在地上",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["画面中有一只小猫", "小猫穿着可见的衣服", "小猫躺在地面上"],
+    "optional": ["小猫侧躺或四肢贴近地面"],
+    "exclusions": ["小猫没有穿衣服", "小猫位于沙发、床或人的怀里而不是地面"]
+  },
+  {
+    "query_text": "有人在打高尔夫的场景",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["画面中至少有一人", "人物手持高尔夫球杆", "人物正在挥杆或准备击球"],
+    "optional": ["草地、球洞或高尔夫球场环境"],
+    "exclusions": ["人物进行棒球、网球或其他持杆运动", "只有高尔夫球具没有人物"]
+  },
+  {
+    "query_text": "人和小猫玩足球游戏，画面中有球网",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": [
+      "画面中同时有人和小猫",
+      "画面中可见足球或类似球体",
+      "画面中可见球网",
+      "人物或小猫正在与球互动"
+    ],
+    "optional": ["球靠近球网或球门"],
+    "exclusions": ["只有人物踢球而没有小猫", "只有小猫和球但没有球网"]
+  },
+  {
+    "query_text": "人站在舞台上，空中飘着很多彩带",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["至少一人站在舞台或演出区域", "空中可见多条飘动或下落的彩带"],
+    "optional": ["舞台灯光、观众或演出背景"],
+    "exclusions": ["彩带只固定在背景上没有飘动", "只有舞台和彩带没有人物"]
+  },
+  {
+    "query_text": "有人朝海里扔石头",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["画面中至少有一人", "人物位于海边或岸边", "人物做出向海面投掷石头的动作"],
+    "optional": ["石头离手、海面出现落点或水花"],
+    "exclusions": ["人物只是捡石头或拿着石头", "人物向陆地方向投掷物体"]
+  },
+  {
+    "query_text": "一个人抱着一只小猫，对视",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["画面中有一人和一只小猫", "人物将小猫抱在怀里或手臂上", "人物和小猫的脸相互朝向"],
+    "optional": ["人物与小猫距离很近"],
+    "exclusions": ["人物只是触摸地面上的小猫", "人物抱着小猫但双方没有相互朝向"]
+  },
+  {
+    "query_text": "有人正在包饺子",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["画面中至少有一人", "桌面或手中可见饺子皮与馅料", "人物正在折叠、捏合或包制饺子"],
+    "optional": ["桌面有多个已经包好的饺子"],
+    "exclusions": ["人物只是在煮或吃饺子", "只有饺子没有正在包制的人"]
+  },
+  {
+    "query_text": "有人晚上面朝大海坐在海边",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["画面处于夜晚或明显昏暗环境", "至少一人坐在海边", "人物身体或面部朝向大海"],
+    "optional": ["海面反光、岸边灯光或夜空"],
+    "exclusions": ["人物站在海边", "白天坐在海边"]
+  },
+  {
+    "query_text": "一个人抱着一束花",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["画面中至少有一人", "人物怀中或手臂间抱着一束花"],
+    "optional": ["花束有包装纸或丝带"],
+    "exclusions": ["人物只拿着一朵花", "花束放在桌面上而没有被人物抱着"]
+  },
+  {
+    "query_text": "给小猫的耳朵滴药水",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": [
+      "画面中有一只小猫",
+      "有人用手固定或靠近小猫的耳朵",
+      "滴管或药水容器的开口靠近小猫耳朵"
+    ],
+    "optional": ["可见液滴或滴药动作"],
+    "exclusions": ["给小猫眼睛或嘴部滴药", "只是检查或抚摸小猫耳朵"]
+  },
+  {
+    "query_text": "一个人在给一只小猫洗澡",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": [
+      "画面中有一人和一只小猫",
+      "小猫位于水盆、浴缸或清洗区域",
+      "人物正在用水或清洁用品清洗小猫"
+    ],
+    "optional": ["可见泡沫、毛巾或淋水动作"],
+    "exclusions": ["人物只是在梳理或擦拭干燥的小猫", "只有小猫在水边没有人物清洗"]
+  },
+  {
+    "query_text": "一个红头发的人在做操",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": ["画面中有红色头发的人物", "人物正在做连续的伸展、摆臂或体操动作"],
+    "optional": ["人物穿运动服或位于可活动的空地"],
+    "exclusions": ["红发人物只是站立或讲话", "人物在唱歌或演奏而不是做操"]
+  },
+  {
+    "query_text": "一个人坐在桌前做手工",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "visual",
+    "must_have": [
+      "画面中至少有一人坐在桌前",
+      "人物双手正在操作手工材料或工具",
+      "桌面可见正在制作的物品或材料"
+    ],
+    "optional": ["可见剪刀、黏土、纸张、画笔或其他手工工具"],
+    "exclusions": ["人物只是在桌前使用电脑或阅读", "只有手工材料没有人物操作"]
+  }
+]

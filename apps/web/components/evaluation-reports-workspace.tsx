@@ -10,6 +10,7 @@ import {
   type EvaluationRunSummary,
 } from '../lib/api-client'
 import { ShadowRerankPanel } from './shadow-rerank-panel'
+import { EvaluationBreadcrumbs } from './evaluation-breadcrumbs'
 
 const metricDefinitions = [
   ['precisionAt5', 'Precision@5', '前 5 条中相关候选的比例'],
@@ -101,6 +102,9 @@ export function EvaluationReportsWorkspace({
 
   return (
     <section className="space-y-6">
+      <EvaluationBreadcrumbs
+        items={[{ label: '评测主页', href: '/evaluation' }, { label: '历史报告' }]}
+      />
       <header className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
         <div>
           <p className="eyebrow">内部工具 · PostgreSQL 历史记录</p>
@@ -242,6 +246,7 @@ export function EvaluationReportsWorkspace({
             setSelectedQueryId={setSelectedQueryId}
             queryTextById={queryTextById}
             candidates={selectedCandidates}
+            apiClient={apiClient}
           />
         </>
       ) : null}
@@ -325,12 +330,14 @@ function CandidateRanks({
   setSelectedQueryId,
   queryTextById,
   candidates,
+  apiClient,
 }: {
   detail: EvaluationRun
   selectedQueryId: string | null
   setSelectedQueryId: (id: string) => void
   queryTextById: Map<string, string>
   candidates: EvaluationRun['candidates']
+  apiClient: ReturnType<typeof createApiClient>
 }) {
   const queryIds = detail.report?.queries.map((query) => query.query_id) ?? []
   return (
@@ -352,34 +359,82 @@ function CandidateRanks({
           </button>
         ))}
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[680px] border-collapse text-left text-sm">
-          <caption className="sr-only">所选查询的候选相关等级和排序名次变化</caption>
-          <thead>
-            <tr className="border-b">
-              <th className="p-3">候选</th>
-              <th className="p-3">人工判断</th>
-              <th className="p-3">Current → RRF</th>
-            </tr>
-          </thead>
-          <tbody>
-            {candidates.map((candidate) => (
-              <tr key={candidate.id} className="border-b last:border-0">
-                <td className="p-3">
-                  <span className="font-medium text-neutral-950">{candidate.media_type}</span>
-                  <span className="eyebrow block">{candidate.scene_id ?? candidate.file_id}</span>
-                </td>
-                <td className="p-3">{judgmentLabel(candidate.judgment)}</td>
-                <td className="p-3 font-medium tabular-nums text-neutral-950">
-                  {formatRank(candidate.current_rank)} → {formatRank(candidate.rrf_rank)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-label="候选媒体与名次变化">
+        {candidates.map((candidate) => {
+          const queryText = queryTextById.get(candidate.query_id) || candidate.query_id
+          const contentUrl = apiClient.mediaContentUrl(candidate.file_id, {
+            startTimeSeconds: candidate.start_time_seconds,
+            endTimeSeconds: candidate.end_time_seconds,
+          })
+          return (
+            <article
+              key={candidate.id}
+              className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+            >
+              <div className="aspect-video bg-neutral-950">
+                {candidate.media_type === 'video' ? (
+                  <video
+                    aria-label={`播放候选视频片段：${queryText}`}
+                    className="h-full w-full object-contain"
+                    controls
+                    playsInline
+                    preload="metadata"
+                    src={contentUrl}
+                  />
+                ) : candidate.media_type === 'image' ? (
+                  <img
+                    alt={`候选图片：${queryText}`}
+                    className="h-full w-full object-contain"
+                    loading="lazy"
+                    src={contentUrl}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center px-4 text-center text-sm text-neutral-300">
+                    当前媒体类型暂不提供内嵌预览
+                  </div>
+                )}
+              </div>
+              <div className="space-y-3 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-neutral-950">{candidate.media_type}</p>
+                    <p className="muted text-sm">
+                      {formatSceneRange(candidate.start_time_seconds, candidate.end_time_seconds)}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-sm font-semibold text-blue-800 tabular-nums">
+                    {formatRank(candidate.current_rank)} → {formatRank(candidate.rrf_rank)}
+                  </span>
+                </div>
+                <p className="text-sm text-neutral-700">
+                  人工判断：{judgmentLabel(candidate.judgment)}
+                </p>
+                <details className="text-sm">
+                  <summary className="cursor-pointer rounded-md font-medium text-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
+                    审计身份
+                  </summary>
+                  <p className="mt-2 break-all font-mono text-xs text-neutral-500">
+                    {candidate.scene_id ?? candidate.file_id}
+                  </p>
+                </details>
+                <a
+                  className="secondary-action w-full justify-center focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
+                  href={`/media/${candidate.file_id}`}
+                >
+                  打开候选媒体详情
+                </a>
+              </div>
+            </article>
+          )
+        })}
       </div>
     </section>
   )
+}
+
+function formatSceneRange(start: number | null, end: number | null) {
+  if (start === null) return '整份媒体'
+  return `${start.toFixed(1)}s${end === null ? '' : ` – ${end.toFixed(1)}s`}`
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {

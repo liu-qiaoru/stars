@@ -87,6 +87,212 @@ export const shadowRerankResponseSchema = z
     }
   })
 
+// Phase F 只冻结“原查询 + Server 分配的原子条件 + 1～12 张独立索引帧”。
+// Provider 不得修改条件、发明帧 ID 或把 Phase E 的 rerank 模型代替为复核模型。
+export const vlmReviewConditionKindSchema = z.enum(['must_have', 'optional', 'exclusion'])
+export const vlmReviewVerdictSchema = z.enum(['yes', 'no', 'uncertain'])
+export const vlmBlindGroupSchema = z.enum([
+  'exact_match',
+  'missing_must_have',
+  'exclusion_hit',
+  'partial_relevance',
+  'insufficient_evidence',
+])
+
+const vlmReviewConditionSchema = z
+  .object({
+    condition_id: z.string().min(1).max(100),
+    kind: vlmReviewConditionKindSchema,
+    source_text: unicodeStringSchema('source_text', 200),
+  })
+  .strict()
+
+export const vlmCandidateReviewRequestSchema = z
+  .object({
+    protocol_version: z.literal('vlm-review-v1'),
+    model: z.literal('qwen3.7-plus'),
+    original_query: unicodeStringSchema('original_query', 4000),
+    candidate_key: z.string().min(1).max(300),
+    // 可为空：Server 会在调用 Provider 之前直接派生 review_not_applicable。
+    // 保留空数组比伪造一个条件更忠实于冻结查询。
+    conditions: z.array(vlmReviewConditionSchema).max(30),
+    evidence_frames: z
+      .array(
+        z
+          .object({
+            frame_id: uuidSchema,
+            image_base64: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(12),
+  })
+  .strict()
+  .superRefine((request, context) => {
+    if (
+      new Set(request.conditions.map((condition) => condition.condition_id)).size !==
+      request.conditions.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'conditions must contain unique condition_id values',
+        path: ['conditions'],
+      })
+    }
+    if (
+      new Set(request.evidence_frames.map((frame) => frame.frame_id)).size !==
+      request.evidence_frames.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'evidence_frames must contain unique frame_id values',
+        path: ['evidence_frames'],
+      })
+    }
+  })
+
+export const vlmCandidateReviewOutputSchema = z
+  .object({
+    candidate_key: z.string().min(1).max(300),
+    conditions: z
+      .array(
+        z
+          .object({
+            condition_id: z.string().min(1).max(100),
+            verdict: vlmReviewVerdictSchema,
+            evidence_frame_ids: z.array(uuidSchema).max(12),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(30),
+  })
+  .strict()
+
+/**
+ * Zod 只能校验单个 JSON 的形状；条件和帧是否来自本次冻结请求，必须把
+ * Provider 输出与请求对照。任何缺失、重复或陌生 ID 都整体失败，不猜测修复。
+ */
+export function parseVlmCandidateReviewOutput(requestInput: unknown, outputInput: unknown) {
+  const request = vlmCandidateReviewRequestSchema.parse(requestInput)
+  const output = vlmCandidateReviewOutputSchema.parse(outputInput)
+  if (output.candidate_key !== request.candidate_key) {
+    throw new Error('candidate_key does not match the frozen request')
+  }
+  const expectedConditionIds = request.conditions.map((condition) => condition.condition_id)
+  const returnedConditionIds = output.conditions.map((condition) => condition.condition_id)
+  if (
+    new Set(returnedConditionIds).size !== returnedConditionIds.length ||
+    returnedConditionIds.length !== expectedConditionIds.length ||
+    expectedConditionIds.some((id) => !returnedConditionIds.includes(id))
+  ) {
+    throw new Error('conditions must match the frozen request exactly once')
+  }
+  const allowedFrameIds = new Set(request.evidence_frames.map((frame) => frame.frame_id))
+  if (
+    output.conditions.some(
+      (condition) =>
+        new Set(condition.evidence_frame_ids).size !== condition.evidence_frame_ids.length ||
+        condition.evidence_frame_ids.some((id) => !allowedFrameIds.has(id)),
+    )
+  ) {
+    throw new Error('evidence_frame_ids must reference unique frames from the frozen request')
+  }
+  return output
+}
+
+const vlmBlindCandidateProposalSchema = z
+  .object({
+    proposal_id: z.string().min(1).max(100),
+    source_evaluation_run_id: uuidSchema,
+    source_candidate_id: uuidSchema,
+    query_text: unicodeStringSchema('query_text', 4000),
+    candidate_key: z.string().min(1).max(300),
+    file_id: uuidSchema,
+    scene_id: uuidSchema,
+    start_time_seconds: nonNegativeNumberSchema.finite(),
+    end_time_seconds: positiveNumberSchema.finite(),
+    proposed_group: vlmBlindGroupSchema,
+    selection_basis: unicodeStringSchema('selection_basis', 500),
+    conditions: z.array(vlmReviewConditionSchema).min(1).max(30),
+  })
+  .strict()
+  .refine((proposal) => proposal.end_time_seconds > proposal.start_time_seconds, {
+    message: 'end_time_seconds must be greater than start_time_seconds',
+    path: ['end_time_seconds'],
+  })
+
+// 这是“待用户审核”的候选包，不是已冻结人工真值。固定 60 对和 5×12 只为了
+// 防止抽样阶段悠然改变分母；每对的组别仍需用户逐条确认。
+export const vlmBlindCandidateReviewPacketSchema = z
+  .object({
+    schema_version: z.literal('phase-f-vlm-candidate-review-v1'),
+    proposals: z.array(vlmBlindCandidateProposalSchema).length(60),
+  })
+  .strict()
+  .superRefine((packet, context) => {
+    const proposalIds = packet.proposals.map((proposal) => proposal.proposal_id)
+    const candidateIds = packet.proposals.map((proposal) => proposal.source_candidate_id)
+    if (new Set(proposalIds).size !== proposalIds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'proposal_id must be unique',
+        path: ['proposals'],
+      })
+    }
+    if (new Set(candidateIds).size !== candidateIds.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'source_candidate_id must be unique',
+        path: ['proposals'],
+      })
+    }
+    for (const group of vlmBlindGroupSchema.options) {
+      if (packet.proposals.filter((proposal) => proposal.proposed_group === group).length !== 12) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `proposed_group ${group} must contain exactly 12 proposals`,
+          path: ['proposals'],
+        })
+      }
+    }
+  })
+
+export const vlmBlindCandidateReviewInputSchema = z
+  .object({
+    decision: z.enum(['accepted', 'rejected']),
+    reviewed_group: vlmBlindGroupSchema.optional(),
+    notes: z.string().max(1000).optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.decision === 'accepted' && input.reviewed_group === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'reviewed_group is required when a proposal is accepted',
+        path: ['reviewed_group'],
+      })
+    }
+    if (input.decision === 'rejected' && input.reviewed_group !== undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'reviewed_group must be omitted when a proposal is rejected',
+        path: ['reviewed_group'],
+      })
+    }
+  })
+
+// 条件标签使用稳定的 condition row UUID + 标注阶段作为幂等身份。相同阶段重复保存
+// 只更新同一个字段；API 不追加匿名数组项，也不会把候选审核状态当作人工真值。
+export const vlmBlindLabelStageSchema = z.enum(['first', 'second', 'final'])
+export const vlmBlindConditionLabelInputSchema = z
+  .object({
+    verdict: vlmReviewVerdictSchema,
+    notes: z.string().max(1000).optional(),
+  })
+  .strict()
+
 // Agent V1 是 Server 控制的固定状态机。模型输出和 API 输入都只能使用这些状态，
 // 不能自造“思考中”或跳过等待授权边界的状态。
 export const agentRunStatusSchema = z.enum([

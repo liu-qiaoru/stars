@@ -64,6 +64,34 @@
       "when": 1786612228252,
       "tag": "0008_strong_karen_page",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786616161881,
+      "tag": "0009_phase_f_vlm_blind_candidate_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786617795212,
+      "tag": "0010_phase_f_candidate_packet_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786626199663,
+      "tag": "0011_phase_f_candidate_replacement_lineage",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786682006211,
+      "tag": "0012_phase_f_human_condition_labeling",
+      "breakpoints": true
     }
   ]
 }

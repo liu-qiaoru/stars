@@ -3,6 +3,8 @@ import { describe, expect, test, vi } from 'vitest'
 import { EvaluationController } from '../../src/evaluation/evaluation.controller.js'
 import { EvaluationService } from '../../src/evaluation/evaluation.service.js'
 import { ShadowRerankService } from '../../src/evaluation/shadow-rerank.service.js'
+import { VlmBlindDatasetService } from '../../src/evaluation/vlm-blind-dataset.service.js'
+import { VlmBlindLabelingService } from '../../src/evaluation/vlm-blind-labeling.service.js'
 
 describe('evaluation controller dependency injection', () => {
   test('NestJS 向 Controller 注入 EvaluationService，使真实 HTTP 路由可以调用评测能力', async () => {
@@ -18,11 +20,22 @@ describe('evaluation controller dependency injection', () => {
       reconcileUsage: vi.fn().mockResolvedValue({ id: 'attempt-1' }),
       retryAndSchedule: vi.fn().mockResolvedValue({ id: 'shadow-run-2', execution_number: 2 }),
     }
+    const vlmBlindDatasets = {
+      list: vi.fn().mockResolvedValue([]),
+      get: vi.fn().mockResolvedValue({ id: 'dataset-1' }),
+      importCandidateReviewPacket: vi.fn(),
+      reviewCandidate: vi.fn(),
+    }
+    const vlmBlindLabeling = {
+      get: vi.fn().mockResolvedValue({ dataset_id: 'dataset-1', candidate_status: 'frozen' }),
+    }
     const moduleRef = await Test.createTestingModule({
       controllers: [EvaluationController],
       providers: [
         { provide: EvaluationService, useValue: service },
         { provide: ShadowRerankService, useValue: shadowRerank },
+        { provide: VlmBlindDatasetService, useValue: vlmBlindDatasets },
+        { provide: VlmBlindLabelingService, useValue: vlmBlindLabeling },
       ],
     }).compile()
 
@@ -68,6 +81,9 @@ describe('evaluation controller dependency injection', () => {
         execution_number: 2,
       })
       expect(shadowRerank.retryAndSchedule).toHaveBeenCalledWith('run-id')
+      await expect(controller.getVlmBlindLabeling('dataset-1')).resolves.toMatchObject({
+        candidate_status: 'frozen',
+      })
     } finally {
       await moduleRef.close()
     }

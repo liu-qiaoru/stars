@@ -27,6 +27,10 @@ describe('database migration chain', () => {
       '0006_new_ghost_rider.sql',
       '0007_phase_e_shadow_usage_reconciliation.sql',
       '0008_strong_karen_page.sql',
+      '0009_phase_f_vlm_blind_candidate_review.sql',
+      '0010_phase_f_candidate_packet_identity.sql',
+      '0011_phase_f_candidate_replacement_lineage.sql',
+      '0012_phase_f_human_condition_labeling.sql',
     ])
     expect(metadataFiles).toEqual([
       '0000_snapshot.json',
@@ -38,6 +42,10 @@ describe('database migration chain', () => {
       '0006_snapshot.json',
       '0007_snapshot.json',
       '0008_snapshot.json',
+      '0009_snapshot.json',
+      '0010_snapshot.json',
+      '0011_snapshot.json',
+      '0012_snapshot.json',
       '_journal.json',
     ])
     const journal = JSON.parse(await readFile(resolve('drizzle/meta/_journal.json'), 'utf8')) as {
@@ -53,6 +61,10 @@ describe('database migration chain', () => {
       '0006_new_ghost_rider',
       '0007_phase_e_shadow_usage_reconciliation',
       '0008_strong_karen_page',
+      '0009_phase_f_vlm_blind_candidate_review',
+      '0010_phase_f_candidate_packet_identity',
+      '0011_phase_f_candidate_replacement_lineage',
+      '0012_phase_f_human_condition_labeling',
     ])
 
     const sql = await readFile(resolve('drizzle', migrationFiles[0]!), 'utf8')
@@ -259,6 +271,102 @@ describe('database migration chain', () => {
           indexdef: expect.stringContaining('execution_number'),
         }),
       ]),
+    )
+  })
+
+  test('adds only normalized Phase F candidate-review facts after Phase E', async () => {
+    client = new PGlite()
+    for (const file of [
+      '0000_final_baseline.sql',
+      '0001_agent_v1_phase_a.sql',
+      '0002_agent_v1_phase_d_candidate_evidence.sql',
+      '0003_happy_morlun.sql',
+      '0004_mute_meggan.sql',
+      '0005_friendly_mister_sinister.sql',
+      '0006_new_ghost_rider.sql',
+      '0007_phase_e_shadow_usage_reconciliation.sql',
+      '0008_strong_karen_page.sql',
+      '0009_phase_f_vlm_blind_candidate_review.sql',
+      '0010_phase_f_candidate_packet_identity.sql',
+      '0011_phase_f_candidate_replacement_lineage.sql',
+    ]) {
+      await client.exec(await readFile(resolve('drizzle', file), 'utf8'))
+    }
+    const tables = await client.query<{ tablename: string }>(
+      `select tablename from pg_tables
+       where schemaname='public' and tablename like 'evaluation_vlm_blind_%'
+       order by tablename`,
+    )
+    expect(tables.rows.map((row) => row.tablename)).toEqual([
+      'evaluation_vlm_blind_cases',
+      'evaluation_vlm_blind_conditions',
+      'evaluation_vlm_blind_datasets',
+    ])
+    const indexes = await client.query<{ indexname: string; indexdef: string }>(
+      `select indexname, indexdef from pg_indexes
+       where tablename in (
+         'evaluation_vlm_blind_datasets',
+         'evaluation_vlm_blind_cases',
+         'evaluation_vlm_blind_conditions'
+       )`,
+    )
+    expect(indexes.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          indexname: 'evaluation_vlm_blind_datasets_proposal_fingerprint_unique',
+          indexdef: expect.stringContaining('UNIQUE'),
+        }),
+        expect.objectContaining({
+          indexname: 'evaluation_vlm_blind_cases_dataset_candidate_unique',
+          indexdef: expect.stringContaining('UNIQUE'),
+        }),
+        expect.objectContaining({
+          indexname: 'evaluation_vlm_blind_cases_replaces_unique',
+          indexdef: expect.stringContaining('UNIQUE'),
+        }),
+        expect.objectContaining({
+          indexname: 'evaluation_vlm_blind_conditions_case_condition_unique',
+          indexdef: expect.stringContaining('UNIQUE'),
+        }),
+      ]),
+    )
+  })
+
+  test('adds independent Phase F labeling and fake-run facts without reopening candidates', async () => {
+    client = new PGlite()
+    for (const file of [
+      '0000_final_baseline.sql',
+      '0001_agent_v1_phase_a.sql',
+      '0002_agent_v1_phase_d_candidate_evidence.sql',
+      '0003_happy_morlun.sql',
+      '0004_mute_meggan.sql',
+      '0005_friendly_mister_sinister.sql',
+      '0006_new_ghost_rider.sql',
+      '0007_phase_e_shadow_usage_reconciliation.sql',
+      '0008_strong_karen_page.sql',
+      '0009_phase_f_vlm_blind_candidate_review.sql',
+      '0010_phase_f_candidate_packet_identity.sql',
+      '0011_phase_f_candidate_replacement_lineage.sql',
+      '0012_phase_f_human_condition_labeling.sql',
+    ]) {
+      await client.exec(await readFile(resolve('drizzle', file), 'utf8'))
+    }
+
+    const tables = await client.query<{ tablename: string }>(
+      `select tablename from pg_tables where schemaname='public' and tablename like 'evaluation_vlm_blind_%' order by tablename`,
+    )
+    expect(tables.rows.map((row) => row.tablename)).toEqual(
+      expect.arrayContaining([
+        'evaluation_vlm_blind_labeling_sessions',
+        'evaluation_vlm_blind_fake_runs',
+        'evaluation_vlm_blind_fake_results',
+      ]),
+    )
+    const conditionColumns = await client.query<{ column_name: string }>(
+      `select column_name from information_schema.columns where table_name='evaluation_vlm_blind_conditions'`,
+    )
+    expect(conditionColumns.rows.map((row) => row.column_name)).toEqual(
+      expect.arrayContaining(['first_labeled_at', 'second_labeled_at', 'final_labeled_at']),
     )
   })
 })

@@ -130,6 +130,9 @@ export function EvaluationWorkspace({
           <a className="secondary-action" href="/evaluation/phase9a-c2">
             进入 Phase 9A-C2 的 30 条新盲标
           </a>
+          <a className="secondary-action" href="/evaluation/vlm-blind">
+            审核 Phase F VLM 候选
+          </a>
         </div>
       </header>
       {error ? <p role="alert">操作失败：{error}</p> : null}

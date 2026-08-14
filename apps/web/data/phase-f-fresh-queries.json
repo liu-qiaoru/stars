@@ -1,0 +1,284 @@
+[
+  {
+    "query_text": "夜里有人弯腰系鞋带",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "人物动作",
+    "must_have": ["画面处于夜间或昏暗街道环境", "至少一人弯腰接触鞋子", "能看出正在整理或系鞋带"],
+    "optional": ["地面有灯光倒影"],
+    "exclusions": ["人物只是弯腰捡东西", "只有鞋子没有人物"]
+  },
+  {
+    "query_text": "两个人并排弹电子琴",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "多人演奏",
+    "must_have": ["至少两个人同时出现", "两人位于电子琴或键盘乐器前", "能看出正在共同演奏"],
+    "optional": ["室内木质背景"],
+    "exclusions": ["只有一人弹琴", "只有钢琴或电子琴没有人物"]
+  },
+  {
+    "query_text": "有人把锅里的饺子翻动起来",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "烹饪动作",
+    "must_have": ["可见装有饺子的锅", "有人用筷子或厨具翻动锅内食物"],
+    "optional": ["水正在沸腾"],
+    "exclusions": ["只展示装盘后的饺子", "锅内没有饺子"]
+  },
+  {
+    "query_text": "有人端着写有小麦面粉的盘子介绍食材",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "物体展示",
+    "must_have": [
+      "至少一人手持盘子或容器",
+      "容器上能识别出小麦面粉相关文字",
+      "人物正在面向镜头展示或讲解"
+    ],
+    "optional": ["人物穿红色上衣"],
+    "exclusions": ["只有面粉包装没有人物", "人物没有拿着食材"]
+  },
+  {
+    "query_text": "双手从容器里挤出蓝色液体",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "手工操作",
+    "must_have": ["可见双手操作容器", "容器中有蓝色液体或膏状物", "蓝色内容物正从开口被挤出"],
+    "optional": ["使用工具剪开小口"],
+    "exclusions": ["只是搅拌蓝色液体", "没有液体流出"]
+  },
+  {
+    "query_text": "有人把橙色小猫抱在怀里",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "人与动物",
+    "must_have": ["至少一人", "可见橙色或橘色小猫", "人物将猫抱起或抱在手臂上"],
+    "optional": ["室内灰色窗帘"],
+    "exclusions": ["人物只是在旁边摸猫", "只有猫没有人物"]
+  },
+  {
+    "query_text": "穿厨师服的人用勺子喂猫头鹰玩偶",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "人物与玩偶",
+    "must_have": ["人物穿着厨师服或厨师风格服装", "手中有猫头鹰造型玩偶", "人物用勺子做出喂食动作"],
+    "optional": ["厨房背景"],
+    "exclusions": ["给真实动物喂食", "只拿玩偶没有勺子"]
+  },
+  {
+    "query_text": "红发人物在桌前捏蓝色黏土模型",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "手工制作",
+    "must_have": ["可见红发人物坐在桌前", "桌面上有蓝色黏土或软质材料", "人物正在捏制或塑形"],
+    "optional": ["桌面有多种工具"],
+    "exclusions": ["只是展示完成品", "没有人物参与制作"]
+  },
+  {
+    "query_text": "舞台上的表演者撑着白色雨伞",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "舞台道具",
+    "must_have": ["可见舞台或演出灯光", "至少一名表演者手持白色雨伞"],
+    "optional": ["其他人也拿着雨伞"],
+    "exclusions": ["户外下雨打伞", "雨伞不是白色"]
+  },
+  {
+    "query_text": "黑白花猫站在临水的岩石上",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "动物场景",
+    "must_have": ["可见黑白相间的猫", "猫站在岩石或石块上", "背景能看到水面"],
+    "optional": ["黄昏光线"],
+    "exclusions": ["猫站在室内地板上", "只有岩石和水没有猫"]
+  },
+  {
+    "query_text": "有人在自助点餐屏幕前选择菜品",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "人机交互",
+    "must_have": ["至少一人坐在或站在点餐设备前", "可见带菜品选项的屏幕", "人物用手指向或操作屏幕"],
+    "optional": ["手中还有平板设备"],
+    "exclusions": ["操作普通电脑", "只有点餐屏幕没有人物"]
+  },
+  {
+    "query_text": "戴帽子的人在餐厅用筷子夹面条",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "用餐动作",
+    "must_have": ["人物戴着帽子坐在餐厅", "桌面有餐食", "人物使用筷子夹起面条"],
+    "optional": ["背景有竹子装饰"],
+    "exclusions": ["用筷子吃盒饭", "没有面条"]
+  },
+  {
+    "query_text": "穿红衣的人在厨房捏饺子边缘",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "食品制作",
+    "must_have": ["人物穿红色上衣并位于厨房", "手中有饺子皮和馅料", "人物正在捏合饺子边缘"],
+    "optional": ["桌上有面粉和馅料"],
+    "exclusions": ["只是在煮饺子", "只展示包好的饺子"]
+  },
+  {
+    "query_text": "两个男歌手在同一舞台上合唱",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "多人表演",
+    "must_have": ["舞台上同时出现两名男性表演者", "两人都在使用麦克风或明显唱歌", "能看出共同表演"],
+    "optional": ["背景有乐器和灯光"],
+    "exclusions": ["只有一名歌手", "两人只是站着没有演唱"]
+  },
+  {
+    "query_text": "有人背对镜头站在海边看落日",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "人物风景",
+    "must_have": ["至少一人背对或侧背镜头", "人物站在海边", "天空或海面呈现日落暖色"],
+    "optional": ["人物穿白色羽绒服"],
+    "exclusions": ["白天海边行走", "只有落日海景没有人物"]
+  },
+  {
+    "query_text": "男子夜晚站在沙滩上微笑",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "夜间人物",
+    "must_have": ["可见一名男性站在沙滩", "环境处于夜晚或明显昏暗", "人物面带微笑"],
+    "optional": ["远处有点状灯光"],
+    "exclusions": ["白天海边场景", "人物正在走路而非停留"]
+  },
+  {
+    "query_text": "户外有人对着成排人物旗帜拍照",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "户外活动",
+    "must_have": ["户外可见成排竖立的旗帜", "旗帜上印有人物图像", "至少一人用手机拍摄或观看旗帜"],
+    "optional": ["草地和树木"],
+    "exclusions": ["普通国旗或广告旗", "没有观众"]
+  },
+  {
+    "query_text": "演唱会后台有人背对镜头操作控制台",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "设备操作",
+    "must_have": ["至少一人背对镜头", "人物面前有电脑或演出控制设备", "远处能看到舞台或观众灯光"],
+    "optional": ["人物是红发"],
+    "exclusions": ["普通办公室使用电脑", "只有控制台没有人物"]
+  },
+  {
+    "query_text": "穿深红运动服的人在百叶窗前跳舞",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "舞蹈动作",
+    "must_have": ["人物穿深红色运动套装", "背景可见百叶窗", "人物正在摆动手臂或跳舞"],
+    "optional": ["人物面带微笑"],
+    "exclusions": ["人物只是站立摆姿势", "没有百叶窗背景"]
+  },
+  {
+    "query_text": "昏暗房间里穿蓝毛衣的人举手跳舞",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "低光舞蹈",
+    "must_have": ["室内光线昏暗并有明显侧光", "人物穿蓝色上衣", "人物举起手臂并做舞蹈动作"],
+    "optional": ["墙面出现人物剪影"],
+    "exclusions": ["明亮舞台表演", "人物静止不动"]
+  },
+  {
+    "query_text": "穿蓝色长袍的人在海边展开白色风筝",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "户外搭建",
+    "must_have": [
+      "人物穿蓝色长衣或长袍并位于海边",
+      "地面上有白色风筝框架",
+      "人物正在整理并展开风筝"
+    ],
+    "optional": ["光线从白天变暗"],
+    "exclusions": ["人物只是举着已经完成的风筝", "没有海边背景"]
+  },
+  {
+    "query_text": "有人坐在床边托着下巴看打开的书",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "室内阅读",
+    "must_have": ["人物坐在床上或床边", "面前有一本打开的书", "人物用手托着下巴并看向书"],
+    "optional": ["人物穿蓝色条纹毛衣"],
+    "exclusions": ["人物使用电脑", "只有书没有人物"]
+  },
+  {
+    "query_text": "红发人物坐在浴缸里泡澡",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "生活场景",
+    "must_have": ["可见红发人物坐在浴缸内", "背景是浴室或砖墙环境"],
+    "optional": ["画面带监控录像样式"],
+    "exclusions": ["人物站在浴缸旁", "只有浴缸没有人物"]
+  },
+  {
+    "query_text": "穿红外套的人用扫帚清扫摄影棚地面",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "清扫动作",
+    "must_have": ["人物穿红色外套", "人物手持扫帚清扫地面", "背景可见幕布或摄影设备"],
+    "optional": ["地面散落纸张"],
+    "exclusions": ["户外扫地", "人物拿拖把而非扫帚"]
+  },
+  {
+    "query_text": "有人用工具在蓝色黏土上刻出纹路",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "精细手工",
+    "must_have": ["双手正在操作蓝色黏土", "至少一只手使用细小工具", "黏土表面正在形成纹路或图案"],
+    "optional": ["蓝色工作垫"],
+    "exclusions": ["只用手捏黏土", "在纸上绘画"]
+  },
+  {
+    "query_text": "女性用紫色化妆刷给穿西装的男子上妆",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "化妆互动",
+    "must_have": [
+      "同时出现一名女性和一名男性",
+      "男性穿西装或正式外套",
+      "女性使用紫色化妆刷接触男性面部"
+    ],
+    "optional": ["男性表情惊讶"],
+    "exclusions": ["人物自己化妆", "只整理头发没有化妆刷"]
+  },
+  {
+    "query_text": "海边有人指向远处后转身微笑",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "连续人物动作",
+    "must_have": ["人物位于海边", "人物先指向海面或远处", "随后转向镜头并微笑"],
+    "optional": ["人物穿白色外套"],
+    "exclusions": ["人物始终背对镜头", "只站着看海没有指向动作"]
+  },
+  {
+    "query_text": "穿彩色衣服的小猫在沙发上和人互动",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "宠物互动",
+    "must_have": ["可见穿彩色衣服的小猫", "猫位于沙发上", "旁边的人用手逗弄或触碰猫"],
+    "optional": ["灰色窗帘背景"],
+    "exclusions": ["猫没有穿衣服", "只有猫没有人物互动"]
+  },
+  {
+    "query_text": "有人把小猫举起来亲吻",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "亲密宠物互动",
+    "must_have": ["至少一人抱起小猫", "人物将面部靠近并亲吻猫"],
+    "optional": ["室内玻璃隔断背景"],
+    "exclusions": ["只是抚摸猫", "猫仍在地面上"]
+  },
+  {
+    "query_text": "穿白西装的人坐在户外专心写字",
+    "query_type": "discovery",
+    "search_scope": "visual",
+    "intent_category": "户外静态动作",
+    "must_have": ["人物穿白色西装或白色正式服装", "人物坐在户外", "手中拿笔并做出书写动作"],
+    "optional": ["背景有建筑栏杆"],
+    "exclusions": ["人物站立签名", "只拿笔没有书写"]
+  }
+]

@@ -852,5 +852,76 @@ null：只要任一已外发 attempt 缺少对应事实，汇总就保持未知�
 API 和普通日志不返回绝对路径、Base64、文件名、Caption、转录或图片字节。
 `review_status` 固定为 `not_run`，表示尚未执行 Phase F VLM 审核。
 
+### Phase F VLM 候选审核（本地）
+
+- `GET /evaluation/vlm-blind/datasets`：列出已保存的候选审核批次，只返回身份、状态和指纹。
+- `GET /evaluation/vlm-blind/datasets/{dataset_id}`：读取 60 对查询—候选快照、原子条件、
+  建议分组和审核进度。返回文件/场景 UUID 和秒级时间，不返回绝对路径、文件名、
+  Caption、转录或图片字节。
+- `POST /evaluation/vlm-blind/datasets`：导入 `phase-f-vlm-candidate-review-v1` 建议包。请求必须
+  恰好包含 60 对，五组各 12 对且候选唯一。Server 在单个 PostgreSQL 事务内对照
+  已完整召回的 Evaluation 快照，任何身份、时间或条件差异都整体拒绝。同一内容指纹
+  并发或重复导入时返回已存在批次，不重复创建案例。
+- `POST /evaluation/vlm-blind/datasets/{dataset_id}/cases/{case_id}/review`：保存候选审核。
+  `accepted` 必须同时提交 `reviewed_group`；`rejected` 表示需要替换，不得携带组别。
+- `POST /evaluation/vlm-blind/datasets/{dataset_id}/replacements`：为所有尚无后继的有效
+  案例生成替代。任一查询文本只要曾被人工 `rejected`，该文本及当前所有同文本叶子都会
+  永久退出盲测池；旧 rejected/accepted/pending 行保持只读。Server 从数据集已有冻结
+  Evaluation runs 中选择从未被拒绝、尚未使用且符合目标分组的查询—候选，新行通过
+  `replaces_case_id` 关联并回到 `pending`。选择同时维持每个查询最多两对和至少 50 个唯一
+  查询；任一槽位没有替代时整批回滚。请求可显式携带
+  `source_evaluation_run_id`，但该 run 必须已经处于 `ready_for_labeling | labeled | reported`，
+  Server 只把它加入本次冻结候选读取范围，不在替代接口内重新搜索。该接口本身不读写
+  Qdrant、不调用 Provider。
+- `POST /evaluation/vlm-blind/datasets/{dataset_id}/rebalance`：仅在 60 条有效候选全部
+  `accepted` 后，根据人工 `reviewed_group` 将五组重新配到各 12 条。Server 不改写超额组的
+  accepted 审核，而是保留其历史行，并从同一冻结 run、同一 query 的未使用候选中，为缺额组
+  追加 pending 后继。任一缺额无法完整匹配时整批回滚；接口不重搜、不读写 Qdrant、不调用
+  Provider。详情响应的 `historical_accepted` 与 `historical_rejected` 分别显示被后继取代的两类
+  人工审计记录，不能与当前有效候选混算。
+- `POST /evaluation/vlm-blind/datasets/{dataset_id}/freeze`：候选审核的本地终态操作。Server 在
+  同一 PostgreSQL 事务内锁定批次与案例，重新验证有效叶子恰好 60 条、全部 accepted、候选
+  身份唯一、至少 50 个不同查询、每个查询最多两对、历史拒绝文本不再有效、五组各 12 条且
+  条件快照完整。通过后将规范化查询—候选—条件快照计算为 SHA-256 指纹，并把批次更新为
+  `status=frozen`；重复请求只返回同一冻结事实。SHA-256 是一种把任意内容压缩成固定 64 位
+  十六进制摘要的哈希算法，这里用于发现快照是否变化，不包含原始媒体。该接口不构建证据、
+  不调用 VLM、不读写 Qdrant；冻结后 review/replacements/rebalance 都拒绝继续修改。
+
+上述路由只写人工审核事实，不调用 Provider、不创建证据 Job、不读写 Qdrant，也不产生
+`passed/rejected/insufficient_evidence` 等模型复核结论。候选的 `review_status=rejected` 只表示
+“不适合进入本轮盲标”，不是 VLM 对媒体相关性的判断。
+
+#### Phase F 条件级人工盲标
+
+候选数据集保持 `status=frozen`，条件标签使用独立的 labeling session（标注会话）记录进度。
+这样“候选身份已经冻结”和“人工真值是否完成”不会复用同一个状态词，也不会为了开始标注而
+重新开放候选审核。
+
+- `GET /evaluation/vlm-blind/datasets/{dataset_id}/labeling`：只读返回证据、`first / second /
+final` 三阶段进度、有效 60 条案例、条件标签和 fake 报告。GET 不创建 Job、不读取 Qdrant、
+  不执行 Provider。
+- `POST /evaluation/vlm-blind/datasets/{dataset_id}/evidence`：只对 60 条有效叶子的
+  `source_evaluation_run_id + source_candidate_id` 创建或复用 `all_indexed_frames_v1`。它使用
+  已有 `build_candidate_evidence` 后台 Job，不重新搜索、扫描、抽帧或索引；失败项可通过同一
+  接口重试，成功项按冻结身份复用。
+- `POST /evaluation/vlm-blind/datasets/{dataset_id}/cases/{case_id}/conditions/{condition_row_id}/labels/{stage}`：
+  `stage=first|second|final`，body 严格为 `verdict=yes|no|uncertain` 和可选 `notes`。稳定
+  condition row UUID 与 stage 组成幂等写入位置。全部一审完成后才能进入复核；复核开始后一审
+  锁定；只有两轮不一致或含 `uncertain` 的条件能进入最终裁决。
+- `POST /evaluation/vlm-blind/datasets/{dataset_id}/labels/freeze`：全部条件完成两轮；两轮一致的
+  `yes/no` 直接成为 resolved verdict，两轮不一致或含 `uncertain` 时必须由人工 final 明确裁成
+  `yes/no`。Server 不自动填充 `final_verdict`，只对完整人工事实生成 SHA-256 指纹并关闭写入口。
+- `POST /evaluation/vlm-blind/datasets/{dataset_id}/fake-run`：只允许人工标签冻结后执行一次本地
+  fake 协议演练。Server 读取并校验私有帧 bundle，在内存中组装严格请求；fake 不访问网络，
+  `external_call_count` 恒为 0。数据库和 API 只保存条件输出、固定派生状态与指标，不保存或返回
+  Base64、图片字节、绝对路径、文件名、Caption 或转录。
+
+`labels_status` 为 `evidence_pending | evidence_preparing | evidence_failed | first_pass |
+second_pass | adjudication | ready_to_freeze | labels_frozen`。证据准备由 Python Worker 异步执行；
+人工标签与 fake 演练由 NestJS Server 同步校验并写入 PostgreSQL。fake 指标中的
+`condition_accuracy` 是“fake 条件判断与冻结人工结论相同的条件数 ÷ fake 实际返回的条件数”，
+`case_status_accuracy` 是“Server 派生状态相同的案例数 ÷ 全部案例数”；范围都是 0～1，越高只
+表示固定假输出碰巧一致得越多，不能代表真实模型质量。
+
 `POST /jobs/{id}/retry` 只接受 `failed` 任务，并复制原任务已经校验的输入创建新的
 `queued` 任务。原失败任务保持不变，便于保留错误详情和审计链。

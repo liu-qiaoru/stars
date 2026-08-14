@@ -1,0 +1,3 @@
+ALTER TABLE "evaluation_vlm_blind_cases" ADD COLUMN "replaces_case_id" uuid;--> statement-breakpoint
+ALTER TABLE "evaluation_vlm_blind_cases" ADD CONSTRAINT "evaluation_vlm_blind_cases_replaces_case_id_evaluation_vlm_blind_cases_id_fk" FOREIGN KEY ("replaces_case_id") REFERENCES "public"."evaluation_vlm_blind_cases"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "evaluation_vlm_blind_cases_replaces_unique" ON "evaluation_vlm_blind_cases" USING btree ("replaces_case_id");

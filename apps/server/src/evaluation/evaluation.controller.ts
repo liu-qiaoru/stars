@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common'
 import { EvaluationService } from './evaluation.service.js'
 import { ShadowRerankService } from './shadow-rerank.service.js'
+import { VlmBlindDatasetService } from './vlm-blind-dataset.service.js'
+import { VlmBlindLabelingService } from './vlm-blind-labeling.service.js'
 
 @Controller('evaluation')
 export class EvaluationController {
@@ -11,6 +13,10 @@ export class EvaluationController {
     private readonly service: EvaluationService,
     @Inject(ShadowRerankService)
     private readonly shadowRerank: ShadowRerankService,
+    @Inject(VlmBlindDatasetService)
+    private readonly vlmBlindDatasets: VlmBlindDatasetService,
+    @Inject(VlmBlindLabelingService)
+    private readonly vlmBlindLabeling: VlmBlindLabelingService,
   ) {}
 
   @Get('sets') listSets() {
@@ -116,5 +122,90 @@ export class EvaluationController {
       textInputTokens: body.text_input_tokens,
       imageInputTokens: body.image_input_tokens,
     })
+  }
+
+  /** Phase F 当前只暴露本地候选审核数据；这些路由不会调用 VLM Provider。 */
+  @Get('vlm-blind/datasets') listVlmBlindDatasets() {
+    return this.vlmBlindDatasets.list()
+  }
+
+  @Get('vlm-blind/datasets/:datasetId') getVlmBlindDataset(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindDatasets.get(datasetId)
+  }
+
+  @Post('vlm-blind/datasets') importVlmBlindDataset(
+    @Body() body: { name: string; packet: unknown },
+  ) {
+    return this.vlmBlindDatasets.importCandidateReviewPacket(body)
+  }
+
+  @Post('vlm-blind/datasets/:datasetId/cases/:caseId/review')
+  reviewVlmBlindCandidate(
+    @Param('datasetId') datasetId: string,
+    @Param('caseId') caseId: string,
+    @Body() body: unknown,
+  ) {
+    return this.vlmBlindDatasets.reviewCandidate(datasetId, caseId, body)
+  }
+
+  /**
+   * 从已有批次和一次显式指定的新冻结 run 生成查询替代。source run 只扩展候选读取范围，
+   * 不在此路由内触发 Search、Qdrant 写入或 VLM 调用。
+   */
+  @Post('vlm-blind/datasets/:datasetId/replacements')
+  generateVlmBlindReplacements(
+    @Param('datasetId') datasetId: string,
+    @Body() body: { source_evaluation_run_id?: string },
+  ) {
+    return this.vlmBlindDatasets.generateRejectedReplacements(
+      datasetId,
+      body.source_evaluation_run_id,
+    )
+  }
+
+  /** 五组人工分布失衡时追加 pending 后继；accepted 前代保持只读审计。 */
+  @Post('vlm-blind/datasets/:datasetId/rebalance')
+  rebalanceVlmBlindDataset(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindDatasets.rebalanceAcceptedGroups(datasetId)
+  }
+
+  /** 最终候选完整性校验通过后冻结本地事实；不构建或派发任何 VLM 请求。 */
+  @Post('vlm-blind/datasets/:datasetId/freeze')
+  freezeVlmBlindDataset(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindDatasets.freezeCandidateReview(datasetId)
+  }
+
+  /** 读取独立人工标签进度；不会在 GET 中创建 Job 或执行 Provider。 */
+  @Get('vlm-blind/datasets/:datasetId/labeling')
+  getVlmBlindLabeling(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindLabeling.get(datasetId)
+  }
+
+  /** 仅复用冻结 Evaluation candidate 创建 all_indexed_frames_v1 后台 Job。 */
+  @Post('vlm-blind/datasets/:datasetId/evidence')
+  prepareVlmBlindEvidence(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindLabeling.prepareEvidence(datasetId)
+  }
+
+  @Post('vlm-blind/datasets/:datasetId/cases/:caseId/conditions/:conditionId/labels/:stage')
+  saveVlmBlindConditionLabel(
+    @Param('datasetId') datasetId: string,
+    @Param('caseId') caseId: string,
+    @Param('conditionId') conditionId: string,
+    @Param('stage') stage: string,
+    @Body() body: unknown,
+  ) {
+    return this.vlmBlindLabeling.saveConditionLabel(datasetId, caseId, conditionId, stage, body)
+  }
+
+  @Post('vlm-blind/datasets/:datasetId/labels/freeze')
+  freezeVlmBlindLabels(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindLabeling.freezeLabels(datasetId)
+  }
+
+  /** 标签冻结后只运行本地 fake 协议演练；真实 Provider 适配器仍不存在。 */
+  @Post('vlm-blind/datasets/:datasetId/fake-run')
+  runVlmBlindFake(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindLabeling.runFake(datasetId)
   }
 }
