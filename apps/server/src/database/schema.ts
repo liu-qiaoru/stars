@@ -949,6 +949,86 @@ export const agentRunCandidates = pgTable(
   ],
 )
 
+// 产品 Rerank 与不可变的 Agent RRF 候选分表保存。每个 Agent run 最多一个实验 run；
+// dispatched 会在网络请求前提交，Server 重启后只能转为 outcome_unknown，禁止自动重放。
+export const agentRerankRuns = pgTable(
+  'agent_rerank_runs',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    agentRunId: uuid('agent_run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    protocolVersion: text('protocol_version').notNull(),
+    status: text('status').notNull().default('preparing_evidence'),
+    externalCallStatus: text('external_call_status').notNull().default('not_dispatched'),
+    provider: text('provider').notNull().default('dashscope'),
+    requestedModel: text('requested_model').notNull().default('qwen3-vl-rerank'),
+    providerRequestId: text('provider_request_id'),
+    responseModel: text('response_model'),
+    modelSnapshot: text('model_snapshot'),
+    region: text('region'),
+    maxCostCny: numeric('max_cost_cny').notNull(),
+    queryFingerprint: text('query_fingerprint'),
+    evidenceFingerprint: text('evidence_fingerprint'),
+    responseFingerprint: text('response_fingerprint'),
+    requestBytes: bigint('request_bytes', { mode: 'number' }),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    billedCostCny: numeric('billed_cost_cny'),
+    estimatedCostCny: numeric('estimated_cost_cny'),
+    latencyMs: bigint('latency_ms', { mode: 'number' }),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    errorDetailsJson: jsonb('error_details_json'),
+    dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('agent_rerank_runs_agent_run_unique').on(table.agentRunId),
+    index('agent_rerank_runs_status_idx').on(table.status, table.createdAt),
+  ],
+)
+
+// 保存完整 20 个输入身份。Top-10 才有 rerank_rank/score，其余行证明候选没有被删除。
+export const agentRerankRankings = pgTable(
+  'agent_rerank_rankings',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    rerankRunId: uuid('rerank_run_id')
+      .notNull()
+      .references(() => agentRerankRuns.id, { onDelete: 'cascade' }),
+    candidateId: uuid('candidate_id')
+      .notNull()
+      .references(() => agentRunCandidates.id, { onDelete: 'cascade' }),
+    candidateKey: text('candidate_key').notNull(),
+    rrfRank: integer('rrf_rank').notNull(),
+    rerankRank: integer('rerank_rank'),
+    relevanceScore: numeric('relevance_score'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('agent_rerank_rankings_candidate_unique').on(table.rerankRunId, table.candidateId),
+    uniqueIndex('agent_rerank_rankings_rank_unique').on(table.rerankRunId, table.rerankRank),
+    index('agent_rerank_rankings_run_rrf_idx').on(table.rerankRunId, table.rrfRank),
+  ],
+)
+
+// 三选一反馈允许用户改选；唯一键保证汇总时一条 Rerank run 只计一票。
+export const agentRerankFeedback = pgTable(
+  'agent_rerank_feedback',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    rerankRunId: uuid('rerank_run_id')
+      .notNull()
+      .references(() => agentRerankRuns.id, { onDelete: 'cascade' }),
+    verdict: text('verdict').notNull(),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex('agent_rerank_feedback_run_unique').on(table.rerankRunId)],
+)
+
 // Candidate Evidence（候选证据）是 Phase D 的长期业务事实，不只存在 jobs.result_json。
 // Server 用 source_type/source_id 证明候选来自哪个冻结快照；Python Worker 只写本地派生
 // 文件和 manifest。artifact_path 永不进入普通 API，浏览器只能经受控 artifact 路由读取。
@@ -1093,4 +1173,5 @@ export const agentRunsRelations = relations(agentRuns, ({ many }) => ({
   inputs: many(agentRunInputs),
   sideEffects: many(agentSideEffects),
   candidates: many(agentRunCandidates),
+  rerankRuns: many(agentRerankRuns),
 }))

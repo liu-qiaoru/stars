@@ -46,6 +46,9 @@ function client(overrides: Record<string, unknown> = {}) {
     getAgentSettings: vi.fn().mockResolvedValue(settings),
     createAgentRun: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'queued' }),
     getAgentRun: vi.fn().mockResolvedValue(terminalRun()),
+    startAgentRerank: vi.fn(),
+    getAgentRerank: vi.fn().mockResolvedValue(null),
+    saveAgentRerankFeedback: vi.fn(),
     selectAgentExport: vi.fn(),
     confirmAgentExport: vi.fn(),
     getJob: vi.fn(),
@@ -87,7 +90,92 @@ describe('AgentWorkspace', () => {
       })
     })
     expect(await screen.findByText('succeeded')).toBeInTheDocument()
-    expect(screen.getByText(/固定流程，不包含 Rerank、VLM/i)).toBeInTheDocument()
+    expect(screen.getByText(/RRF 始终先返回/i)).toBeInTheDocument()
+  })
+
+  test('用户开启 Rerank 后展示两套名次并保存三选一反馈', async () => {
+    const candidates = Array.from({ length: 20 }, (_, index) => ({
+      candidate_key: `image:asset-${index + 1}`,
+      file_id: `file-${index + 1}`,
+      file_generation: 0,
+      asset_id: `asset-${index + 1}`,
+      scene_id: null,
+      scene_start_seconds: null,
+      scene_end_seconds: null,
+      rank: index + 1,
+      retrieval: { score: 1 / (60 + index + 1) },
+      review_status: 'not_run' as const,
+    }))
+    const completedRun = {
+      ...terminalRun(),
+      status: 'waiting_for_export_selection',
+      candidates,
+    }
+    const rerankResult = {
+      id: 'rerank-1',
+      agent_run_id: 'run-1',
+      status: 'succeeded' as const,
+      external_call_status: 'completed' as const,
+      provider: 'dashscope',
+      requested_model: 'qwen3-vl-rerank',
+      provider_request_id: 'fake-request',
+      request_bytes: 100,
+      total_tokens: 100,
+      estimated_cost_cny: 0.00018,
+      latency_ms: 20,
+      error: null,
+      rankings: candidates.map((candidate, index) => ({
+        candidate_key: candidate.candidate_key,
+        rrf_rank: candidate.rank,
+        rerank_rank: index < 10 ? 10 - index : null,
+        relevance_score: index < 10 ? 1 - index / 10 : null,
+      })),
+      feedback: null,
+    }
+    const apiClient = client({
+      getAgentSettings: vi.fn().mockResolvedValue({
+        ...settings,
+        capabilities: {
+          ...settings.capabilities,
+          external_visual_available: true,
+          rerank_available: true,
+        },
+      }),
+      getAgentRun: vi.fn().mockResolvedValue(completedRun),
+      startAgentRerank: vi.fn().mockResolvedValue(rerankResult),
+      saveAgentRerankFeedback: vi
+        .fn()
+        .mockImplementation((_id, { verdict }) =>
+          Promise.resolve({ ...rerankResult, feedback: verdict }),
+        ),
+    })
+    render(<AgentWorkspace apiClient={apiClient} />)
+
+    await waitFor(() => expect(screen.getByLabelText(/开启实验性 Rerank/i)).toBeEnabled())
+    fireEvent.click(screen.getByLabelText(/开启实验性 Rerank/i))
+    fireEvent.change(screen.getByLabelText('完整用户请求'), { target: { value: '查找图片' } })
+    fireEvent.click(screen.getByRole('button', { name: /启动任务/i }))
+
+    await waitFor(() => {
+      expect(apiClient.createAgentRun).toHaveBeenCalledWith({
+        prompt: '查找图片',
+        allow_external_text: true,
+        allow_external_visual: true,
+        media_types: ['image', 'video'],
+      })
+      expect(apiClient.startAgentRerank).toHaveBeenCalledWith('run-1', {
+        confirmed: true,
+        max_cost_cny: 0.216,
+      })
+    })
+    expect(await screen.findByText('RRF 1')).toBeInTheDocument()
+    expect(await screen.findByText('Rerank 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Rerank 更好' }))
+    await waitFor(() =>
+      expect(apiClient.saveAgentRerankFeedback).toHaveBeenCalledWith('rerank-1', {
+        verdict: 'rerank_better',
+      }),
+    )
   })
 
   test('页面重新挂载只用持久化 run_id 读取 Server 状态，不重新创建 run', async () => {

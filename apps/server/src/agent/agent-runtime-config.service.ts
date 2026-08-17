@@ -87,6 +87,9 @@ export class AgentRuntimeConfigService {
       unavailableReasons.push('external_text_deployment_disabled')
     if (!providerConfigured) unavailableReasons.push('rightapi_not_configured')
     if (!this.current.enabled) unavailableReasons.push('agent_executor_disabled')
+    const rerankConfigured =
+      this.settings.agentRerankProvider === 'dashscope' &&
+      Boolean(this.settings.dashscopeWorkspaceId && this.settings.dashscopeApiKey)
     return {
       provider: 'rightapi',
       model: AGENT_INTENT_MODEL,
@@ -97,8 +100,8 @@ export class AgentRuntimeConfigService {
       capabilities: {
         external_text_available:
           this.settings.allowExternalLlm && providerConfigured && this.current.enabled,
-        external_visual_available: false,
-        rerank_available: false,
+        external_visual_available: rerankConfigured,
+        rerank_available: rerankConfigured,
         vlm_review_available: false,
         unavailable_reasons: unavailableReasons,
       },

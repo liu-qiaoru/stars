@@ -268,6 +268,7 @@ describe('AgentV1StepHandler', () => {
           sceneEndSeconds: '19.75',
           rank: 1,
           retrievalJson: {
+            media_type: 'video',
             score: 0.0325,
             score_kind: 'rrf_score',
             primary_reason: 'vector_match',

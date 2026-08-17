@@ -36,6 +36,9 @@ export interface Settings {
   dashscopeApiKey?: string
   shadowRerankMaxCalls?: number
   shadowRerankMaxCostCny?: number
+  // 产品 Rerank 使用独立部署闸门；开启 Evaluation shadow 不会自动开启用户检索外发。
+  agentRerankProvider?: 'disabled' | 'dashscope'
+  agentRerankTimeoutMs?: number
   // Phase F 视觉复核拥有独立部署闸门；AgentIntent 文本执行开关不能授权图片外发。
   vlmReviewProvider?: 'disabled' | 'rightapi'
   vlmReviewMaxCalls?: number
@@ -278,6 +281,21 @@ const settingsSchema = z.object({
   // workspace ID 会成为北京专属域名的一部分，因此只接受单个合法 DNS label，
   // 防止配置值注入斜杠、端口或另一个主机名。
   SHADOW_RERANK_PROVIDER: z.enum(['disabled', 'dashscope']).default('disabled'),
+  AGENT_RERANK_PROVIDER: z.enum(['disabled', 'dashscope']).default('disabled'),
+  AGENT_RERANK_TIMEOUT_MS: z
+    .string()
+    .default('180000')
+    .transform((value, context) => {
+      const timeout = Number(value)
+      if (!Number.isInteger(timeout) || timeout < 1_000 || timeout > 180_000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'AGENT_RERANK_TIMEOUT_MS must be between 1000 and 180000',
+        })
+        return z.NEVER
+      }
+      return timeout
+    }),
   DASHSCOPE_WORKSPACE_ID: z
     .string()
     .regex(
@@ -448,12 +466,17 @@ export function createSettings(env: Env = process.env): Settings {
       'AGENT_LEASE_DURATION_MS must be at least max(AGENT_ACTIVITY_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS) + 5000',
     )
   }
-  if (parsed.SHADOW_RERANK_PROVIDER === 'dashscope') {
+  if (
+    parsed.SHADOW_RERANK_PROVIDER === 'dashscope' ||
+    parsed.AGENT_RERANK_PROVIDER === 'dashscope'
+  ) {
     if (!parsed.DASHSCOPE_WORKSPACE_ID) {
-      throw new Error('DASHSCOPE_WORKSPACE_ID is required when SHADOW_RERANK_PROVIDER=dashscope')
+      throw new Error(
+        'DASHSCOPE_WORKSPACE_ID is required when a DashScope rerank provider is enabled',
+      )
     }
     if (!parsed.DASHSCOPE_API_KEY) {
-      throw new Error('DASHSCOPE_API_KEY is required when SHADOW_RERANK_PROVIDER=dashscope')
+      throw new Error('DASHSCOPE_API_KEY is required when a DashScope rerank provider is enabled')
     }
   }
   if (parsed.VLM_REVIEW_PROVIDER === 'rightapi') {
@@ -498,6 +521,8 @@ export function createSettings(env: Env = process.env): Settings {
     dashscopeApiKey: parsed.DASHSCOPE_API_KEY,
     shadowRerankMaxCalls: parsed.SHADOW_RERANK_MAX_CALLS,
     shadowRerankMaxCostCny: parsed.SHADOW_RERANK_MAX_COST_CNY,
+    agentRerankProvider: parsed.AGENT_RERANK_PROVIDER,
+    agentRerankTimeoutMs: parsed.AGENT_RERANK_TIMEOUT_MS,
     vlmReviewProvider: parsed.VLM_REVIEW_PROVIDER,
     vlmReviewMaxCalls: parsed.VLM_REVIEW_MAX_CALLS,
     vlmReviewMaxCostCny: parsed.VLM_REVIEW_MAX_COST_CNY,

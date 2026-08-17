@@ -461,6 +461,7 @@ export interface AgentRunDetail {
     scene_end_seconds: number | null
     rank: number
     retrieval: {
+      media_type?: MediaType
       score?: number
       score_kind?: string
       primary_reason?: string
@@ -479,6 +480,34 @@ export interface AgentRunDetail {
   } | null
 }
 
+export interface AgentRerankRun {
+  id: string
+  agent_run_id: string
+  status:
+    | 'preparing_evidence'
+    | 'running'
+    | 'succeeded'
+    | 'failed'
+    | 'outcome_unknown'
+    | 'not_applicable'
+  external_call_status: 'not_dispatched' | 'dispatched' | 'completed'
+  provider: string
+  requested_model: string
+  provider_request_id: string | null
+  request_bytes: number | null
+  total_tokens: number | null
+  estimated_cost_cny: number | null
+  latency_ms: number | null
+  error: { code: string; message: string | null } | null
+  rankings: Array<{
+    candidate_key: string
+    rrf_rank: number
+    rerank_rank: number | null
+    relevance_score: number | null
+  }>
+  feedback: 'rerank_better' | 'rrf_better' | 'same' | null
+}
+
 export interface AgentSettingsResponse {
   provider: 'rightapi'
   model: 'qwen3.7-plus'
@@ -487,8 +516,8 @@ export interface AgentSettingsResponse {
   api_key: { configured: boolean }
   capabilities: {
     external_text_available: boolean
-    external_visual_available: false
-    rerank_available: false
+    external_visual_available: boolean
+    rerank_available: boolean
     vlm_review_available: false
     unavailable_reasons: string[]
   }
@@ -1078,6 +1107,24 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<AgentRunDetail>(`/agent/runs/${id}`, {
         method: 'GET',
         signal: options.signal,
+      }),
+    startAgentRerank: (id: string, input: { confirmed: true; max_cost_cny: number }) =>
+      request<AgentRerankRun>(`/agent/runs/${id}/rerank`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    getAgentRerank: (id: string, options: { signal?: AbortSignal } = {}) =>
+      request<AgentRerankRun | null>(`/agent/runs/${id}/rerank`, {
+        method: 'GET',
+        signal: options.signal,
+      }),
+    saveAgentRerankFeedback: (
+      id: string,
+      input: { verdict: 'rerank_better' | 'rrf_better' | 'same' },
+    ) =>
+      request<AgentRerankRun>(`/agent/rerank-runs/${id}/feedback`, {
+        method: 'PUT',
+        body: JSON.stringify(input),
       }),
     createCandidateEvidence: (input: {
       source: CandidateEvidenceSource

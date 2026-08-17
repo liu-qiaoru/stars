@@ -34,6 +34,7 @@ import { agentSideEffects, agentToolCalls, jobs } from '../database/schema.js'
 import { eq } from 'drizzle-orm'
 import { AGENT_STEP_HANDLER, type AgentStepHandler } from './agent.types.js'
 import { AgentRuntimeConfigService } from './agent-runtime-config.service.js'
+import { AgentRerankService } from './agent-rerank.service.js'
 
 const persistedAgentConditionSchema = z
   .object({
@@ -64,6 +65,7 @@ export class AgentService {
     @Inject(SETTINGS) private readonly settings: Settings,
     @Inject(AGENT_STEP_HANDLER) private readonly stepHandler: AgentStepHandler,
     @Optional() private readonly runtimeConfig?: AgentRuntimeConfigService,
+    @Optional() private readonly rerankService?: AgentRerankService,
   ) {}
 
   getCapabilities() {
@@ -79,6 +81,7 @@ export class AgentService {
     if (!stepHandlerReady) unavailableReasons.push('agent_executor_or_step_handler_not_ready')
 
     return {
+      // Agent 固定意图/检索协议仍是 Phase C；Rerank 是可选后处理，不改写主 run 协议。
       phase: 'C',
       provider: 'rightapi',
       model: 'qwen3.7-plus',
@@ -90,12 +93,11 @@ export class AgentService {
         available: runCreationAvailable,
         allowed_fields: ['user_prompt', 'deidentified_capability_boundary'],
       },
-      // 视觉授权只是数据库协议的独立字段；Phase B 没有任何发图入口。
       external_visual: {
-        deployment_enabled: false,
-        configured: false,
-        available: false,
-        allowed_fields: [],
+        deployment_enabled: this.settings.agentRerankProvider === 'dashscope',
+        configured: Boolean(this.settings.dashscopeWorkspaceId && this.settings.dashscopeApiKey),
+        available: this.rerankService?.available ?? false,
+        allowed_fields: ['full_user_query', 'rrf_top20_derived_pngs'],
       },
       unavailable_reasons: unavailableReasons,
     }
@@ -117,10 +119,16 @@ export class AgentService {
         message: '创建 Agent V1 run 前必须授权发送本次用户输入。',
       })
     }
-    if (parsed.allow_external_visual) {
+    if (parsed.allow_external_visual && !this.rerankService?.available) {
       throw new BadRequestException({
         code: 'AGENT_EXTERNAL_VISUAL_NOT_AVAILABLE',
-        message: 'Phase B 不接收视觉外发授权，也不会发送候选图片。',
+        message: '产品 Rerank 未启用，不能接受本次视觉外发授权。',
+      })
+    }
+    if (parsed.allow_external_visual && parsed.media_types.some((type) => type === 'audio')) {
+      throw new BadRequestException({
+        code: 'AGENT_RERANK_VISUAL_SCOPE_REQUIRED',
+        message: '开启 Rerank 时媒体范围只能包含 image 和 video。',
       })
     }
     if (parsed.media_types.includes('document')) {

@@ -464,6 +464,9 @@ export class AgentV1StepHandler implements AgentStepHandler {
         sceneEndSeconds: candidate.end_time_seconds,
         rank: index + 1,
         retrievalJson: {
+          // Web 需要选择正确的 image/video/audio 原生播放器；媒体类型来自 Server 已校验
+          // 的 Search 响应，不允许浏览器根据 candidate_key 猜测。
+          media_type: candidate.media_type,
           score: candidate.score,
           score_kind: candidate.score_kind,
           primary_reason: candidate.primary_reason,

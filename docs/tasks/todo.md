@@ -534,6 +534,18 @@ Review：
 本轮只证明 Provider、Tool Call、审计、停止和恢复链路可运行，质量与评测口径均未达到启动 84 次
 正式评测的条件；不进入 Phase G。
 
+### Agent V1：用户主动开启的产品 Rerank（2026-08-17）
+
+- [x] Agent 搜索仍先冻结并展示不可变 RRF Top-20；产品 Rerank 使用独立 run/ranking 表保存
+      `qwen3-vl-rerank` Top-10，不覆盖普通候选、不后台静默执行。
+- [x] Web 增加按查询显式开关，展示完整 RRF 顺序和 Rerank 顺序，并保存
+      `Rerank 更好 / RRF 更好 / 差不多` 三选一反馈；同一 run 改选只更新一票。
+- [x] 图片由 Server 校验并缩放，视频复用异步 `contact_sheet_v1`。外发前提交 dispatched；
+      `outcome_unknown` 立即停止且不自动重试。默认 `AGENT_RERANK_PROVIDER=disabled`，本次实现与
+      自动化测试未产生真实 DashScope 请求。
+- [x] 新增 0014 迁移和迁移前 PostgreSQL 备份；迁移只增加三张产品事实表，不修改
+      `media_files`、`media_assets`、`vector_refs`、`video_scenes` 或 Qdrant。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

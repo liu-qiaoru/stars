@@ -389,6 +389,22 @@ export const createAgentRunInputSchema = z
   })
   .strict()
 
+// 产品 Rerank 是用户对当前 Agent run 的显式选择。一次调用固定比较 RRF Top-20，
+// 因此浏览器只需确认视觉外发和本次最高预算，不能提交候选列表或模型参数。
+export const startAgentRerankInputSchema = z
+  .object({
+    confirmed: z.literal(true),
+    max_cost_cny: z.number().positive().max(0.5),
+  })
+  .strict()
+
+// 反馈是同一批候选的成对比较，不把 Rerank 分数误当成用户满意度。
+export const agentRerankFeedbackInputSchema = z
+  .object({
+    verdict: z.enum(['rerank_better', 'rrf_better', 'same']),
+  })
+  .strict()
+
 export const resumeAgentRunInputSchema = z
   .object({
     waiting_step_id: uuidSchema,

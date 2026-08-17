@@ -487,7 +487,7 @@ Phase C 只有在外部文本部署开关、RightAPI URL/Key、后台执行器�
     "deployment_enabled": false,
     "configured": false,
     "available": false,
-    "allowed_fields": []
+    "allowed_fields": ["full_user_query", "rrf_top20_derived_pngs"]
   },
   "unavailable_reasons": [
     "external_text_deployment_disabled",
@@ -514,7 +514,9 @@ Phase C 只有在外部文本部署开关、RightAPI URL/Key、后台执行器�
 
 - `prompt` 最多 4000 个 Unicode 字符，超限拒绝，不静默截断。
 - `allow_external_text` 是本 run 发送用户原 prompt 的授权，Agent V1 必须为 `true`。
-- `allow_external_visual` 是独立视觉授权；Phase B 必须为 `false`，且没有发图入口。
+- `allow_external_visual` 是独立视觉授权。默认 `false`；只有产品 Rerank 已通过
+  `AGENT_RERANK_PROVIDER=dashscope` 显式启用时才能设为 `true`。授权范围固定为完整原查询和
+  最多 20 张派生 PNG，不包含路径、Caption、转录、候选 Key 或指纹。
 - `library_ids` / `media_types` 是 Server 强制范围上限，不由模型扩大。
 
 ```json
@@ -653,7 +655,40 @@ Server 在响应预览前重新校验候选属于当前 run、`file_generation`�
 复用、run 与事件更新。重复/并发确认最多创建一个 `export_clip` Job，并始终返回同一 `job_id`。
 run 进入 `succeeded` 只表示确认事实完成；导出是否完成必须读取独立 Job 状态。
 
-Phase C 仍不提供 Rerank、VLM 复核或 Agent 自主循环。
+Phase C 主 run 仍不改变固定意图、一次原文搜索和安全导出协议。产品 Rerank 是独立可选后处理，
+不会改写主 run 的 RRF 候选，也不接入 VLM 条件复核或 Agent 自主循环。
+
+## Agent 产品 Rerank API
+
+Rerank（重排）在同一次 Agent 查询的 RRF Top-20 已冻结后执行。RRF 是只利用多个召回通道名次
+合并结果的基线；Rerank 把查询与候选派生 PNG 交给 `qwen3-vl-rerank`，返回独立 Top-10。
+
+### POST /agent/runs/{id}/rerank
+
+```json
+{ "confirmed": true, "max_cost_cny": 0.216 }
+```
+
+只有本 run 已保存 `allow_external_visual=true`、产品 Provider 可用、搜索已完成且候选为连续视觉
+Top-20 时才会执行。少于 20 条或包含音频时保存 `not_applicable`，外部调用为 0。视频候选先异步
+创建 `contact_sheet_v1`；图片由 Server 校验 generation/Asset 后等比缩放为最长边 1600 像素的
+PNG。网络前先提交 `external_call_status=dispatched`；无明确响应时进入 `outcome_unknown`，不自动
+重试。一次 run 最多一个 Rerank 事实，重复 POST 幂等返回原结果。
+
+### GET /agent/runs/{id}/rerank
+
+没有启用时返回 `null`。存在时返回状态、请求审计、token/费用/耗时、错误、20 条 ranking 身份和
+当前反馈。Top-10 行包含 `rerank_rank` 与 `relevance_score`，其余 10 行保持 null；原始
+`rrf_rank` 始终保留。相关分数不是概率，只能在本次请求内比较。
+
+### PUT /agent/rerank-runs/{id}/feedback
+
+```json
+{ "verdict": "rerank_better" }
+```
+
+`verdict` 只接受 `rerank_better | rrf_better | same`。只有成功的 Rerank 可反馈；重复选择会更新
+同一行，因此后续汇总每次查询最多计一票。
 
 ## 候选证据 API（Agent V1 Phase D）
 
@@ -679,7 +714,7 @@ Evaluation 来源把 `source` 改为
 
 RRF Top-20 中由 Caption 单独召回的视频候选继续保留原 Caption Asset，不能改写冻结快照。Server
 验证 Caption 属于同一冻结 file/scene 后，确定性选择该场景第一条非 stale 且已有 indexed
-`video_frame_vectors` 引用的帧作为证据 Job 锚点；Agent 候选仍要求原冻结 Asset 本身是视频帧。
+`video_frame_vectors` 引用的帧作为证据 Job 锚点；Agent 与 Evaluation 使用相同规则。
 找不到合格帧时返回 409，不删除候选、不补位或重新搜索。
 
 响应为 `{ "items": [...] }`，每项使用 snake_case，包含 `id`、`candidate_key`、

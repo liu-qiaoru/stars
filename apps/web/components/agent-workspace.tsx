@@ -1,8 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bot, Clock3, Send, ShieldCheck } from 'lucide-react'
-import { createApiClient, type AgentRunDetail, type JobSummary } from '../lib/api-client'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Bot, Clock3, Send, ShieldCheck, Sparkles } from 'lucide-react'
+import {
+  createApiClient,
+  type AgentRerankRun,
+  type AgentRunDetail,
+  type JobSummary,
+} from '../lib/api-client'
 import { Alert } from './ui/alert'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
@@ -21,11 +26,15 @@ const terminalRunStatuses = new Set([
   'expired',
 ])
 const terminalJobStatuses = new Set(['succeeded', 'failed', 'cancelled'])
+const terminalRerankStatuses = new Set(['succeeded', 'failed', 'outcome_unknown', 'not_applicable'])
 
 type AgentApiClient = Pick<
   ReturnType<typeof createApiClient>,
   | 'createAgentRun'
   | 'getAgentRun'
+  | 'startAgentRerank'
+  | 'getAgentRerank'
+  | 'saveAgentRerankFeedback'
   | 'getAgentSettings'
   | 'selectAgentExport'
   | 'confirmAgentExport'
@@ -50,6 +59,10 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
   const [prompt, setPrompt] = useState('')
   const [run, setRun] = useState<AgentRunDetail | null>(null)
   const [job, setJob] = useState<JobSummary | null>(null)
+  const [rerank, setRerank] = useState<AgentRerankRun | null>(null)
+  const [rerankEnabled, setRerankEnabled] = useState(false)
+  const [rerankAvailable, setRerankAvailable] = useState(false)
+  const rerankStartPending = useRef(false)
   const [pollIntervalMs, setPollIntervalMs] = useState(2_000)
   const [statusMessage, setStatusMessage] = useState(
     '输入请求后，Agent 会先识别一次意图并执行一次原文搜索。',
@@ -78,7 +91,10 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
     const controller = new AbortController()
     void client
       .getAgentSettings({ signal: controller.signal })
-      .then((settings) => setPollIntervalMs(settings.editable.web_poll_interval_ms))
+      .then((settings) => {
+        setPollIntervalMs(settings.editable.web_poll_interval_ms)
+        setRerankAvailable(settings.capabilities.rerank_available)
+      })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === 'AbortError')) {
           setStatusMessage(
@@ -97,6 +113,11 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
       .getAgentRun(persistedRunId, { signal: controller.signal })
       .then(async (persistedRun) => {
         setRun(persistedRun)
+        const persistedRerank = await client.getAgentRerank(persistedRun.id, {
+          signal: controller.signal,
+        })
+        setRerank(persistedRerank)
+        setRerankEnabled(Boolean(persistedRerank))
         restoreConfirmation(persistedRun)
         if (persistedRun.export_job?.id) {
           setJob(await client.getJob(persistedRun.export_job.id, { signal: controller.signal }))
@@ -122,6 +143,8 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
         ? run
         : await client.getAgentRun(run.id, { signal })
       if (nextRun !== run) setRun(nextRun)
+      const nextRerank = await client.getAgentRerank(nextRun.id, { signal })
+      if (nextRerank) setRerank(nextRerank)
       const jobId = nextRun.export_job?.id ?? job?.id
       if (jobId && (!job || !terminalJobStatuses.has(job.status))) {
         setJob(await client.getJob(jobId, { signal }))
@@ -134,7 +157,9 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
     if (!run) return
     const runDone = terminalRunStatuses.has(run.status)
     const jobDone = !job || terminalJobStatuses.has(job.status)
-    if (runDone && jobDone) return
+    const rerankDone =
+      !rerankEnabled || (rerank !== null && terminalRerankStatuses.has(rerank.status))
+    if (runDone && jobDone && rerankDone) return
     let disposed = false
     let timerId: number | undefined
     let requestController: AbortController | undefined
@@ -171,7 +196,32 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
       if (timerId) window.clearTimeout(timerId)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [job, pollIntervalMs, refreshPersistedState, run])
+  }, [job, pollIntervalMs, refreshPersistedState, rerank, rerankEnabled, run])
+
+  useEffect(() => {
+    if (
+      !run ||
+      !rerankEnabled ||
+      rerank ||
+      rerankStartPending.current ||
+      !['waiting_for_export_selection', 'succeeded'].includes(run.status)
+    ) {
+      return
+    }
+    rerankStartPending.current = true
+    setStatusMessage('RRF 已返回；正在准备 20 张派生 PNG 并启动 Rerank…')
+    void client
+      .startAgentRerank(run.id, { confirmed: true, max_cost_cny: 0.216 })
+      .then((result) => setRerank(result))
+      .catch((error: unknown) => {
+        setStatusMessage(
+          error instanceof Error ? `Rerank 启动失败：${error.message}` : 'Rerank 启动失败。',
+        )
+      })
+      .finally(() => {
+        rerankStartPending.current = false
+      })
+  }, [client, rerank, rerankEnabled, run])
 
   async function startRun() {
     const trimmedPrompt = prompt.trim()
@@ -180,15 +230,17 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
     const created = await client.createAgentRun({
       prompt: trimmedPrompt,
       allow_external_text: true,
-      allow_external_visual: false,
+      allow_external_visual: rerankEnabled,
       // 空数组在 Server 协议中表示“无额外限制”，但浏览器显式列出 V1 支持范围，
       // 让后续导出守卫和页面展示都不依赖隐式默认值。
-      media_types: ['image', 'video', 'audio'],
+      media_types: rerankEnabled ? ['image', 'video'] : ['image', 'video', 'audio'],
     })
     const detail = await client.getAgentRun(created.run_id)
     window.localStorage.setItem('agent:last-run-id', created.run_id)
     setRun(detail)
     setJob(null)
+    setRerank(null)
+    rerankStartPending.current = false
     setSelectedKey(null)
     setConfirmation(null)
     setStatusMessage(`run 已创建：${created.status}`)
@@ -260,6 +312,13 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
     setRun(await client.getAgentRun(run.id))
   }
 
+  async function saveRerankFeedback(verdict: 'rerank_better' | 'rrf_better' | 'same') {
+    if (!rerank) return
+    const updated = await client.saveAgentRerankFeedback(rerank.id, { verdict })
+    setRerank(updated)
+    setStatusMessage('Rerank 对比反馈已保存，可改选。')
+  }
+
   return (
     <section className="mx-auto max-w-5xl space-y-5">
       <Card>
@@ -269,11 +328,11 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
               <Bot aria-hidden="true" size={22} />
             </span>
             <div>
-              <p className="eyebrow">Agent V1 · Phase D</p>
+              <p className="eyebrow">Agent V1 · Experimental Rerank</p>
               <CardTitle className="text-2xl">检索与安全导出</CardTitle>
             </div>
           </div>
-          <CardDescription>固定流程，不包含 Rerank、VLM 或自主工具循环。</CardDescription>
+          <CardDescription>RRF 始终先返回；Rerank 仅在本次查询显式开启时执行。</CardDescription>
         </CardHeader>
         <CardContent>
           <form
@@ -291,6 +350,28 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
               placeholder="查找红色汽车经过桥下的视频，并导出合适片段"
               required
             />
+            <div className="rounded-lg border border-[var(--hairline)] p-3">
+              <div className="flex items-start gap-3">
+                <input
+                  id="agent-rerank"
+                  className="mt-1 size-4 accent-[var(--primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                  type="checkbox"
+                  checked={rerankEnabled}
+                  disabled={!rerankAvailable}
+                  onChange={(event) => setRerankEnabled(event.target.checked)}
+                />
+                <div>
+                  <Label htmlFor="agent-rerank">为本次查询开启实验性 Rerank</Label>
+                  <p className="mt-1 text-xs text-[var(--mute)]">
+                    开启后会向 DashScope 北京地域发送完整查询和 RRF Top-20 的派生 PNG； 单次最多 20
+                    张，按最高 ¥0.216 预留，不自动重试未知结果。
+                  </p>
+                  {!rerankAvailable ? (
+                    <p className="mt-1 text-xs text-[var(--mute)]">当前部署未启用产品 Rerank。</p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
             <Button type="submit">
               <Send aria-hidden="true" size={16} />
               启动任务
@@ -338,6 +419,141 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
             </CardContent>
           </Card>
 
+          {run.candidates?.length ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>RRF 结果</CardTitle>
+                <CardDescription>
+                  RRF（倒数排名融合）只按多个召回通道的名次合并；分数不是相关概率。
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ol className="grid gap-2 sm:grid-cols-2">
+                  {run.candidates.map((candidate) => (
+                    <li
+                      key={candidate.candidate_key}
+                      className="rounded-lg border border-[var(--hairline)] bg-white p-3"
+                    >
+                      <strong>RRF {candidate.rank}</strong>
+                      <p className="truncate text-xs text-[var(--mute)]">
+                        {candidate.candidate_key}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {rerankEnabled ? (
+            <Card aria-live="polite">
+              <CardHeader>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles aria-hidden="true" size={18} />
+                      Rerank 结果
+                    </CardTitle>
+                    <CardDescription>
+                      与上方同一次查询的 RRF 基线对照；相关分数只在本次 Top-20 内用于排序。
+                    </CardDescription>
+                  </div>
+                  <Badge>{rerank?.status ?? '等待 RRF Top-20'}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {rerank?.status === 'succeeded' ? (
+                  <>
+                    <ol className="grid gap-2 sm:grid-cols-2">
+                      {rerank.rankings
+                        .filter((item) => item.rerank_rank !== null)
+                        .sort((left, right) => left.rerank_rank! - right.rerank_rank!)
+                        .map((item) => {
+                          const candidate = run.candidates?.find(
+                            (entry) => entry.candidate_key === item.candidate_key,
+                          )
+                          const mediaUrl = candidate
+                            ? client.mediaContentUrl(candidate.file_id, {
+                                startTimeSeconds: candidate.scene_start_seconds,
+                                endTimeSeconds: candidate.scene_end_seconds,
+                              })
+                            : null
+                          return (
+                            <li
+                              key={item.candidate_key}
+                              className="overflow-hidden rounded-lg border border-[var(--hairline)] bg-white"
+                            >
+                              {mediaUrl && candidate ? (
+                                candidate.scene_id ? (
+                                  <video
+                                    aria-label={`播放 Rerank 候选 ${item.rerank_rank}`}
+                                    className="aspect-video w-full bg-black object-contain"
+                                    controls
+                                    playsInline
+                                    preload="metadata"
+                                    src={mediaUrl}
+                                  />
+                                ) : (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    alt={`Rerank 候选 ${item.rerank_rank}，尚未人工审核`}
+                                    className="aspect-video w-full bg-black object-contain"
+                                    loading="lazy"
+                                    src={mediaUrl}
+                                  />
+                                )
+                              ) : null}
+                              <div className="p-3">
+                                <strong>Rerank {item.rerank_rank}</strong>
+                                <p className="text-sm text-[var(--mute)]">
+                                  原 RRF {item.rrf_rank} · 分数 {item.relevance_score ?? '—'}
+                                </p>
+                                <p className="truncate text-xs text-[var(--mute)]">
+                                  {item.candidate_key}
+                                </p>
+                              </div>
+                            </li>
+                          )
+                        })}
+                    </ol>
+                    <fieldset className="rounded-lg border border-[var(--hairline)] p-4">
+                      <legend className="px-1 text-sm font-medium">哪组结果更好？</legend>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          ['rerank_better', 'Rerank 更好'],
+                          ['rrf_better', 'RRF 更好'],
+                          ['same', '差不多'],
+                        ].map(([value, label]) => (
+                          <Button
+                            key={value}
+                            type="button"
+                            variant={rerank.feedback === value ? 'default' : 'outline'}
+                            aria-pressed={rerank.feedback === value}
+                            onClick={() =>
+                              void saveRerankFeedback(
+                                value as 'rerank_better' | 'rrf_better' | 'same',
+                              )
+                            }
+                          >
+                            {label}
+                          </Button>
+                        ))}
+                      </div>
+                    </fieldset>
+                  </>
+                ) : rerank?.error ? (
+                  <Alert>
+                    {rerank.error.code}：{rerank.error.message}
+                  </Alert>
+                ) : (
+                  <p className="text-sm text-[var(--mute)]">
+                    RRF 结果可先使用；Rerank 正在等待派生 PNG 或模型响应。
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+
           {run.conditions?.length ? (
             <Card>
               <CardHeader>
@@ -359,7 +575,7 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
 
           <Card>
             <CardHeader>
-              <CardTitle>搜索候选</CardTitle>
+              <CardTitle>RRF 候选详情</CardTitle>
               <CardDescription>RRF（倒数排名融合）分数只表示排序，不是相关概率。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
@@ -372,6 +588,10 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
                     startTimeSeconds: candidate.scene_start_seconds,
                     endTimeSeconds: candidate.scene_end_seconds,
                   })
+                  // 旧 run 的 retrieval 尚未保存 media_type；只对历史数据回退到 Server
+                  // 生成的 candidate_key 前缀，新 run 始终使用显式字段。
+                  const candidateMediaType =
+                    candidate.retrieval.media_type ?? candidate.candidate_key.split(':')[0]
 
                   return (
                     <article
@@ -382,14 +602,33 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
                           : 'border-[var(--hairline)]'
                       }`}
                     >
-                      <video
-                        aria-label={`播放候选 ${candidate.rank}，场景 ${candidate.scene_start_seconds}–${candidate.scene_end_seconds} 秒`}
-                        className="aspect-video w-full bg-black object-contain"
-                        controls
-                        playsInline
-                        preload="metadata"
-                        src={mediaUrl}
-                      />
+                      {candidateMediaType === 'image' ? (
+                        // 原图经受控 content API 读取；alt 只描述候选身份，不声称图片内容已审核。
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          alt={`RRF 候选 ${candidate.rank}，尚未审核`}
+                          className="aspect-video w-full bg-black object-contain"
+                          loading="lazy"
+                          src={mediaUrl}
+                        />
+                      ) : candidateMediaType === 'audio' ? (
+                        <audio
+                          aria-label={`播放音频候选 ${candidate.rank}`}
+                          className="w-full p-4"
+                          controls
+                          preload="metadata"
+                          src={mediaUrl}
+                        />
+                      ) : (
+                        <video
+                          aria-label={`播放候选 ${candidate.rank}，场景 ${candidate.scene_start_seconds}–${candidate.scene_end_seconds} 秒`}
+                          className="aspect-video w-full bg-black object-contain"
+                          controls
+                          playsInline
+                          preload="metadata"
+                          src={mediaUrl}
+                        />
+                      )}
                       <div className="space-y-2 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <strong>候选 {candidate.rank}</strong>

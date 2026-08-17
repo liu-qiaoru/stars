@@ -130,7 +130,11 @@ export async function createDurableAgentRun(
         ? { fields: ['user_prompt', 'deidentified_capability_boundary'] }
         : { fields: [] },
       visualScopeJson: input.allowExternalVisual
-        ? { fields: ['candidate_frames'] }
+        ? {
+            fields: ['full_user_query', 'rrf_top20_derived_pngs'],
+            maximum_image_count: 20,
+            protocol_version: 'qwen3-vl-rerank-top20-v1',
+          }
         : { fields: [] },
       grantedAt: now,
     })

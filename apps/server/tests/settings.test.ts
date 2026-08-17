@@ -44,6 +44,8 @@ describe('createSettings', () => {
       dashscopeApiKey: undefined,
       shadowRerankMaxCalls: 1,
       shadowRerankMaxCostCny: 0.5,
+      agentRerankProvider: 'disabled',
+      agentRerankTimeoutMs: 180000,
       vlmReviewProvider: 'disabled',
       vlmReviewMaxCalls: 84,
       vlmReviewMaxCostCny: 5,
@@ -128,7 +130,7 @@ describe('createSettings', () => {
         SHADOW_RERANK_PROVIDER: 'dashscope',
         DASHSCOPE_API_KEY: 'test-key',
       }),
-    ).toThrow('DASHSCOPE_WORKSPACE_ID is required when SHADOW_RERANK_PROVIDER=dashscope')
+    ).toThrow('DASHSCOPE_WORKSPACE_ID is required when a DashScope rerank provider is enabled')
 
     expect(
       createSettings({
@@ -160,6 +162,36 @@ describe('createSettings', () => {
         SHADOW_RERANK_MAX_COST_CNY: '0.5001',
       }),
     ).toThrow('SHADOW_RERANK_MAX_COST_CNY must be greater than 0 and at most 0.5')
+  })
+
+  test('产品 Rerank 独立默认关闭，超时门槛固定不超过三分钟', () => {
+    expect(
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        DASHSCOPE_WORKSPACE_ID: 'ws-test',
+        DASHSCOPE_API_KEY: 'test-key',
+      }),
+    ).toMatchObject({ agentRerankProvider: 'disabled', agentRerankTimeoutMs: 180000 })
+
+    expect(
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        AGENT_RERANK_PROVIDER: 'dashscope',
+        AGENT_RERANK_TIMEOUT_MS: '90000',
+        DASHSCOPE_WORKSPACE_ID: 'ws-test',
+        DASHSCOPE_API_KEY: 'test-key',
+      }),
+    ).toMatchObject({ agentRerankProvider: 'dashscope', agentRerankTimeoutMs: 90000 })
+
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        AGENT_RERANK_TIMEOUT_MS: '180001',
+      }),
+    ).toThrow('AGENT_RERANK_TIMEOUT_MS must be between 1000 and 180000')
   })
 
   test('读取 Agent 外部模型配置并保留默认关闭', () => {

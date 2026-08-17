@@ -315,6 +315,19 @@ pending attempt 可在 Server 重启后继续；已 dispatched 但没有确认�
 任一已外发 attempt 缺用量时停止，汇总计量保持 null。用户重新授权前不会外发查询或图像，
 也不执行 Phase F VLM 审核。
 
+### 用户主动开启的产品 Rerank
+
+产品 Rerank 不替换 `SearchService`：Agent 仍先完成一次本地原文搜索，并把 RRF Top-20 作为
+不可变基线写入 `agent_run_candidates`。用户在本次查询开启 Rerank 后，Web 再调用独立 API；
+Python Worker 只为视频场景异步生成 contact sheet，图片缩放和 Provider 调用由 NestJS Server
+完成。结果写入 `agent_rerank_runs` 与 `agent_rerank_rankings`，绝不回写原 rank。页面同时展示
+两套顺序，并把 `rerank_better | rrf_better | same` 写入一对一反馈表，供累积真实使用样本后
+评估生产门槛。
+
+`AGENT_RERANK_PROVIDER` 是独立部署闸门，默认 `disabled`；仅配置 DashScope 凭证不会外发。
+每个 Agent run 还必须单独保存视觉授权。请求外发前提交 dispatched，超时或连接中断记为
+`outcome_unknown` 且不自动重试。当前硬超时上限与正式接入 P95 门槛均为 180 秒。
+
 ### Phase F 候选审核与 VLM 协议准备
 
 Phase F 在真实 VLM 之前增加独立的人工候选审核门。本地抽样器只从一次完整

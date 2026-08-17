@@ -330,7 +330,9 @@ export class CandidateEvidenceService {
       )
       .limit(1)
     if (!candidate) throw new NotFoundException('Frozen Agent candidate not found')
-    return this.validateIdentity(db, candidate)
+    // 产品 Rerank 的 Agent RRF Top-20 也可能由 Caption 通道单独召回。冻结候选仍保留
+    // Caption asset_id；contact sheet 只改用同场景的已索引帧作为 Worker 本地锚点。
+    return this.validateIdentity(db, candidate, true)
   }
 
   private async resolveEvaluationCandidate(
@@ -351,9 +353,7 @@ export class CandidateEvidenceService {
       )
       .limit(1)
     if (!candidate) throw new NotFoundException('Frozen Evaluation candidate not found')
-    // Evaluation 的 RRF Top-20 可能由 Caption 通道单独召回。此时冻结 asset_id 必须
-    // 继续指向 Caption 以保留检索事实，但联系表协议需要一个已索引 video_frame 作为
-    // Worker 的身份锚点。Agent 候选没有这个转换，仍执行原来的严格帧身份校验。
+    // Evaluation 的 RRF Top-20 也使用相同 Caption → 同场景帧锚点规则。
     return this.validateIdentity(db, candidate, true)
   }
 

@@ -32,6 +32,7 @@ describe('database migration chain', () => {
       '0011_phase_f_candidate_replacement_lineage.sql',
       '0012_phase_f_human_condition_labeling.sql',
       '0013_phase_f_real_vlm_capability.sql',
+      '0014_flawless_shaman.sql',
     ])
     expect(metadataFiles).toEqual([
       '0000_snapshot.json',
@@ -48,6 +49,7 @@ describe('database migration chain', () => {
       '0011_snapshot.json',
       '0012_snapshot.json',
       '0013_snapshot.json',
+      '0014_snapshot.json',
       '_journal.json',
     ])
     const journal = JSON.parse(await readFile(resolve('drizzle/meta/_journal.json'), 'utf8')) as {
@@ -68,6 +70,7 @@ describe('database migration chain', () => {
       '0011_phase_f_candidate_replacement_lineage',
       '0012_phase_f_human_condition_labeling',
       '0013_phase_f_real_vlm_capability',
+      '0014_flawless_shaman',
     ])
 
     const sql = await readFile(resolve('drizzle', migrationFiles[0]!), 'utf8')
@@ -393,6 +396,33 @@ describe('database migration chain', () => {
         'evaluation_vlm_blind_real_results',
       ]),
     )
+    const mediaTableCount = await client.query<{ count: number }>(
+      `select count(*)::int as count from pg_tables where schemaname='public' and tablename in ('media_files', 'media_assets', 'vector_refs', 'video_scenes')`,
+    )
+    expect(mediaTableCount.rows[0]?.count).toBe(4)
+  })
+
+  test('adds product Rerank facts without rewriting Agent RRF candidates or media tables', async () => {
+    client = new PGlite()
+    const migrationFiles = (await readdir(resolve('drizzle')))
+      .filter((file) => file.endsWith('.sql'))
+      .sort()
+    for (const file of migrationFiles) {
+      await client.exec(await readFile(resolve('drizzle', file), 'utf8'))
+    }
+
+    const rerankTables = await client.query<{ tablename: string }>(
+      `select tablename from pg_tables where schemaname='public' and tablename like 'agent_rerank_%' order by tablename`,
+    )
+    expect(rerankTables.rows.map((row) => row.tablename)).toEqual([
+      'agent_rerank_feedback',
+      'agent_rerank_rankings',
+      'agent_rerank_runs',
+    ])
+    const candidateColumns = await client.query<{ column_name: string }>(
+      `select column_name from information_schema.columns where table_name='agent_run_candidates' order by column_name`,
+    )
+    expect(candidateColumns.rows.map((row) => row.column_name)).not.toContain('rerank_rank')
     const mediaTableCount = await client.query<{ count: number }>(
       `select count(*)::int as count from pg_tables where schemaname='public' and tablename in ('media_files', 'media_assets', 'vector_refs', 'video_scenes')`,
     )
