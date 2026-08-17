@@ -53,6 +53,7 @@ function client(overrides: Record<string, unknown> = {}) {
     confirmAgentExport: vi.fn(),
     getJob: vi.fn(),
     retryUnknownAgentRun: vi.fn(),
+    cancelAgentRun: vi.fn(),
     createCandidateEvidence: vi.fn().mockResolvedValue({ items: [] }),
     listCandidateEvidence: vi.fn().mockResolvedValue({ items: [] }),
     cancelCandidateEvidence: vi.fn(),
@@ -192,6 +193,62 @@ describe('AgentWorkspace', () => {
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
     expect(apiClient.createAgentRun).not.toHaveBeenCalled()
+  })
+
+  test('结果未知时提供重新执行入口', async () => {
+    window.localStorage.setItem('agent:last-run-id', 'run-unknown')
+    const unknownRun = {
+      ...terminalRun(),
+      id: 'run-unknown',
+      status: 'outcome_unknown',
+      error: { code: 'AGENT_INTENT_OUTCOME_UNKNOWN', message: '请求结果未知' },
+      steps: [
+        { step_attempt_id: 'step-unknown', step: 'extracting_intent', status: 'outcome_unknown' },
+      ],
+    }
+    const apiClient = client({
+      getAgentRun: vi.fn().mockResolvedValue(unknownRun),
+      retryUnknownAgentRun: vi.fn().mockResolvedValue({ run_id: 'run-unknown', status: 'queued' }),
+    })
+    render(<AgentWorkspace apiClient={apiClient} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '重新执行' }))
+
+    await waitFor(() =>
+      expect(apiClient.retryUnknownAgentRun).toHaveBeenCalledWith('run-unknown', {
+        step_attempt_id: 'step-unknown',
+        client_request_id: expect.any(String),
+      }),
+    )
+  })
+
+  test('结果未知时可以放弃并读取 cancelled 终态', async () => {
+    window.localStorage.setItem('agent:last-run-id', 'run-unknown')
+    const unknownRun = {
+      ...terminalRun(),
+      id: 'run-unknown',
+      status: 'outcome_unknown',
+      error: { code: 'AGENT_INTENT_OUTCOME_UNKNOWN', message: '请求结果未知' },
+      steps: [
+        { step_attempt_id: 'step-unknown', step: 'extracting_intent', status: 'outcome_unknown' },
+      ],
+    }
+    const cancelledRun = { ...unknownRun, status: 'cancelled' }
+    const apiClient = client({
+      getAgentRun: vi.fn().mockResolvedValueOnce(unknownRun).mockResolvedValue(cancelledRun),
+      cancelAgentRun: vi.fn().mockResolvedValue({ run_id: 'run-unknown', status: 'cancelled' }),
+    })
+    render(<AgentWorkspace apiClient={apiClient} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '放弃本次任务' }))
+
+    await waitFor(() =>
+      expect(apiClient.cancelAgentRun).toHaveBeenCalledWith('run-unknown', {
+        client_request_id: expect.any(String),
+        reason: '用户放弃结果未知的任务',
+      }),
+    )
+    expect(await screen.findByText('cancelled')).toBeInTheDocument()
   })
 
   test('刷新后从持久化 tool call 恢复 Server 冻结预览和确认入口', async () => {

@@ -906,7 +906,10 @@ export async function resumeWaitingAgentRun(
   })
 }
 
-/** queued/等待态尚无外部调用，可立即 cancelled；活动步骤先记 cancel_requested。 */
+/**
+ * queued/等待态尚无外部调用，可立即 cancelled；活动步骤先记 cancel_requested。
+ * outcome_unknown 已经停止自动推进，也允许用户明确放弃；这里只结束本地 run，绝不会重放外部请求。
+ */
 export async function cancelDurableAgentRun(
   db: Database,
   input: { runId: string; clientRequestId: string; reason?: string },
@@ -936,6 +939,7 @@ export async function cancelDurableAgentRun(
     'waiting_for_user_input',
     'waiting_for_export_selection',
     'waiting_for_confirmation',
+    'outcome_unknown',
   ].includes(current.status)
   if (!immediatelyCancellable && !['extracting_intent', 'searching'].includes(current.status)) {
     return { kind: 'invalid_state' }
@@ -979,6 +983,8 @@ export async function cancelDurableAgentRun(
         cancelReason: input.reason ?? null,
         waitingStepId: null,
         waitingExpiresAt: null,
+        // 立即取消后清除 run 的活动步骤指针，避免后续把已放弃的未知尝试误认为仍可重试。
+        currentStepAttemptId: immediatelyCancellable ? null : current.currentStepAttemptId,
         finishedAt: immediatelyCancellable ? now : null,
         updatedAt: now,
       })

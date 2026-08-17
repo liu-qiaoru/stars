@@ -1196,5 +1196,10 @@ export function createApiClient(options: ApiClientOptions = {}) {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    cancelAgentRun: (id: string, input: { client_request_id: string; reason?: string }) =>
+      request<{ run_id: string; status: string }>(`/agent/runs/${id}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
   }
 }

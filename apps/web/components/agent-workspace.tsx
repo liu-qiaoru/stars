@@ -40,6 +40,7 @@ type AgentApiClient = Pick<
   | 'confirmAgentExport'
   | 'getJob'
   | 'retryUnknownAgentRun'
+  | 'cancelAgentRun'
   | 'mediaContentUrl'
   | 'createCandidateEvidence'
   | 'listCandidateEvidence'
@@ -64,6 +65,7 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
   const [rerankAvailable, setRerankAvailable] = useState(false)
   const rerankStartPending = useRef(false)
   const [pollIntervalMs, setPollIntervalMs] = useState(2_000)
+  const [unknownActionPending, setUnknownActionPending] = useState(false)
   const [statusMessage, setStatusMessage] = useState(
     '输入请求后，Agent 会先识别一次意图并执行一次原文搜索。',
   )
@@ -304,12 +306,34 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
 
   async function retryUnknown() {
     const stepAttemptId = run?.steps?.at(-1)?.step_attempt_id
-    if (!run || !stepAttemptId) return
-    await client.retryUnknownAgentRun(run.id, {
-      step_attempt_id: stepAttemptId,
-      client_request_id: crypto.randomUUID(),
-    })
-    setRun(await client.getAgentRun(run.id))
+    if (!run || !stepAttemptId || unknownActionPending) return
+    setUnknownActionPending(true)
+    try {
+      await client.retryUnknownAgentRun(run.id, {
+        step_attempt_id: stepAttemptId,
+        client_request_id: crypto.randomUUID(),
+      })
+      setRun(await client.getAgentRun(run.id))
+      setStatusMessage('已由用户授权重新执行；这会创建一次新的外部请求尝试。')
+    } finally {
+      setUnknownActionPending(false)
+    }
+  }
+
+  /** 放弃只把当前 run 写成 cancelled，不会再次调用 RightAPI。 */
+  async function abandonUnknown() {
+    if (!run || unknownActionPending) return
+    setUnknownActionPending(true)
+    try {
+      await client.cancelAgentRun(run.id, {
+        client_request_id: crypto.randomUUID(),
+        reason: '用户放弃结果未知的任务',
+      })
+      setRun(await client.getAgentRun(run.id))
+      setStatusMessage('本次任务已放弃，不会重新调用 RightAPI。')
+    } finally {
+      setUnknownActionPending(false)
+    }
   }
 
   async function saveRerankFeedback(verdict: 'rerank_better' | 'rrf_better' | 'same') {
@@ -412,9 +436,29 @@ export function AgentWorkspace({ apiClient }: { apiClient?: AgentApiClient }) {
                 </Alert>
               ) : null}
               {run.status === 'outcome_unknown' ? (
-                <Button type="button" variant="outline" onClick={() => void retryUnknown()}>
-                  显式重试未知结果
-                </Button>
+                <div className="space-y-3 rounded-lg border border-[var(--hairline)] bg-[var(--canvas-soft)] p-4 md:col-span-2">
+                  <p className="text-sm text-[var(--ink)]">
+                    上一次外部请求可能已经被模型处理。重新执行可能产生重复请求和费用；放弃只结束本次任务，
+                    不会再次调用 RightAPI。
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      disabled={unknownActionPending}
+                      onClick={() => void retryUnknown()}
+                    >
+                      重新执行
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={unknownActionPending}
+                      onClick={() => void abandonUnknown()}
+                    >
+                      放弃本次任务
+                    </Button>
+                  </div>
+                </div>
               ) : null}
             </CardContent>
           </Card>

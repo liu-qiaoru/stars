@@ -586,6 +586,54 @@ describe('Agent V1 API', () => {
     expect(total).toBe(1)
   })
 
+  test('outcome_unknown 可以由用户幂等放弃并写入明确结束时间', async () => {
+    await closeCurrentModule()
+    const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
+    await compileAgentModule(
+      testSettings({
+        allowExternalLlm: true,
+        rightCodeBaseUrl: 'https://right.example.test',
+        rightCodeApiKey: 'test-key',
+        agentExecutorEnabled: true,
+      }),
+      handler,
+    )
+    const created = await agentController.createRun({
+      prompt: '找视频',
+      allow_external_text: true,
+    })
+    await db
+      .update(agentRuns)
+      .set({
+        status: 'outcome_unknown',
+        currentStepAttemptId: '11111111-1111-4111-8111-111111111111',
+        externalCallStatus: 'outcome_unknown',
+        errorCode: 'AGENT_INTENT_OUTCOME_UNKNOWN',
+        errorMessage: '请求结果未知',
+        finishedAt: null,
+      })
+      .where(eq(agentRuns.id, created.run_id))
+    const input = {
+      client_request_id: 'abandon-unknown-001',
+      reason: '用户放弃结果未知的任务',
+    }
+
+    const first = await agentController.cancelRun(created.run_id, input)
+    const duplicate = await agentController.cancelRun(created.run_id, input)
+
+    expect(first).toMatchObject({ run_id: created.run_id, status: 'cancelled' })
+    expect(duplicate).toEqual(first)
+    await expect(agentController.getRun(created.run_id)).resolves.toMatchObject({
+      status: 'cancelled',
+      finished_at: expect.any(String),
+    })
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(agentRunInputs)
+      .where(eq(agentRunInputs.runId, created.run_id))
+    expect(total).toBe(1)
+  })
+
   test('选择当前 run 的视频候选后生成只读预览，并拒绝场景外时间范围', async () => {
     await closeCurrentModule()
     const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }

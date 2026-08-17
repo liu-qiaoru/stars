@@ -623,7 +623,9 @@ Phase B 只接受固定动作 `continue_as_read_only_search_with_resolved_scope`
 }
 ```
 
-`queued` 和等待态没有正在提交的步骤，可直接进入 `cancelled`。
+`queued`、等待态和 `outcome_unknown` 可直接进入 `cancelled`。其中放弃
+`outcome_unknown` 只结束本地 run、写入 `finished_at` 并清除活动步骤指针，不会再次调用外部 Provider；
+原未知结果尝试仍保留在步骤和事件记录中供审计。
 `extracting_intent` / `searching` 先进入 `cancel_requested`，立即使旧结果的状态条件失效；
 租约安全到期后由 Server 转成 `cancelled`。已经创建的导出 Job 是独立事实，不随 run 取消。
 
