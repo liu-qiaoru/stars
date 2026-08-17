@@ -504,6 +504,36 @@ Review：
 恢复执行再次按停止条件结束。未经新授权，不重试 `partial_relevance`，不补跑最后一条，不启动
 84 次正式评测，也不进入 Phase G。
 
+### Agent V1 Phase F：剩余两类型 continuation（2026-08-17）
+
+- [x] 将 `VLM_REVIEW_TIMEOUT_MS` 的默认值和部署上限从 120,000 ms 调整为 180,000 ms（3 分钟），
+      同时将 84 次正式能力评测的 P95 接入门槛从不高于 90,000 ms 调整为不高于 180,000 ms。
+      P95 是把请求耗时从小到大排列后的第 95 百分位；数值越低越快，门槛放宽只减少慢请求被
+      判失败的概率，不会放宽条件准确率、稳定性或完整性要求。
+- [x] 恢复协议现在也能以一个 `vlm-review-smoke-recovery-v1` unknown run 为来源，只选择其中唯一
+      的 `outcome_unknown` 和唯一的 `not_dispatched` 槽位，创建新的两条 run/attempt 审计链；旧
+      recovery run 和两次超时事实保持不变。自动化测试覆盖“原 smoke 停止 → 四条 recovery 再次
+      停止 → 两条 continuation 成功”的完整顺序。
+- [x] 本地只读 preflight 已确认剩余 `partial_relevance` 和 `insufficient_evidence` 各 1 张派生
+      PNG，共 2 张、1,724,468 bytes，指纹为
+      `6806cf9f88a9bb67b6b5b64f8050e528e00033a86043fa5e62443a9808b916fe`；真实外部调用仍为 0。
+- [x] 用户补充本次新增预算上限 ¥0.20 后创建独立授权
+      `e2942838-4280-4a25-a51c-78d5116c3797`，并完成 continuation run
+      `c65073b7-524e-44be-8cbf-040382fbc68c`。两条均在 180 秒内成功，外部调用 2、成功 2、失败 0、
+      unknown 0；P50/P95 为 39,908/60,504 ms，输入 6,043 + 输出 843 = 6,886 tokens。Provider
+      没有返回账单费用，因此 `billed_cost_cny` 仍为 null，不能把未知费用记为 0。
+- [x] `partial_relevance` 响应指纹
+      `2d8ac828b2ee5d904cc1427c381cc008f7bfc2941e94866bdc2b28384c5efc89`，条件 4/7 与人工真值
+      一致；模型把舞台/演出背景、唱歌、观众或装饰错误判断为 yes，Server 派生 `passed`，与人工
+      条件派生状态不一致。`insufficient_evidence` 响应指纹
+      `7938f36254ee8af613902fb3f49f0feba9915a02888eaf87bab7bdcd550d334d`，条件 6/6 一致且派生
+      `passed`，但冻结分组期望 `insufficient_evidence`，暴露“全部人工真值只有确定 yes/no”与该
+      分组状态之间的评测口径冲突。Continuation 汇总案例状态 0/2、条件 10/13（76.92%）。
+
+五个 smoke 类型现在都至少获得一次成功结构化响应；两次历史超时仍作为独立 unknown attempt 保留。
+本轮只证明 Provider、Tool Call、审计、停止和恢复链路可运行，质量与评测口径均未达到启动 84 次
+正式评测的条件；不进入 Phase G。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

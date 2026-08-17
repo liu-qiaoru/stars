@@ -175,6 +175,94 @@ describe('Phase F real VLM capability orchestration', () => {
     })
   })
 
+  test('chains a two-call recovery after the first recovery stops on another unknown', async () => {
+    const unknown = () =>
+      new QwenVlmReviewProviderError('VLM_REVIEW_OUTCOME_UNKNOWN', 'sanitized', true)
+    const review = vi
+      .fn()
+      // 原 smoke：第一条成功，第二条超时，后三条保持未派发。
+      .mockImplementationOnce(async (request) => successfulProviderResult(request))
+      .mockRejectedValueOnce(unknown())
+      // 第一级 recovery：前两条成功，第三条再次超时，最后一条保持未派发。
+      .mockImplementationOnce(async (request) => successfulProviderResult(request))
+      .mockImplementationOnce(async (request) => successfulProviderResult(request))
+      .mockRejectedValueOnce(unknown())
+      // 第二级 recovery：显式重试 unknown，再执行最后一条未派发案例。
+      .mockImplementation(async (request) => successfulProviderResult(request))
+    const service = createService(context.db, fixture, externalProvider(review))
+
+    const smokePreview = await service.smokePreflight(fixture.datasetId)
+    await service.authorizeSmoke(fixture.datasetId, {
+      confirmed: true,
+      preflight_fingerprint: smokePreview.preflight_fingerprint,
+      max_calls: 5,
+      max_cost_cny: 0.5,
+    })
+    const smokeRun = await service.start(fixture.datasetId, 'smoke')
+    await service.executePending(smokeRun.id)
+
+    const firstPreview = await service.smokeRecoveryPreflight(smokeRun.id)
+    await service.authorizeSmokeRecovery(smokeRun.id, {
+      confirmed: true,
+      preflight_fingerprint: firstPreview.preflight_fingerprint,
+      max_calls: 4,
+      max_cost_cny: 0.4,
+    })
+    const firstRecovery = await service.startSmokeRecovery(smokeRun.id)
+    const firstStopped = await service.executePending(firstRecovery.id)
+    expect(firstStopped).toMatchObject({
+      status: 'outcome_unknown',
+      planned_call_count: 4,
+      external_call_count: 3,
+      succeeded_count: 2,
+      unknown_count: 1,
+    })
+
+    const secondPreview = await service.smokeRecoveryPreflight(firstRecovery.id)
+    expect(secondPreview).toMatchObject({
+      source_run_id: firstRecovery.id,
+      protocol_version: 'vlm-review-smoke-recovery-v1',
+      candidate_count: 2,
+      maximum_call_count: 2,
+      total_image_count: 2,
+      budget: { max_calls: 2, max_cost_cny: 0.4 },
+      external_call_count: 0,
+    })
+    expect(secondPreview.items.map((item) => item.recovery_reason)).toEqual([
+      'retry_outcome_unknown',
+      'previously_not_dispatched',
+    ])
+    await service.authorizeSmokeRecovery(firstRecovery.id, {
+      confirmed: true,
+      preflight_fingerprint: secondPreview.preflight_fingerprint,
+      max_calls: 2,
+      max_cost_cny: 0.2,
+    })
+    const secondRecovery = await service.startSmokeRecovery(firstRecovery.id)
+    const completed = await service.executePending(secondRecovery.id)
+
+    expect(review).toHaveBeenCalledTimes(7)
+    expect(completed).toMatchObject({
+      status: 'succeeded',
+      planned_call_count: 2,
+      external_call_count: 2,
+      succeeded_count: 2,
+      unknown_count: 0,
+      metrics: {
+        smoke_only: true,
+        case_total: 2,
+        planned_case_total: 2,
+        audit: { all_planned_calls_succeeded: true },
+      },
+    })
+    // 两个来源 run 保留原来的 unknown/pending 事实，第二级恢复只新增审计行。
+    await expect(service.getRun(firstRecovery.id)).resolves.toMatchObject({
+      status: 'outcome_unknown',
+      external_call_count: 3,
+      unknown_count: 1,
+    })
+  })
+
   test('Nest injects the labeling service explicitly in tsx runtime', async () => {
     const provider = successfulExternalFake()
     const labeling = {
@@ -249,6 +337,9 @@ describe('Phase F real VLM capability orchestration', () => {
       succeeded_count: 84,
       failed_count: 0,
       unknown_count: 0,
+      metrics: {
+        gates: { p95_latency_at_most_180000_ms: true },
+      },
     })
     expect(result.attempts).toHaveLength(84)
     expect(JSON.stringify(result)).not.toContain('ZmFrZQ==')
@@ -333,7 +424,7 @@ function createService(
       vlmReviewProvider: 'rightapi',
       vlmReviewMaxCalls: 84,
       vlmReviewMaxCostCny: 5,
-      vlmReviewTimeoutMs: 120_000,
+      vlmReviewTimeoutMs: 180_000,
     } as never,
     provider,
     labeling as never,

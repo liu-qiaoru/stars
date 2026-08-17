@@ -47,7 +47,7 @@ describe('createSettings', () => {
       vlmReviewProvider: 'disabled',
       vlmReviewMaxCalls: 84,
       vlmReviewMaxCostCny: 5,
-      vlmReviewTimeoutMs: 120000,
+      vlmReviewTimeoutMs: 180000,
       captionIndexingEnabled: false,
       captionSearchEnabled: false,
       localVlmEnabled: false,
@@ -249,6 +249,20 @@ describe('createSettings', () => {
         VLM_REVIEW_MAX_CALLS: '85',
       }),
     ).toThrow('VLM_REVIEW_MAX_CALLS must be between 1 and 84')
+    expect(
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        VLM_REVIEW_TIMEOUT_MS: '180000',
+      }),
+    ).toMatchObject({ vlmReviewTimeoutMs: 180000 })
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        VLM_REVIEW_TIMEOUT_MS: '180001',
+      }),
+    ).toThrow('VLM_REVIEW_TIMEOUT_MS must be between 1000 and 180000')
   })
 
   test('端口不是数字时抛出明确错误', () => {

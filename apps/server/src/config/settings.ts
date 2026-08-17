@@ -345,13 +345,13 @@ const settingsSchema = z.object({
     }),
   VLM_REVIEW_TIMEOUT_MS: z
     .string()
-    .default('120000')
+    .default('180000')
     .transform((value, context) => {
       const timeout = Number(value)
-      if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 120000) {
+      if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 180000) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'VLM_REVIEW_TIMEOUT_MS must be between 1000 and 120000',
+          message: 'VLM_REVIEW_TIMEOUT_MS must be between 1000 and 180000',
         })
         return z.NEVER
       }

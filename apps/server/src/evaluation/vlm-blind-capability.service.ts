@@ -80,8 +80,9 @@ export class VlmBlindCapabilityService {
   }
 
   /**
-   * Recovery 只选择原 smoke 中唯一的 outcome_unknown 槽位和仍未派发的槽位。
-   * 它生成新的指纹、授权、run 和 step_attempt_id，原始审计行永远不覆盖。
+   * Recovery 选择来源 smoke/recovery 中唯一的 outcome_unknown 槽位和仍未派发的槽位。
+   * 因此第一次恢复可得到 4 条，恢复中途再次超时后可得到剩余 2 条。每一级都生成新的
+   * 指纹、授权、run 和 step_attempt_id，任何旧审计行都不会被覆盖或自动重放。
    */
   async smokeRecoveryPreflight(sourceRunId: string) {
     const prepared = await this.prepareSmokeRecovery(sourceRunId)
@@ -132,7 +133,8 @@ export class VlmBlindCapabilityService {
         stability_extra_calls: 0,
       })),
       budget: {
-        max_calls: SMOKE_RECOVERY_MAX_CALLS,
+        // 实际授权必须与本次计划条数完全一致；0.4 元只是部署硬上限，不代表用户已授权。
+        max_calls: prepared.planned.length,
         max_cost_cny: SMOKE_RECOVERY_MAX_COST_CNY,
       },
       stop_conditions: [
@@ -670,7 +672,7 @@ export class VlmBlindCapabilityService {
     const controller = new AbortController()
     const timeout = setTimeout(
       () => controller.abort(),
-      this.settings.vlmReviewTimeoutMs ?? 120_000,
+      this.settings.vlmReviewTimeoutMs ?? 180_000,
     )
     let receivedAudit: Awaited<ReturnType<VlmReviewProvider['review']>>['audit'] | null = null
     try {
@@ -980,10 +982,11 @@ export class VlmBlindCapabilityService {
       .limit(1)
     if (!sourceRun) throw new NotFoundException('source smoke run not found')
     if (
-      sourceRun.protocolVersion !== SMOKE_PROTOCOL_VERSION ||
-      sourceRun.status !== 'outcome_unknown'
+      ![SMOKE_PROTOCOL_VERSION, SMOKE_RECOVERY_PROTOCOL_VERSION].includes(
+        sourceRun.protocolVersion,
+      ) || sourceRun.status !== 'outcome_unknown'
     ) {
-      throw new ConflictException('recovery requires an outcome_unknown five-type smoke run')
+      throw new ConflictException('recovery requires an outcome_unknown smoke or recovery run')
     }
     const sourceAttempts = await this.db
       .select()
@@ -997,9 +1000,11 @@ export class VlmBlindCapabilityService {
     const pending = sourceAttempts.filter(
       (attempt) => attempt.status === 'pending' && attempt.externalCallStatus === 'not_dispatched',
     )
-    if (unknown.length !== 1 || pending.length !== 3) {
+    const expectedPendingCount =
+      sourceRun.protocolVersion === SMOKE_PROTOCOL_VERSION ? SMOKE_RECOVERY_MAX_CALLS - 1 : 1
+    if (unknown.length !== 1 || pending.length !== expectedPendingCount) {
       throw new ConflictException(
-        'recovery requires exactly one unknown and three non-dispatched slots',
+        `recovery requires exactly one unknown and ${expectedPendingCount} non-dispatched slots`,
       )
     }
     const input = await this.labeling.prepareCapabilityInputForRun(sourceRun.labelingSessionId)
@@ -1286,7 +1291,8 @@ function computeMetrics(
     insufficient_evidence_at_least_10_of_12: (groupCorrect.insufficient_evidence ?? 0) >= 10,
     condition_macro_accuracy_at_least_90_percent: macroAccuracy !== null && macroAccuracy >= 0.9,
     stability_at_least_11_of_12: stableCaseCount >= 11,
-    p95_latency_at_most_90000_ms: p95 !== null && p95 <= 90_000,
+    // 用户等待一次视觉复核最多 3 分钟，因此正式接入门槛与 Provider 超时保持同一上限。
+    p95_latency_at_most_180000_ms: p95 !== null && p95 <= 180_000,
   }
   return {
     false_pass_count: falsePassCount,
