@@ -479,6 +479,31 @@ Review：
 真实 smoke 已按停止条件结束。未经新的明确授权，不调用 `retry-unknown`，不补跑后三条，不启动
 84 次正式评测，也不进入 Phase G。
 
+### Agent V1 Phase F：五类型 smoke 恢复执行（2026-08-17）
+
+- [x] 用户追加授权“重试原 unknown + 补跑三条未派发”，最多新增 4 次、4 张派生 PNG、预算
+      ¥0.40。为避免覆盖原 5 次授权和 attempt，新增 `vlm-review-smoke-recovery-v1` 独立 run；
+      recovery preflight 指纹为
+      `86485db696826e32a7b47c6b7c96e2aedca585006d97b0f8eca8eb4fe753aa37`，总请求体
+      3,042,421 bytes。新重试 attempt 通过 `retry_of_attempt_id` 引用原 unknown，后三条引用原
+      `not_dispatched` 请求身份；原 run 事实不变。
+- [x] Recovery run `0c0987da-5061-4dc4-9b1b-e2bc691e575a` 先成功重试
+      `missing_must_have`：49,403 ms、3,155 tokens、响应指纹
+      `0d6a8a986dd0db6bd83cc1b85b837858bdbd92c82dec88233737ddb48c389001`；随后成功执行
+      `exclusion_hit`：53,406 ms、3,214 tokens、响应指纹
+      `41fdd8b98d47af1b8a79146a4fcf560cf411ffa8dc6756b689ccae0607911f6e`。两条案例状态均与
+      人工真值一致，但条件仅 5/11 一致（45.45%），不能只看最终 rejected 状态而忽略条件误判。
+- [x] 第 3 条 `partial_relevance` 在 120,007 ms 再次进入 `outcome_unknown`，Server 按授权立即
+      停止；最后的 `insufficient_evidence` 保持 `not_dispatched`。本次新增外部调用 3 次、成功 2、
+      未知 1、未外发 1，无自动重试；成功请求共 6,369 tokens。Provider 仍未返回账单费用，超时
+      请求费用未知，所以 recovery `billed_cost_cny` 保持 null。
+- [x] 修正 smoke 派生指标分母：只有成功且有严格结构化输出的案例才进入案例/条件准确率；
+      `outcome_unknown`、失败和未派发只进入运行完整性指标。Recovery 因此显示已评估 2/计划 4、
+      案例状态 2/2、条件 5/11，而不是把无模型输出的条件伪装成答错。
+
+恢复执行再次按停止条件结束。未经新授权，不重试 `partial_relevance`，不补跑最后一条，不启动
+84 次正式评测，也不进入 Phase G。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

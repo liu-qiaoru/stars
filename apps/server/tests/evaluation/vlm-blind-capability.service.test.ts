@@ -101,6 +101,80 @@ describe('Phase F real VLM capability orchestration', () => {
     })
   })
 
+  test('creates a separate four-call recovery run without overwriting the unknown source attempt', async () => {
+    const review = vi
+      .fn()
+      .mockImplementationOnce(async (request) => successfulProviderResult(request))
+      .mockRejectedValueOnce(
+        new QwenVlmReviewProviderError('VLM_REVIEW_OUTCOME_UNKNOWN', 'sanitized', true),
+      )
+      .mockImplementation(async (request) => successfulProviderResult(request))
+    const service = createService(context.db, fixture, externalProvider(review))
+    const smokePreview = await service.smokePreflight(fixture.datasetId)
+    await service.authorizeSmoke(fixture.datasetId, {
+      confirmed: true,
+      preflight_fingerprint: smokePreview.preflight_fingerprint,
+      max_calls: 5,
+      max_cost_cny: 0.5,
+    })
+    const sourceRun = await service.start(fixture.datasetId, 'smoke')
+    const stopped = await service.executePending(sourceRun.id)
+    expect(stopped).toMatchObject({
+      status: 'outcome_unknown',
+      external_call_count: 2,
+      succeeded_count: 1,
+      unknown_count: 1,
+      metrics: { case_total: 1, planned_case_total: 5 },
+    })
+
+    const recoveryPreview = await service.smokeRecoveryPreflight(sourceRun.id)
+    expect(recoveryPreview).toMatchObject({
+      source_run_id: sourceRun.id,
+      execution_mode: 'smoke_recovery',
+      protocol_version: 'vlm-review-smoke-recovery-v1',
+      candidate_count: 4,
+      maximum_call_count: 4,
+      total_image_count: 4,
+      budget: { max_calls: 4, max_cost_cny: 0.4 },
+      external_call_count: 0,
+    })
+    expect(recoveryPreview.items.map((item) => item.recovery_reason)).toEqual([
+      'retry_outcome_unknown',
+      'previously_not_dispatched',
+      'previously_not_dispatched',
+      'previously_not_dispatched',
+    ])
+    await service.authorizeSmokeRecovery(sourceRun.id, {
+      confirmed: true,
+      preflight_fingerprint: recoveryPreview.preflight_fingerprint,
+      max_calls: 4,
+      max_cost_cny: 0.4,
+    })
+    const recoveryRun = await service.startSmokeRecovery(sourceRun.id)
+    const completed = await service.executePending(recoveryRun.id)
+
+    expect(review).toHaveBeenCalledTimes(6)
+    expect(completed).toMatchObject({
+      protocol_version: 'vlm-review-smoke-recovery-v1',
+      status: 'succeeded',
+      planned_call_count: 4,
+      external_call_count: 4,
+      succeeded_count: 4,
+      metrics: {
+        smoke_only: true,
+        case_total: 4,
+        audit: { all_planned_calls_succeeded: true },
+        eligible_for_real_top3_simulation: false,
+      },
+    })
+    expect(completed.attempts[0].retry_of_attempt_id).toBeTruthy()
+    await expect(service.getRun(sourceRun.id)).resolves.toMatchObject({
+      status: 'outcome_unknown',
+      external_call_count: 2,
+      unknown_count: 1,
+    })
+  })
+
   test('Nest injects the labeling service explicitly in tsx runtime', async () => {
     const provider = successfulExternalFake()
     const labeling = {

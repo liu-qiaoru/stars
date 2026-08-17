@@ -35,6 +35,9 @@ describe('evaluation controller dependency injection', () => {
       smokePreflight: vi
         .fn()
         .mockResolvedValue({ execution_mode: 'smoke', external_call_count: 0 }),
+      smokeRecoveryPreflight: vi
+        .fn()
+        .mockResolvedValue({ execution_mode: 'smoke_recovery', external_call_count: 0 }),
     }
     const moduleRef = await Test.createTestingModule({
       controllers: [EvaluationController],
@@ -98,6 +101,11 @@ describe('evaluation controller dependency injection', () => {
         external_call_count: 0,
       })
       expect(vlmBlindCapability.smokePreflight).toHaveBeenCalledWith('dataset-1')
+      await expect(controller.preflightVlmBlindSmokeRecovery('run-1')).resolves.toMatchObject({
+        execution_mode: 'smoke_recovery',
+        external_call_count: 0,
+      })
+      expect(vlmBlindCapability.smokeRecoveryPreflight).toHaveBeenCalledWith('run-1')
       await expect(controller.getVlmBlindLabeling('dataset-1')).resolves.toMatchObject({
         candidate_status: 'frozen',
       })

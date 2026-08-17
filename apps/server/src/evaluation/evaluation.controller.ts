@@ -224,6 +224,12 @@ export class EvaluationController {
     return this.vlmBlindCapability.smokePreflight(datasetId)
   }
 
+  /** 原 smoke 的 unknown + 未派发槽位使用新的增量指纹，不修改原 run。 */
+  @Get('vlm-blind/real-runs/:runId/recovery-preflight')
+  preflightVlmBlindSmokeRecovery(@Param('runId') runId: string) {
+    return this.vlmBlindCapability.smokeRecoveryPreflight(runId)
+  }
+
   /** 独立视觉授权绑定当前 preflight 指纹，不能由文本 AgentIntent 授权替代。 */
   @Post('vlm-blind/datasets/:datasetId/visual-authorizations')
   authorizeVlmBlindReal(@Param('datasetId') datasetId: string, @Body() body: unknown) {
@@ -236,6 +242,11 @@ export class EvaluationController {
     return this.vlmBlindCapability.authorizeSmoke(datasetId, body)
   }
 
+  @Post('vlm-blind/real-runs/:runId/recovery-visual-authorizations')
+  authorizeVlmBlindSmokeRecovery(@Param('runId') runId: string, @Body() body: unknown) {
+    return this.vlmBlindCapability.authorizeSmokeRecovery(runId, body)
+  }
+
   @Post('vlm-blind/datasets/:datasetId/real-runs')
   startVlmBlindReal(@Param('datasetId') datasetId: string) {
     return this.vlmBlindCapability.startAndSchedule(datasetId)
@@ -244,6 +255,11 @@ export class EvaluationController {
   @Post('vlm-blind/datasets/:datasetId/real-smoke-runs')
   startVlmBlindSmoke(@Param('datasetId') datasetId: string) {
     return this.vlmBlindCapability.startSmokeAndSchedule(datasetId)
+  }
+
+  @Post('vlm-blind/real-runs/:runId/recovery-runs')
+  startVlmBlindSmokeRecovery(@Param('runId') runId: string) {
+    return this.vlmBlindCapability.startSmokeRecoveryAndSchedule(runId)
   }
 
   /** 历史报告只读取 PostgreSQL，不重新构造图片请求。 */

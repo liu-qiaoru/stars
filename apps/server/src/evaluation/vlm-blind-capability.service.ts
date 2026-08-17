@@ -33,6 +33,9 @@ const MAX_CALLS = 84
 const SMOKE_MAX_CALLS = 5
 const SMOKE_MAX_COST_CNY = 0.5
 const SMOKE_PROTOCOL_VERSION = 'vlm-review-smoke-v1'
+const SMOKE_RECOVERY_MAX_CALLS = 4
+const SMOKE_RECOVERY_MAX_COST_CNY = 0.4
+const SMOKE_RECOVERY_PROTOCOL_VERSION = 'vlm-review-smoke-recovery-v1'
 const SMOKE_GROUPS = [
   'exact_match',
   'missing_must_have',
@@ -74,6 +77,73 @@ export class VlmBlindCapabilityService {
    */
   async smokePreflight(datasetId: string) {
     return this.preflightForMode(datasetId, 'smoke')
+  }
+
+  /**
+   * Recovery 只选择原 smoke 中唯一的 outcome_unknown 槽位和仍未派发的槽位。
+   * 它生成新的指纹、授权、run 和 step_attempt_id，原始审计行永远不覆盖。
+   */
+  async smokeRecoveryPreflight(sourceRunId: string) {
+    const prepared = await this.prepareSmokeRecovery(sourceRunId)
+    const existingAuthorization = await this.findMatchingAuthorization(
+      prepared.input.session.id,
+      prepared.preflightFingerprint,
+    )
+    return {
+      dataset_id: prepared.input.dataset.id,
+      labeling_session_id: prepared.input.session.id,
+      source_run_id: sourceRunId,
+      dataset_fingerprint: prepared.input.dataset.frozenFingerprint,
+      labels_fingerprint: prepared.input.session.labelsFingerprint,
+      evidence_fingerprint: prepared.input.evidence_fingerprint,
+      preflight_fingerprint: prepared.preflightFingerprint,
+      provider: 'rightapi',
+      requested_model: VLM_REVIEW_MODEL,
+      execution_mode: 'smoke_recovery',
+      protocol_version: SMOKE_RECOVERY_PROTOCOL_VERSION,
+      prompt_version: VLM_REVIEW_PROMPT_VERSION,
+      provider_configured: Boolean(this.settings.rightCodeBaseUrl && this.settings.rightCodeApiKey),
+      provider_enabled: this.settings.vlmReviewProvider === 'rightapi',
+      external_llm_enabled: this.settings.allowExternalLlm,
+      provider_available: this.provider.available && this.provider.external,
+      visual_authorization_exists: Boolean(existingAuthorization),
+      authorization_id: existingAuthorization?.id ?? null,
+      candidate_count: prepared.items.length,
+      normal_call_count: prepared.items.length,
+      stability_case_count: 0,
+      stability_extra_call_count: 0,
+      maximum_call_count: prepared.planned.length,
+      total_image_count: prepared.planned.reduce(
+        (sum, item) => sum + item.input.request.evidence_frames.length,
+        0,
+      ),
+      total_request_bytes: prepared.planned.reduce((sum, item) => sum + item.requestBytes, 0),
+      items: prepared.planned.map((item) => ({
+        case_id: item.input.case.id,
+        candidate_key: item.input.case.candidateKey,
+        group: item.input.group,
+        image_count: item.input.request.evidence_frames.length,
+        request_bytes: item.requestBytes,
+        recovery_reason: item.retryOfAttemptId
+          ? 'retry_outcome_unknown'
+          : 'previously_not_dispatched',
+        source_attempt_id: item.sourceAttemptId,
+        normal_calls: 1,
+        stability_extra_calls: 0,
+      })),
+      budget: {
+        max_calls: SMOKE_RECOVERY_MAX_CALLS,
+        max_cost_cny: SMOKE_RECOVERY_MAX_COST_CNY,
+      },
+      stop_conditions: [
+        'provider_disabled_or_unconfigured',
+        'fingerprint_drift',
+        'visual_authorization_missing_or_expired',
+        'call_or_budget_limit_reached',
+        'outcome_unknown',
+      ],
+      external_call_count: 0,
+    }
   }
 
   private async preflightForMode(datasetId: string, mode: ExecutionMode) {
@@ -149,6 +219,25 @@ export class VlmBlindCapabilityService {
     return this.authorizeForMode(datasetId, input, 'smoke')
   }
 
+  async authorizeSmokeRecovery(sourceRunId: string, input: unknown) {
+    const parsed = vlmBlindVisualAuthorizationInputSchema.parse(input)
+    const prepared = await this.prepareSmokeRecovery(sourceRunId)
+    if (parsed.preflight_fingerprint !== prepared.preflightFingerprint) {
+      throw new ConflictException('preflight fingerprint no longer matches frozen recovery input')
+    }
+    if (!this.provider.available || !this.provider.external) {
+      throw new ConflictException('真实 qwen3.7-plus 视觉 Provider 未启用或未配置')
+    }
+    if (
+      parsed.max_calls !== prepared.planned.length ||
+      parsed.max_calls > SMOKE_RECOVERY_MAX_CALLS ||
+      parsed.max_cost_cny > SMOKE_RECOVERY_MAX_COST_CNY
+    ) {
+      throw new ConflictException('recovery authorization exceeds or cannot cover recovery limits')
+    }
+    return this.insertAuthorization(prepared, parsed)
+  }
+
   private async authorizeForMode(datasetId: string, input: unknown, mode: ExecutionMode) {
     const parsed = vlmBlindVisualAuthorizationInputSchema.parse(input)
     const prepared = await this.prepare(datasetId, mode)
@@ -169,6 +258,20 @@ export class VlmBlindCapabilityService {
     ) {
       throw new ConflictException('visual authorization exceeds or cannot cover deployment limits')
     }
+    return this.insertAuthorization(prepared, parsed)
+  }
+
+  private async insertAuthorization(
+    prepared: {
+      input: Awaited<ReturnType<VlmBlindLabelingService['prepareCapabilityInput']>>
+      preflightFingerprint: string
+    },
+    parsed: {
+      max_calls: number
+      max_cost_cny: number
+      expires_in_minutes: number
+    },
+  ) {
     const [inserted] = await this.db
       .insert(evaluationVlmBlindVisualAuthorizations)
       .values({
@@ -201,6 +304,12 @@ export class VlmBlindCapabilityService {
 
   async startSmokeAndSchedule(datasetId: string) {
     const run = await this.start(datasetId, 'smoke')
+    setImmediate(() => void this.executePending(run.id).catch(() => this.failRun(run.id)))
+    return this.getRun(run.id)
+  }
+
+  async startSmokeRecoveryAndSchedule(sourceRunId: string) {
+    const run = await this.startSmokeRecovery(sourceRunId)
     setImmediate(() => void this.executePending(run.id).catch(() => this.failRun(run.id)))
     return this.getRun(run.id)
   }
@@ -342,6 +451,70 @@ export class VlmBlindCapabilityService {
     })
   }
 
+  /** Recovery 使用新 run 保存增量授权；原 run 的 unknown/pending 行保持原样。 */
+  async startSmokeRecovery(sourceRunId: string) {
+    const prepared = await this.prepareSmokeRecovery(sourceRunId)
+    if (!this.provider.available || !this.provider.external) {
+      throw new ConflictException('真实 qwen3.7-plus 视觉 Provider 未启用或未配置')
+    }
+    const authorization = await this.findMatchingAuthorization(
+      prepared.input.session.id,
+      prepared.preflightFingerprint,
+    )
+    if (!authorization) throw new ConflictException('恢复视觉授权不存在、已过期或指纹不匹配')
+    if (prepared.planned.length > authorization.maxCalls) {
+      throw new ConflictException('recovery authorization call limit is insufficient')
+    }
+    const runId = randomUUID()
+    return this.db.transaction(async (tx) => {
+      const [run] = await tx
+        .insert(evaluationVlmBlindRealRuns)
+        .values({
+          id: runId,
+          labelingSessionId: prepared.input.session.id,
+          authorizationId: authorization.id,
+          protocolVersion: SMOKE_RECOVERY_PROTOCOL_VERSION,
+          promptVersion: VLM_REVIEW_PROMPT_VERSION,
+          datasetFingerprint: prepared.input.dataset.frozenFingerprint!,
+          labelsFingerprint: prepared.input.session.labelsFingerprint!,
+          evidenceFingerprint: prepared.input.evidence_fingerprint,
+          caseCount: prepared.items.length,
+          plannedCallCount: prepared.planned.length,
+          maxCalls: authorization.maxCalls,
+          maxCostCny: authorization.maxCostCny,
+        })
+        .onConflictDoNothing()
+        .returning()
+      if (!run) {
+        const [existing] = await tx
+          .select()
+          .from(evaluationVlmBlindRealRuns)
+          .where(eq(evaluationVlmBlindRealRuns.authorizationId, authorization.id))
+          .limit(1)
+        if (!existing) throw new ConflictException('recovery VLM run idempotency conflict')
+        return existing
+      }
+      await tx.insert(evaluationVlmBlindRealAttempts).values(
+        prepared.planned.map((item) => {
+          const id = randomUUID()
+          return {
+            id,
+            runId,
+            caseId: item.input.case.id,
+            repetition: item.repetition,
+            retryOfAttemptId: item.retryOfAttemptId,
+            stepAttemptId: id,
+            requestBytes: item.requestBytes,
+            imageCount: item.input.request.evidence_frames.length,
+            actualSampleCount: 1,
+            requestFingerprint: item.requestFingerprint,
+          }
+        }),
+      )
+      return run
+    })
+  }
+
   async executePending(runId: string) {
     const [run] = await this.db
       .select()
@@ -466,6 +639,7 @@ export class VlmBlindCapabilityService {
         case_id: attempt.caseId,
         repetition: attempt.repetition,
         attempt_number: attempt.attemptNumber,
+        retry_of_attempt_id: attempt.retryOfAttemptId,
         step_attempt_id: attempt.stepAttemptId,
         status: attempt.status,
         external_call_status: attempt.externalCallStatus,
@@ -694,14 +868,18 @@ export class VlmBlindCapabilityService {
     const currentRun = await this.runById(runId)
     const selectedCaseIds = new Set(attempts.map((attempt) => attempt.caseId))
     const selectedItems = items?.filter((item) => selectedCaseIds.has(item.case.id))
-    const smoke = currentRun.protocolVersion === SMOKE_PROTOCOL_VERSION
+    const smoke = [SMOKE_PROTOCOL_VERSION, SMOKE_RECOVERY_PROTOCOL_VERSION].includes(
+      currentRun.protocolVersion,
+    )
     const metrics = selectedItems
       ? smoke
         ? {
             ...computeSmokeMetrics(selectedItems, attempts, results),
             audit: {
-              all_5_calls_succeeded:
-                succeededCount === SMOKE_MAX_CALLS && failedCount === 0 && unknownCount === 0,
+              all_planned_calls_succeeded:
+                succeededCount === currentRun.plannedCallCount &&
+                failedCount === 0 &&
+                unknownCount === 0,
               token_usage_known: knownTokens,
               billed_cost_known_and_within_budget:
                 billedCost !== null && billedCost <= Number(currentRun.maxCostCny),
@@ -792,6 +970,93 @@ export class VlmBlindCapabilityService {
           inArray(evaluationVlmBlindRealRuns.status, ['pending', 'running']),
         ),
       )
+  }
+
+  private async prepareSmokeRecovery(sourceRunId: string) {
+    const [sourceRun] = await this.db
+      .select()
+      .from(evaluationVlmBlindRealRuns)
+      .where(eq(evaluationVlmBlindRealRuns.id, sourceRunId))
+      .limit(1)
+    if (!sourceRun) throw new NotFoundException('source smoke run not found')
+    if (
+      sourceRun.protocolVersion !== SMOKE_PROTOCOL_VERSION ||
+      sourceRun.status !== 'outcome_unknown'
+    ) {
+      throw new ConflictException('recovery requires an outcome_unknown five-type smoke run')
+    }
+    const sourceAttempts = await this.db
+      .select()
+      .from(evaluationVlmBlindRealAttempts)
+      .where(eq(evaluationVlmBlindRealAttempts.runId, sourceRunId))
+      .orderBy(asc(evaluationVlmBlindRealAttempts.createdAt))
+    const unknown = sourceAttempts.filter(
+      (attempt) =>
+        attempt.status === 'outcome_unknown' && attempt.externalCallStatus === 'outcome_unknown',
+    )
+    const pending = sourceAttempts.filter(
+      (attempt) => attempt.status === 'pending' && attempt.externalCallStatus === 'not_dispatched',
+    )
+    if (unknown.length !== 1 || pending.length !== 3) {
+      throw new ConflictException(
+        'recovery requires exactly one unknown and three non-dispatched slots',
+      )
+    }
+    const input = await this.labeling.prepareCapabilityInputForRun(sourceRun.labelingSessionId)
+    if (
+      input.dataset.frozenFingerprint !== sourceRun.datasetFingerprint ||
+      input.session.labelsFingerprint !== sourceRun.labelsFingerprint ||
+      input.evidence_fingerprint !== sourceRun.evidenceFingerprint
+    ) {
+      throw new ConflictException('source smoke fingerprints no longer match frozen input')
+    }
+    const itemByCase = new Map(input.items.map((item) => [item.case.id, item]))
+    const planned = [unknown[0]!, ...pending].map((sourceAttempt) => {
+      const item = itemByCase.get(sourceAttempt.caseId)
+      if (!item) throw new ConflictException('recovery case identity is missing')
+      const serialized = JSON.stringify(buildQwenVlmReviewRequestBody(item.request))
+      const requestBytes = Buffer.byteLength(serialized)
+      const requestFingerprint = createHash('sha256').update(serialized).digest('hex')
+      if (
+        requestFingerprint !== sourceAttempt.requestFingerprint ||
+        requestBytes !== sourceAttempt.requestBytes ||
+        item.request.evidence_frames.length !== sourceAttempt.imageCount
+      ) {
+        throw new ConflictException('recovery request no longer matches the source attempt')
+      }
+      return {
+        input: item,
+        repetition: sourceAttempt.repetition,
+        requestBytes,
+        requestFingerprint,
+        sourceAttemptId: sourceAttempt.id,
+        retryOfAttemptId: sourceAttempt === unknown[0] ? sourceAttempt.id : null,
+      }
+    })
+    const preflightFingerprint = createHash('sha256')
+      .update(
+        JSON.stringify({
+          execution_mode: 'smoke_recovery',
+          source_run_id: sourceRunId,
+          dataset_fingerprint: input.dataset.frozenFingerprint,
+          labels_fingerprint: input.session.labelsFingerprint,
+          evidence_fingerprint: input.evidence_fingerprint,
+          requests: planned.map((item) => ({
+            source_attempt_id: item.sourceAttemptId,
+            retry_of_attempt_id: item.retryOfAttemptId,
+            case_id: item.input.case.id,
+            request_fingerprint: item.requestFingerprint,
+            request_bytes: item.requestBytes,
+          })),
+        }),
+      )
+      .digest('hex')
+    return {
+      input,
+      items: planned.map((item) => item.input),
+      planned,
+      preflightFingerprint,
+    }
   }
 
   private async prepare(datasetId: string, mode: ExecutionMode = 'full') {
@@ -891,19 +1156,24 @@ function computeSmokeMetrics(
   }
   const groupMatches: Record<string, boolean> = {}
   let caseStatusCorrect = 0
+  let evaluatedCaseTotal = 0
   let conditionCorrect = 0
   let conditionTotal = 0
   for (const item of items) {
     const attempt = attemptByCase.get(item.case.id)
     const result = attempt ? resultByAttempt.get(attempt.id) : undefined
-    const matches = result?.derivedStatus === expectedCaseStatus(item.group, item.human_status)
-    groupMatches[item.group] = matches
-    if (matches) caseStatusCorrect += 1
     const output = result?.outputJson as {
       conditions?: Array<{ condition_id: string; verdict: string }>
     } | null
+    // outcome_unknown、失败或未派发都没有可信模型输出，只属于运行完整性指标；
+    // 不能把它们的人工条件计入“模型条件准确率”分母，制造模型全部答错的假象。
+    if (!attempt || attempt.status !== 'succeeded' || !output?.conditions) continue
+    evaluatedCaseTotal += 1
+    const matches = result?.derivedStatus === expectedCaseStatus(item.group, item.human_status)
+    groupMatches[item.group] = matches
+    if (matches) caseStatusCorrect += 1
     const actualById = new Map(
-      (output?.conditions ?? []).map((condition) => [condition.condition_id, condition.verdict]),
+      output.conditions.map((condition) => [condition.condition_id, condition.verdict]),
     )
     for (const condition of item.human_conditions) {
       conditionTotal += 1
@@ -919,7 +1189,8 @@ function computeSmokeMetrics(
     selection: 'minimum_request_bytes_v1',
     group_matches: groupMatches,
     case_status_correct: caseStatusCorrect,
-    case_total: items.length,
+    case_total: evaluatedCaseTotal,
+    planned_case_total: items.length,
     condition_correct: conditionCorrect,
     condition_total: conditionTotal,
     condition_accuracy: conditionTotal === 0 ? null : conditionCorrect / conditionTotal,

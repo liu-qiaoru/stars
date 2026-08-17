@@ -1054,7 +1054,11 @@ function RealRunReport({ run }: { run: VlmBlindRealRun }) {
     <article className="rounded-xl border border-amber-200 bg-white p-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-bold text-neutral-950">
-          {run.protocol_version === 'vlm-review-smoke-v1' ? '五类型 smoke · ' : '正式评测 · '}
+          {run.protocol_version === 'vlm-review-smoke-v1'
+            ? '五类型 smoke · '
+            : run.protocol_version === 'vlm-review-smoke-recovery-v1'
+              ? 'Smoke 恢复 · '
+              : '正式评测 · '}
           {realRunStatusLabel(run.status)}
         </p>
         <span className="font-mono text-xs text-neutral-500">{run.id.slice(0, 8)}…</span>
