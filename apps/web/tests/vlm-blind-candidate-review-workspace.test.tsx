@@ -102,6 +102,7 @@ const labelingState: VlmBlindLabelingState = {
 describe('Phase F candidate review workspace', () => {
   test('shows a local-only real VLM preflight and keeps fake metrics separate from real history', async () => {
     const preflight: VlmBlindRealPreflight = {
+      execution_mode: 'smoke',
       dataset_id: 'dataset-1',
       dataset_fingerprint: 'a'.repeat(64),
       labels_fingerprint: 'b'.repeat(64),
@@ -113,19 +114,19 @@ describe('Phase F candidate review workspace', () => {
       provider_available: false,
       visual_authorization_exists: false,
       authorization_id: null,
-      candidate_count: 60,
-      normal_call_count: 60,
-      stability_case_count: 12,
-      stability_extra_call_count: 24,
-      maximum_call_count: 84,
-      total_image_count: 420,
+      candidate_count: 5,
+      normal_call_count: 5,
+      stability_case_count: 1,
+      stability_extra_call_count: 0,
+      maximum_call_count: 5,
+      total_image_count: 5,
       total_request_bytes: 20 * 1024 * 1024,
       items: [],
-      budget: { max_calls: 84, max_cost_cny: 5 },
+      budget: { max_calls: 5, max_cost_cny: 0.5 },
       stop_conditions: ['outcome_unknown'],
       external_call_count: 0,
     }
-    const preflightVlmBlindReal = vi.fn().mockResolvedValue(preflight)
+    const preflightVlmBlindRealSmoke = vi.fn().mockResolvedValue(preflight)
     const listVlmBlindRealRuns = vi.fn().mockResolvedValue({ items: [] })
     render(
       <VlmBlindCandidateReviewWorkspace
@@ -139,7 +140,7 @@ describe('Phase F candidate review workspace', () => {
         }}
         apiClient={
           {
-            preflightVlmBlindReal,
+            preflightVlmBlindRealSmoke,
             listVlmBlindRealRuns,
             getVlmBlindRealRun: vi.fn(),
             mediaContentUrl: vi.fn(),
@@ -151,12 +152,12 @@ describe('Phase F candidate review workspace', () => {
     expect(screen.getByText('真实 VLM：尚未执行。fake 指标不会填入这里。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '运行本地只读 preflight' }))
 
-    await waitFor(() => expect(preflightVlmBlindReal).toHaveBeenCalledWith('dataset-1'))
+    await waitFor(() => expect(preflightVlmBlindRealSmoke).toHaveBeenCalledWith('dataset-1'))
     expect(screen.getByText('Provider 部署开关')).toBeInTheDocument()
     expect(screen.getByText('disabled')).toBeInTheDocument()
-    expect(screen.getByText(/60 条各一次/)).toBeInTheDocument()
+    expect(screen.getByText(/五种类型各一次/)).toBeInTheDocument()
     expect(screen.getAllByText(/真实外部调用：0/).length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: '保存本次独立视觉授权' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存五类型 smoke 视觉授权' })).toBeDisabled()
   })
 
   test('moves a frozen candidate pool into evidence preparation and first-pass labeling', async () => {

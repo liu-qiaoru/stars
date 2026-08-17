@@ -862,7 +862,7 @@ function RealCapabilityPanel({
     setError('')
     try {
       const [preview, history] = await Promise.all([
-        apiClient.preflightVlmBlindReal(datasetId),
+        apiClient.preflightVlmBlindRealSmoke(datasetId),
         apiClient.listVlmBlindRealRuns(datasetId),
       ])
       setPreflight(preview)
@@ -880,13 +880,13 @@ function RealCapabilityPanel({
     setBusy('authorize')
     setError('')
     try {
-      await apiClient.authorizeVlmBlindReal(datasetId, {
+      await apiClient.authorizeVlmBlindRealSmoke(datasetId, {
         confirmed: true,
         preflight_fingerprint: preflight.preflight_fingerprint,
         max_calls: preflight.maximum_call_count,
         max_cost_cny: preflight.budget.max_cost_cny,
       })
-      setPreflight(await apiClient.preflightVlmBlindReal(datasetId))
+      setPreflight(await apiClient.preflightVlmBlindRealSmoke(datasetId))
       setMessage('本次视觉授权已保存；尚未执行 Provider。')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
@@ -900,9 +900,9 @@ function RealCapabilityPanel({
     setBusy('start')
     setError('')
     try {
-      const run = await apiClient.startVlmBlindReal(datasetId)
+      const run = await apiClient.startVlmBlindRealSmoke(datasetId)
       setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)])
-      setMessage('真实能力盲测已创建；页面正在轮询 PostgreSQL 状态。')
+      setMessage('五类型真实 smoke 已创建；页面正在轮询 PostgreSQL 状态。')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught))
     } finally {
@@ -914,10 +914,10 @@ function RealCapabilityPanel({
     <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="font-bold text-amber-950">真实 qwen3.7-plus 能力盲测</h3>
+          <h3 className="font-bold text-amber-950">真实 qwen3.7-plus 五类型 smoke</h3>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-amber-950">
-            Provider
-            默认关闭。预检只在本机读取冻结帧并计算真实请求大小；刷新页面、查看历史和执行预检都不会发送图片。
+            从完全符合、缺少必须条件、命中排除条件、部分相关和证据不足中各选请求体最小的一条。
+            预检只在本机计算真实请求大小，不会发送图片。
           </p>
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-amber-900">
@@ -951,10 +951,19 @@ function RealCapabilityPanel({
             <ProgressStat label="外部调用" value={preflight.external_call_count} tone="green" />
           </div>
           <p className="text-sm leading-6 text-neutral-700">
-            60 条各一次，冻结的 12 条“部分相关”边缘案例再各两次，共 {preflight.maximum_call_count}{' '}
-            次；请求体合计 {formatBytes(preflight.total_request_bytes)}。预算硬上限 ¥
+            五种类型各一次，共 {preflight.maximum_call_count} 次；累计外发{' '}
+            {preflight.total_image_count} 张冻结索引帧，请求体合计{' '}
+            {formatBytes(preflight.total_request_bytes)}。预算硬上限 ¥
             {preflight.budget.max_cost_cny.toFixed(2)}。
           </p>
+          <ul className="space-y-2 text-sm text-neutral-700" aria-label="Smoke 候选清单">
+            {preflight.items.map((item) => (
+              <li className="rounded-lg bg-neutral-50 p-2" key={item.case_id}>
+                {groupLabel(item.group)}：候选 {item.candidate_key}；{item.image_count} 张图片；
+                {formatBytes(item.request_bytes)}
+              </li>
+            ))}
+          </ul>
           <dl className="grid gap-2 text-sm sm:grid-cols-2">
             <StatusRow
               label="Provider 配置"
@@ -980,8 +989,8 @@ function RealCapabilityPanel({
                   type="checkbox"
                 />
                 <span>
-                  我确认本次授权最多外发 {preflight.total_image_count} 张冻结索引帧、执行{' '}
-                  {preflight.maximum_call_count} 次请求，费用不超过 ¥
+                  我确认这五种类型各一条的 smoke 最多外发 {preflight.total_image_count}{' '}
+                  张冻结索引帧、执行 {preflight.maximum_call_count} 次请求，费用不超过 ¥
                   {preflight.budget.max_cost_cny.toFixed(2)}。此授权与 AgentIntent 文本授权独立。
                 </span>
               </label>
@@ -991,7 +1000,7 @@ function RealCapabilityPanel({
                 onClick={authorize}
                 type="button"
               >
-                {busy === 'authorize' ? '正在保存授权…' : '保存本次独立视觉授权'}
+                {busy === 'authorize' ? '正在保存授权…' : '保存五类型 smoke 视觉授权'}
               </button>
             </div>
           ) : (
@@ -1003,7 +1012,7 @@ function RealCapabilityPanel({
               onClick={startRealRun}
               type="button"
             >
-              {busy === 'start' ? '正在创建运行…' : '启动受控真实能力盲测'}
+              {busy === 'start' ? '正在创建运行…' : '启动五类型真实 smoke'}
             </button>
           )}
         </div>
@@ -1022,6 +1031,14 @@ function RealCapabilityPanel({
 
 function RealRunReport({ run }: { run: VlmBlindRealRun }) {
   const metrics = run.metrics as {
+    smoke_only?: boolean
+    group_matches?: Record<string, boolean>
+    case_status_correct?: number
+    case_total?: number
+    condition_correct?: number
+    condition_total?: number
+    condition_accuracy?: number | null
+    formal_eligibility_note?: string
     false_pass_count?: number
     overall_correct?: number
     overall_total?: number
@@ -1036,7 +1053,10 @@ function RealRunReport({ run }: { run: VlmBlindRealRun }) {
   return (
     <article className="rounded-xl border border-amber-200 bg-white p-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-bold text-neutral-950">{realRunStatusLabel(run.status)}</p>
+        <p className="font-bold text-neutral-950">
+          {run.protocol_version === 'vlm-review-smoke-v1' ? '五类型 smoke · ' : '正式评测 · '}
+          {realRunStatusLabel(run.status)}
+        </p>
         <span className="font-mono text-xs text-neutral-500">{run.id.slice(0, 8)}…</span>
       </div>
       <p className="mt-2 text-neutral-700">
@@ -1044,7 +1064,13 @@ function RealRunReport({ run }: { run: VlmBlindRealRun }) {
         {run.failed_count}，结果未知 {run.unknown_count}。P50/P95、token
         和费用只使用已持久化的真实响应事实。
       </p>
-      {metrics ? (
+      {metrics?.smoke_only ? (
+        <p className="mt-2 text-neutral-700">
+          五类型案例状态一致 {metrics.case_status_correct ?? '—'}/{metrics.case_total ?? 5}
+          ；条件一致 {metrics.condition_correct ?? '—'}/{metrics.condition_total ?? '—'}（
+          {formatRatio(metrics.condition_accuracy)}）。{metrics.formal_eligibility_note}
+        </p>
+      ) : metrics ? (
         <p className="mt-2 text-neutral-700">
           错误通过 {metrics.false_pass_count ?? '—'}；总体正确 {metrics.overall_correct ?? '—'}/
           {metrics.overall_total ?? 60}；条件三分类宏平均{' '}

@@ -218,15 +218,32 @@ export class EvaluationController {
     return this.vlmBlindCapability.preflight(datasetId)
   }
 
+  /** 五个冻结候选类型各选一条；只返回真实请求摘要，不发送任何媒体。 */
+  @Get('vlm-blind/datasets/:datasetId/real-smoke-preflight')
+  preflightVlmBlindSmoke(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindCapability.smokePreflight(datasetId)
+  }
+
   /** 独立视觉授权绑定当前 preflight 指纹，不能由文本 AgentIntent 授权替代。 */
   @Post('vlm-blind/datasets/:datasetId/visual-authorizations')
   authorizeVlmBlindReal(@Param('datasetId') datasetId: string, @Body() body: unknown) {
     return this.vlmBlindCapability.authorize(datasetId, body)
   }
 
+  /** Smoke 授权只绑定五条已展示的请求，不能启动 84 次正式运行。 */
+  @Post('vlm-blind/datasets/:datasetId/smoke-visual-authorizations')
+  authorizeVlmBlindSmoke(@Param('datasetId') datasetId: string, @Body() body: unknown) {
+    return this.vlmBlindCapability.authorizeSmoke(datasetId, body)
+  }
+
   @Post('vlm-blind/datasets/:datasetId/real-runs')
   startVlmBlindReal(@Param('datasetId') datasetId: string) {
     return this.vlmBlindCapability.startAndSchedule(datasetId)
+  }
+
+  @Post('vlm-blind/datasets/:datasetId/real-smoke-runs')
+  startVlmBlindSmoke(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindCapability.startSmokeAndSchedule(datasetId)
   }
 
   /** 历史报告只读取 PostgreSQL，不重新构造图片请求。 */

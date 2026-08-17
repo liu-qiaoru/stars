@@ -45,6 +45,41 @@ describe('typed API client', () => {
     )
   })
 
+  test('keeps five-type smoke routes separate from the 84-call formal run', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ external_call_count: 0 }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'smoke-auth-1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'smoke-run-1' }), { status: 200 }))
+    const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })
+
+    await client.preflightVlmBlindRealSmoke('dataset-1')
+    await client.authorizeVlmBlindRealSmoke('dataset-1', {
+      confirmed: true,
+      preflight_fingerprint: 'b'.repeat(64),
+      max_calls: 5,
+      max_cost_cny: 0.5,
+    })
+    await client.startVlmBlindRealSmoke('dataset-1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://api.local/evaluation/vlm-blind/datasets/dataset-1/real-smoke-preflight',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://api.local/evaluation/vlm-blind/datasets/dataset-1/smoke-visual-authorizations',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'http://api.local/evaluation/vlm-blind/datasets/dataset-1/real-smoke-runs',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
   test('treats a successful empty shadow-rerank response as the documented not-run null state', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }))
     const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })

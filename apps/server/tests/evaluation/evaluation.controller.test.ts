@@ -32,6 +32,9 @@ describe('evaluation controller dependency injection', () => {
     }
     const vlmBlindCapability = {
       preflight: vi.fn().mockResolvedValue({ external_call_count: 0 }),
+      smokePreflight: vi
+        .fn()
+        .mockResolvedValue({ execution_mode: 'smoke', external_call_count: 0 }),
     }
     const moduleRef = await Test.createTestingModule({
       controllers: [EvaluationController],
@@ -90,6 +93,11 @@ describe('evaluation controller dependency injection', () => {
         external_call_count: 0,
       })
       expect(vlmBlindCapability.preflight).toHaveBeenCalledWith('dataset-1')
+      await expect(controller.preflightVlmBlindSmoke('dataset-1')).resolves.toMatchObject({
+        execution_mode: 'smoke',
+        external_call_count: 0,
+      })
+      expect(vlmBlindCapability.smokePreflight).toHaveBeenCalledWith('dataset-1')
       await expect(controller.getVlmBlindLabeling('dataset-1')).resolves.toMatchObject({
         candidate_status: 'frozen',
       })

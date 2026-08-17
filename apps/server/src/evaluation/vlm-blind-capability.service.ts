@@ -30,6 +30,17 @@ import { deriveVlmReviewStatus, type VlmReviewProvider } from './vlm-review.prov
 
 const EDGE_GROUP = 'partial_relevance'
 const MAX_CALLS = 84
+const SMOKE_MAX_CALLS = 5
+const SMOKE_MAX_COST_CNY = 0.5
+const SMOKE_PROTOCOL_VERSION = 'vlm-review-smoke-v1'
+const SMOKE_GROUPS = [
+  'exact_match',
+  'missing_must_have',
+  'exclusion_hit',
+  'partial_relevance',
+  'insufficient_evidence',
+] as const
+type ExecutionMode = 'full' | 'smoke'
 
 /**
  * Phase F 真实能力盲测编排器。
@@ -54,7 +65,19 @@ export class VlmBlindCapabilityService {
 
   /** 构造精确真实 HTTP body，但只返回字节数和指纹，不返回查询、条件或 Base64。 */
   async preflight(datasetId: string) {
-    const prepared = await this.prepare(datasetId)
+    return this.preflightForMode(datasetId, 'full')
+  }
+
+  /**
+   * Smoke 从五个冻结类型中各选请求体最小的一条，目的是用最少媒体外发验证真实协议。
+   * 选择规则完全确定：先比真实请求字节数，再比 case UUID；同一冻结输入永远得到同一清单。
+   */
+  async smokePreflight(datasetId: string) {
+    return this.preflightForMode(datasetId, 'smoke')
+  }
+
+  private async preflightForMode(datasetId: string, mode: ExecutionMode) {
+    const prepared = await this.prepare(datasetId, mode)
     const existingAuthorization = await this.findMatchingAuthorization(
       prepared.input.session.id,
       prepared.preflightFingerprint,
@@ -68,7 +91,8 @@ export class VlmBlindCapabilityService {
       preflight_fingerprint: prepared.preflightFingerprint,
       provider: 'rightapi',
       requested_model: VLM_REVIEW_MODEL,
-      protocol_version: VLM_REVIEW_PROTOCOL_VERSION,
+      execution_mode: mode,
+      protocol_version: mode === 'smoke' ? SMOKE_PROTOCOL_VERSION : VLM_REVIEW_PROTOCOL_VERSION,
       prompt_version: VLM_REVIEW_PROMPT_VERSION,
       provider_configured: Boolean(this.settings.rightCodeBaseUrl && this.settings.rightCodeApiKey),
       provider_enabled: this.settings.vlmReviewProvider === 'rightapi',
@@ -79,7 +103,7 @@ export class VlmBlindCapabilityService {
       candidate_count: prepared.items.length,
       normal_call_count: prepared.items.length,
       stability_case_count: prepared.edgeItems.length,
-      stability_extra_call_count: prepared.edgeItems.length * 2,
+      stability_extra_call_count: mode === 'smoke' ? 0 : prepared.edgeItems.length * 2,
       maximum_call_count: prepared.planned.length,
       total_image_count: prepared.planned.reduce(
         (sum, item) => sum + item.input.request.evidence_frames.length,
@@ -89,15 +113,19 @@ export class VlmBlindCapabilityService {
       items: prepared.items.map((item) => ({
         case_id: item.input.case.id,
         candidate_key: item.input.case.candidateKey,
+        group: item.input.group,
         image_count: item.input.request.evidence_frames.length,
         request_bytes: item.requestBytes,
         normal_calls: 1,
-        stability_extra_calls: item.input.group === EDGE_GROUP ? 2 : 0,
+        stability_extra_calls: mode === 'full' && item.input.group === EDGE_GROUP ? 2 : 0,
       })),
-      budget: {
-        max_calls: this.settings.vlmReviewMaxCalls ?? MAX_CALLS,
-        max_cost_cny: this.settings.vlmReviewMaxCostCny ?? 5,
-      },
+      budget:
+        mode === 'smoke'
+          ? { max_calls: SMOKE_MAX_CALLS, max_cost_cny: SMOKE_MAX_COST_CNY }
+          : {
+              max_calls: this.settings.vlmReviewMaxCalls ?? MAX_CALLS,
+              max_cost_cny: this.settings.vlmReviewMaxCostCny ?? 5,
+            },
       stop_conditions: [
         'provider_disabled_or_unconfigured',
         'fingerprint_drift',
@@ -114,18 +142,30 @@ export class VlmBlindCapabilityService {
    * 指纹漂移、超过部署硬上限或 Provider 未开启都在任何外发前拒绝。
    */
   async authorize(datasetId: string, input: unknown) {
+    return this.authorizeForMode(datasetId, input, 'full')
+  }
+
+  async authorizeSmoke(datasetId: string, input: unknown) {
+    return this.authorizeForMode(datasetId, input, 'smoke')
+  }
+
+  private async authorizeForMode(datasetId: string, input: unknown, mode: ExecutionMode) {
     const parsed = vlmBlindVisualAuthorizationInputSchema.parse(input)
-    const prepared = await this.prepare(datasetId)
+    const prepared = await this.prepare(datasetId, mode)
     if (parsed.preflight_fingerprint !== prepared.preflightFingerprint) {
       throw new ConflictException('preflight fingerprint no longer matches frozen input')
     }
     if (!this.provider.available || !this.provider.external) {
       throw new ConflictException('真实 qwen3.7-plus 视觉 Provider 未启用或未配置')
     }
+    const deploymentMaxCalls =
+      mode === 'smoke' ? SMOKE_MAX_CALLS : (this.settings.vlmReviewMaxCalls ?? MAX_CALLS)
+    const deploymentMaxCost =
+      mode === 'smoke' ? SMOKE_MAX_COST_CNY : (this.settings.vlmReviewMaxCostCny ?? 5)
     if (
-      parsed.max_calls < prepared.planned.length ||
-      parsed.max_calls > (this.settings.vlmReviewMaxCalls ?? MAX_CALLS) ||
-      parsed.max_cost_cny > (this.settings.vlmReviewMaxCostCny ?? 5)
+      parsed.max_calls !== prepared.planned.length ||
+      parsed.max_calls > deploymentMaxCalls ||
+      parsed.max_cost_cny > deploymentMaxCost
     ) {
       throw new ConflictException('visual authorization exceeds or cannot cover deployment limits')
     }
@@ -154,7 +194,13 @@ export class VlmBlindCapabilityService {
   }
 
   async startAndSchedule(datasetId: string) {
-    const run = await this.start(datasetId)
+    const run = await this.start(datasetId, 'full')
+    setImmediate(() => void this.executePending(run.id).catch(() => this.failRun(run.id)))
+    return this.getRun(run.id)
+  }
+
+  async startSmokeAndSchedule(datasetId: string) {
+    const run = await this.start(datasetId, 'smoke')
     setImmediate(() => void this.executePending(run.id).catch(() => this.failRun(run.id)))
     return this.getRun(run.id)
   }
@@ -234,8 +280,8 @@ export class VlmBlindCapabilityService {
   }
 
   /** 可由测试直接调用；生产 Controller 使用 startAndSchedule 立即返回轮询身份。 */
-  async start(datasetId: string) {
-    const prepared = await this.prepare(datasetId)
+  async start(datasetId: string, mode: ExecutionMode = 'full') {
+    const prepared = await this.prepare(datasetId, mode)
     if (!this.provider.available || !this.provider.external) {
       throw new ConflictException('真实 qwen3.7-plus 视觉 Provider 未启用或未配置')
     }
@@ -255,7 +301,7 @@ export class VlmBlindCapabilityService {
           id: runId,
           labelingSessionId: prepared.input.session.id,
           authorizationId: authorization.id,
-          protocolVersion: VLM_REVIEW_PROTOCOL_VERSION,
+          protocolVersion: mode === 'smoke' ? SMOKE_PROTOCOL_VERSION : VLM_REVIEW_PROTOCOL_VERSION,
           promptVersion: VLM_REVIEW_PROMPT_VERSION,
           datasetFingerprint: prepared.input.dataset.frozenFingerprint!,
           labelsFingerprint: prepared.input.session.labelsFingerprint!,
@@ -645,22 +691,37 @@ export class VlmBlindCapabilityService {
     const billedCost = knownCosts
       ? attempts.reduce((sum, item) => sum + (numberOrNull(item.billedCostCny) ?? 0), 0)
       : null
-    const baseMetrics = items ? computeMetrics(items, attempts, results) : null
-    const metrics = baseMetrics
-      ? {
-          ...baseMetrics,
-          gates: {
-            ...baseMetrics.gates,
-            all_84_calls_succeeded:
-              succeededCount === 84 && failedCount === 0 && unknownCount === 0,
-            token_usage_known: knownTokens,
-            billed_cost_known_and_within_budget:
-              billedCost !== null && billedCost <= Number((await this.runById(runId)).maxCostCny),
-          },
-          eligible_for_real_top3_simulation: false,
-        }
+    const currentRun = await this.runById(runId)
+    const selectedCaseIds = new Set(attempts.map((attempt) => attempt.caseId))
+    const selectedItems = items?.filter((item) => selectedCaseIds.has(item.case.id))
+    const smoke = currentRun.protocolVersion === SMOKE_PROTOCOL_VERSION
+    const metrics = selectedItems
+      ? smoke
+        ? {
+            ...computeSmokeMetrics(selectedItems, attempts, results),
+            audit: {
+              all_5_calls_succeeded:
+                succeededCount === SMOKE_MAX_CALLS && failedCount === 0 && unknownCount === 0,
+              token_usage_known: knownTokens,
+              billed_cost_known_and_within_budget:
+                billedCost !== null && billedCost <= Number(currentRun.maxCostCny),
+            },
+            eligible_for_real_top3_simulation: false,
+          }
+        : {
+            ...computeMetrics(selectedItems, attempts, results),
+            gates: {
+              ...computeMetrics(selectedItems, attempts, results).gates,
+              all_84_calls_succeeded:
+                succeededCount === 84 && failedCount === 0 && unknownCount === 0,
+              token_usage_known: knownTokens,
+              billed_cost_known_and_within_budget:
+                billedCost !== null && billedCost <= Number(currentRun.maxCostCny),
+            },
+            eligible_for_real_top3_simulation: false,
+          }
       : null
-    if (metrics) {
+    if (metrics && !smoke && 'gates' in metrics) {
       metrics.eligible_for_real_top3_simulation = Object.values(metrics.gates).every(Boolean)
     }
     await this.db
@@ -733,9 +794,9 @@ export class VlmBlindCapabilityService {
       )
   }
 
-  private async prepare(datasetId: string) {
+  private async prepare(datasetId: string, mode: ExecutionMode = 'full') {
     const input = await this.labeling.prepareCapabilityInput(datasetId)
-    const items = input.items.map((item) => {
+    const allItems = input.items.map((item) => {
       const body = buildQwenVlmReviewRequestBody(item.request)
       const serialized = JSON.stringify(body)
       return {
@@ -744,23 +805,44 @@ export class VlmBlindCapabilityService {
         requestFingerprint: createHash('sha256').update(serialized).digest('hex'),
       }
     })
-    const edgeItems = items.filter((item) => item.input.group === EDGE_GROUP)
-    if (items.length !== 60 || edgeItems.length !== 12) {
+    const allEdgeItems = allItems.filter((item) => item.input.group === EDGE_GROUP)
+    if (allItems.length !== 60 || allEdgeItems.length !== 12) {
       throw new ConflictException('frozen capability protocol requires 60 cases and 12 edge cases')
     }
-    const planned = [
-      ...items.map((item) => ({ ...item, repetition: 1 })),
-      ...edgeItems.flatMap((item) => [
-        { ...item, repetition: 2 },
-        { ...item, repetition: 3 },
-      ]),
-    ]
+    const items =
+      mode === 'smoke'
+        ? SMOKE_GROUPS.map((group) => {
+            const selected = allItems
+              .filter((item) => item.input.group === group)
+              .sort(
+                (left, right) =>
+                  left.requestBytes - right.requestBytes ||
+                  left.input.case.id.localeCompare(right.input.case.id),
+              )[0]
+            if (!selected) throw new ConflictException(`smoke group ${group} has no candidate`)
+            return selected
+          })
+        : allItems
+    const edgeItems = items.filter((item) => item.input.group === EDGE_GROUP)
+    const planned =
+      mode === 'smoke'
+        ? items.map((item) => ({ ...item, repetition: 1 }))
+        : [
+            ...items.map((item) => ({ ...item, repetition: 1 })),
+            ...edgeItems.flatMap((item) => [
+              { ...item, repetition: 2 },
+              { ...item, repetition: 3 },
+            ]),
+          ]
     const preflightFingerprint = createHash('sha256')
       .update(
         JSON.stringify({
           dataset_fingerprint: input.dataset.frozenFingerprint,
           labels_fingerprint: input.session.labelsFingerprint,
           evidence_fingerprint: input.evidence_fingerprint,
+          ...(mode === 'smoke'
+            ? { execution_mode: mode, selection: 'minimum_request_bytes_v1' }
+            : {}),
           requests: planned.map((item) => ({
             case_id: item.input.case.id,
             repetition: item.repetition,
@@ -787,6 +869,62 @@ export class VlmBlindCapabilityService {
       )
       .limit(1)
     return row
+  }
+}
+
+/**
+ * Smoke 只回答“真实协议是否能在五种候选上跑通”，样本量只有每类一条，不能套用
+ * 正式 60 条评测的晋级门槛。这里保存逐组是否一致、条件一致率和耗时，明确不产出晋级结论。
+ */
+function computeSmokeMetrics(
+  items: Awaited<ReturnType<VlmBlindLabelingService['prepareCapabilityInput']>>['items'],
+  attempts: Array<typeof evaluationVlmBlindRealAttempts.$inferSelect>,
+  results: Array<typeof evaluationVlmBlindRealResults.$inferSelect>,
+) {
+  const resultByAttempt = new Map(results.map((item) => [item.attemptId, item]))
+  const attemptByCase = new Map<string, typeof evaluationVlmBlindRealAttempts.$inferSelect>()
+  for (const attempt of attempts.filter((item) => item.repetition === 1)) {
+    const current = attemptByCase.get(attempt.caseId)
+    if (!current || attempt.attemptNumber > current.attemptNumber) {
+      attemptByCase.set(attempt.caseId, attempt)
+    }
+  }
+  const groupMatches: Record<string, boolean> = {}
+  let caseStatusCorrect = 0
+  let conditionCorrect = 0
+  let conditionTotal = 0
+  for (const item of items) {
+    const attempt = attemptByCase.get(item.case.id)
+    const result = attempt ? resultByAttempt.get(attempt.id) : undefined
+    const matches = result?.derivedStatus === expectedCaseStatus(item.group, item.human_status)
+    groupMatches[item.group] = matches
+    if (matches) caseStatusCorrect += 1
+    const output = result?.outputJson as {
+      conditions?: Array<{ condition_id: string; verdict: string }>
+    } | null
+    const actualById = new Map(
+      (output?.conditions ?? []).map((condition) => [condition.condition_id, condition.verdict]),
+    )
+    for (const condition of item.human_conditions) {
+      conditionTotal += 1
+      if (actualById.get(condition.condition_id) === condition.verdict) conditionCorrect += 1
+    }
+  }
+  const latencies = attempts
+    .map((item) => item.latencyMs)
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right)
+  return {
+    smoke_only: true,
+    selection: 'minimum_request_bytes_v1',
+    group_matches: groupMatches,
+    case_status_correct: caseStatusCorrect,
+    case_total: items.length,
+    condition_correct: conditionCorrect,
+    condition_total: conditionTotal,
+    condition_accuracy: conditionTotal === 0 ? null : conditionCorrect / conditionTotal,
+    latency_ms: { p50: percentile(latencies, 0.5), p95: percentile(latencies, 0.95) },
+    formal_eligibility_note: 'Smoke 每类只有一条，只验证协议和审计链路，不用于 Phase F 晋级。',
   }
 }
 

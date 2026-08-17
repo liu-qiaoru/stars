@@ -49,6 +49,58 @@ describe('Phase F real VLM capability orchestration', () => {
     await expect(service.listRuns(fixture.datasetId)).resolves.toEqual({ items: [] })
   })
 
+  test('selects one deterministic candidate per frozen group and keeps smoke authorization isolated', async () => {
+    const provider = successfulExternalFake()
+    const service = createService(context.db, fixture, provider)
+
+    const preview = await service.smokePreflight(fixture.datasetId)
+
+    expect(preview).toMatchObject({
+      execution_mode: 'smoke',
+      protocol_version: 'vlm-review-smoke-v1',
+      candidate_count: 5,
+      normal_call_count: 5,
+      stability_extra_call_count: 0,
+      maximum_call_count: 5,
+      total_image_count: 5,
+      budget: { max_calls: 5, max_cost_cny: 0.5 },
+      external_call_count: 0,
+    })
+    expect(preview.items.map((item) => item.group)).toEqual([
+      'exact_match',
+      'missing_must_have',
+      'exclusion_hit',
+      'partial_relevance',
+      'insufficient_evidence',
+    ])
+    expect(new Set(preview.items.map((item) => item.case_id)).size).toBe(5)
+    expect(provider.review).not.toHaveBeenCalled()
+
+    await service.authorizeSmoke(fixture.datasetId, {
+      confirmed: true,
+      preflight_fingerprint: preview.preflight_fingerprint,
+      max_calls: 5,
+      max_cost_cny: 0.5,
+    })
+    await expect(service.start(fixture.datasetId)).rejects.toThrow(/视觉授权/)
+
+    const run = await service.start(fixture.datasetId, 'smoke')
+    const completed = await service.executePending(run.id)
+    expect(provider.review).toHaveBeenCalledTimes(5)
+    expect(completed).toMatchObject({
+      protocol_version: 'vlm-review-smoke-v1',
+      status: 'succeeded',
+      case_count: 5,
+      planned_call_count: 5,
+      external_call_count: 5,
+      metrics: {
+        smoke_only: true,
+        case_total: 5,
+        eligible_for_real_top3_simulation: false,
+      },
+    })
+  })
+
   test('Nest injects the labeling service explicitly in tsx runtime', async () => {
     const provider = successfulExternalFake()
     const labeling = {

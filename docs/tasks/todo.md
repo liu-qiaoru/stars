@@ -447,6 +447,24 @@ Review：
 伪造分数。真实 VLM 调用、查询/图片外发和费用仍为 0；尚未生成真实质量指标，未进入真实 Top-3
 模拟或 Phase G。
 
+### Agent V1 Phase F：五类型真实 VLM smoke（2026-08-17）
+
+- [x] 新增与 84 次正式评测隔离的 `vlm-review-smoke-v1`：从 `exact_match`、
+      `missing_must_have`、`exclusion_hit`、`partial_relevance`、`insufficient_evidence` 五个冻结
+      分组各选一条。每组先取真实请求字节最小者，字节相同时按 case UUID，保证冻结输入不变时
+      选择稳定，并尽量减少首次媒体外发。
+- [x] 新增独立 smoke preflight、视觉授权和运行入口。Smoke 指纹包含选择规则与五条请求，只允许
+      恰好 5 次调用、费用硬上限 ¥0.50；该授权无法启动 84 次正式评测。报告只说明协议、审计和
+      五个样本是否跑通，不用每类一条的小样本计算正式晋级门槛。
+- [x] 真实冻结数据的只读 preflight 选择 5 条、每条 1 张图，共 5 张派生 PNG、3,971,489 bytes；
+      单请求 521,144～979,046 bytes。preflight 指纹为
+      `c4a6f12d8d5665f5108ad7e65575e480e1ddf898cbec81b9bfe5f882d80bf8d0`。Provider 部署闸门仍为
+      `disabled`，独立视觉授权不存在，真实外部调用、媒体外发和费用仍为 0。
+
+下一步边界：在用户核对五条 smoke 清单并重新明确授权前，不开启 `VLM_REVIEW_PROVIDER=rightapi`，
+不创建真实 run。Smoke 完成后先核对响应模型、Tool Call、条件身份、token、费用、响应指纹和
+`outcome_unknown` 状态，再决定是否单独授权 84 次正式评测；不直接进入 Phase G。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

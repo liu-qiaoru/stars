@@ -666,6 +666,7 @@ export interface VlmBlindLabelingState {
 }
 
 export interface VlmBlindRealPreflight {
+  execution_mode: 'full' | 'smoke'
   dataset_id: string
   dataset_fingerprint: string
   labels_fingerprint: string
@@ -687,6 +688,7 @@ export interface VlmBlindRealPreflight {
   items: Array<{
     case_id: string
     candidate_key: string
+    group: VlmBlindGroup
     image_count: number
     request_bytes: number
     normal_calls: number
@@ -997,6 +999,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
       request<VlmBlindRealPreflight>(`/evaluation/vlm-blind/datasets/${datasetId}/real-preflight`, {
         method: 'GET',
       }),
+    preflightVlmBlindRealSmoke: (datasetId: string) =>
+      request<VlmBlindRealPreflight>(
+        `/evaluation/vlm-blind/datasets/${datasetId}/real-smoke-preflight`,
+        { method: 'GET' },
+      ),
     listVlmBlindRealRuns: (datasetId: string) =>
       request<{ items: VlmBlindRealRun[] }>(
         `/evaluation/vlm-blind/datasets/${datasetId}/real-runs`,
@@ -1018,8 +1025,26 @@ export function createApiClient(options: ApiClientOptions = {}) {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    authorizeVlmBlindRealSmoke: (
+      datasetId: string,
+      input: {
+        confirmed: true
+        preflight_fingerprint: string
+        max_calls: number
+        max_cost_cny: number
+        expires_in_minutes?: number
+      },
+    ) =>
+      request<{ id: string }>(
+        `/evaluation/vlm-blind/datasets/${datasetId}/smoke-visual-authorizations`,
+        { method: 'POST', body: JSON.stringify(input) },
+      ),
     startVlmBlindReal: (datasetId: string) =>
       request<VlmBlindRealRun>(`/evaluation/vlm-blind/datasets/${datasetId}/real-runs`, {
+        method: 'POST',
+      }),
+    startVlmBlindRealSmoke: (datasetId: string) =>
+      request<VlmBlindRealRun>(`/evaluation/vlm-blind/datasets/${datasetId}/real-smoke-runs`, {
         method: 'POST',
       }),
     getMedia: (id: string) =>
