@@ -2,6 +2,7 @@ import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/commo
 import { EvaluationService } from './evaluation.service.js'
 import { ShadowRerankService } from './shadow-rerank.service.js'
 import { VlmBlindDatasetService } from './vlm-blind-dataset.service.js'
+import { VlmBlindCapabilityService } from './vlm-blind-capability.service.js'
 import { VlmBlindLabelingService } from './vlm-blind-labeling.service.js'
 
 @Controller('evaluation')
@@ -17,6 +18,8 @@ export class EvaluationController {
     private readonly vlmBlindDatasets: VlmBlindDatasetService,
     @Inject(VlmBlindLabelingService)
     private readonly vlmBlindLabeling: VlmBlindLabelingService,
+    @Inject(VlmBlindCapabilityService)
+    private readonly vlmBlindCapability: VlmBlindCapabilityService,
   ) {}
 
   @Get('sets') listSets() {
@@ -207,5 +210,38 @@ export class EvaluationController {
   @Post('vlm-blind/datasets/:datasetId/fake-run')
   runVlmBlindFake(@Param('datasetId') datasetId: string) {
     return this.vlmBlindLabeling.runFake(datasetId)
+  }
+
+  /** 只读构造真实请求摘要；不会创建 run、写授权或调用 Provider。 */
+  @Get('vlm-blind/datasets/:datasetId/real-preflight')
+  preflightVlmBlindReal(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindCapability.preflight(datasetId)
+  }
+
+  /** 独立视觉授权绑定当前 preflight 指纹，不能由文本 AgentIntent 授权替代。 */
+  @Post('vlm-blind/datasets/:datasetId/visual-authorizations')
+  authorizeVlmBlindReal(@Param('datasetId') datasetId: string, @Body() body: unknown) {
+    return this.vlmBlindCapability.authorize(datasetId, body)
+  }
+
+  @Post('vlm-blind/datasets/:datasetId/real-runs')
+  startVlmBlindReal(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindCapability.startAndSchedule(datasetId)
+  }
+
+  /** 历史报告只读取 PostgreSQL，不重新构造图片请求。 */
+  @Get('vlm-blind/datasets/:datasetId/real-runs')
+  listVlmBlindReal(@Param('datasetId') datasetId: string) {
+    return this.vlmBlindCapability.listRuns(datasetId)
+  }
+
+  @Get('vlm-blind/real-runs/:runId')
+  getVlmBlindReal(@Param('runId') runId: string) {
+    return this.vlmBlindCapability.getRun(runId)
+  }
+
+  @Post('vlm-blind/real-runs/:runId/retry-unknown')
+  retryUnknownVlmBlindReal(@Param('runId') runId: string, @Body() body: unknown) {
+    return this.vlmBlindCapability.retryUnknownAndSchedule(runId, body)
   }
 }

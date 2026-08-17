@@ -8,6 +8,8 @@ import {
   type VlmBlindGroup,
   type VlmBlindLabelingState,
   type VlmBlindLabelStage,
+  type VlmBlindRealPreflight,
+  type VlmBlindRealRun,
   type VlmBlindVerdict,
 } from '../lib/api-client'
 import { EvaluationBreadcrumbs } from './evaluation-breadcrumbs'
@@ -44,11 +46,13 @@ export function VlmBlindCandidateReviewWorkspace({
   packet,
   initialDataset,
   initialLabeling = null,
+  initialRealRuns = [],
   apiClient = createApiClient(),
 }: {
   packet: VlmBlindCandidateReviewPacket
   initialDataset: VlmBlindDataset | null
   initialLabeling?: VlmBlindLabelingState | null
+  initialRealRuns?: VlmBlindRealRun[]
   apiClient?: ReturnType<typeof createApiClient>
 }) {
   const [dataset, setDataset] = useState(initialDataset)
@@ -214,7 +218,7 @@ export function VlmBlindCandidateReviewWorkspace({
         </p>
         <div className="mt-5 flex flex-wrap gap-2 text-sm font-medium">
           <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-emerald-900">
-            真实 VLM 调用：0
+            真实 VLM 调用：{initialRealRuns[0]?.external_call_count ?? 0}
           </span>
           <span className="rounded-full bg-white px-3 py-1.5 text-neutral-700 ring-1 ring-neutral-200">
             尚未执行 VLM 审核
@@ -297,7 +301,11 @@ export function VlmBlindCandidateReviewWorkspace({
             />
           </section>
           {dataset.status === 'frozen' && initialLabeling ? (
-            <HumanConditionLabelingPanel apiClient={apiClient} initialState={initialLabeling} />
+            <HumanConditionLabelingPanel
+              apiClient={apiClient}
+              initialRealRuns={initialRealRuns}
+              initialState={initialLabeling}
+            />
           ) : null}
           {dataset.status !== 'frozen' ? (
             <>
@@ -487,9 +495,11 @@ export function VlmBlindCandidateReviewWorkspace({
 
 function HumanConditionLabelingPanel({
   initialState,
+  initialRealRuns,
   apiClient,
 }: {
   initialState: VlmBlindLabelingState
+  initialRealRuns: VlmBlindRealRun[]
   apiClient: ReturnType<typeof createApiClient>
 }) {
   const [state, setState] = useState(initialState)
@@ -683,6 +693,14 @@ function HumanConditionLabelingPanel({
         <FakeReport report={state.fake_report} />
       ) : null}
 
+      {state.labels_status === 'labels_frozen' ? (
+        <RealCapabilityPanel
+          apiClient={apiClient}
+          datasetId={state.dataset_id}
+          initialRuns={initialRealRuns}
+        />
+      ) : null}
+
       {activeStage ? (
         <div className="grid gap-5 xl:grid-cols-2">
           {visibleCases.map((candidateCase) => (
@@ -796,6 +814,294 @@ function FakeReport({ report }: { report: NonNullable<VlmBlindLabelingState['fak
       </p>
     </section>
   )
+}
+
+/**
+ * 真实能力盲测沿用当前 Phase F 页面，避免孤立路由。preflight 与历史读取都没有外部调用；
+ * 只有用户先勾选独立视觉授权、再单独点击启动按钮，Server 才可能开始 dispatch。
+ */
+function RealCapabilityPanel({
+  datasetId,
+  apiClient,
+  initialRuns,
+}: {
+  datasetId: string
+  apiClient: ReturnType<typeof createApiClient>
+  initialRuns: VlmBlindRealRun[]
+}) {
+  const [preflight, setPreflight] = useState<VlmBlindRealPreflight | null>(null)
+  const [runs, setRuns] = useState<VlmBlindRealRun[]>(initialRuns)
+  const [confirmed, setConfirmed] = useState(false)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const latest = runs[0] ?? null
+
+  useEffect(() => {
+    if (!latest || !['pending', 'running'].includes(latest.status)) return
+    let cancelled = false
+    const timer = setInterval(() => {
+      void apiClient
+        .getVlmBlindRealRun(latest.id)
+        .then((run) => {
+          if (!cancelled)
+            setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)])
+        })
+        .catch((caught) => {
+          if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught))
+        })
+    }, 2_000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [apiClient, latest])
+
+  async function loadPreflight() {
+    setBusy('preflight')
+    setError('')
+    try {
+      const [preview, history] = await Promise.all([
+        apiClient.preflightVlmBlindReal(datasetId),
+        apiClient.listVlmBlindRealRuns(datasetId),
+      ])
+      setPreflight(preview)
+      setRuns(history.items)
+      setMessage('本地预检已完成；外部调用仍为 0。')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function authorize() {
+    if (!preflight || !confirmed) return
+    setBusy('authorize')
+    setError('')
+    try {
+      await apiClient.authorizeVlmBlindReal(datasetId, {
+        confirmed: true,
+        preflight_fingerprint: preflight.preflight_fingerprint,
+        max_calls: preflight.maximum_call_count,
+        max_cost_cny: preflight.budget.max_cost_cny,
+      })
+      setPreflight(await apiClient.preflightVlmBlindReal(datasetId))
+      setMessage('本次视觉授权已保存；尚未执行 Provider。')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function startRealRun() {
+    if (!preflight?.visual_authorization_exists) return
+    setBusy('start')
+    setError('')
+    try {
+      const run = await apiClient.startVlmBlindReal(datasetId)
+      setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)])
+      setMessage('真实能力盲测已创建；页面正在轮询 PostgreSQL 状态。')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  return (
+    <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="font-bold text-amber-950">真实 qwen3.7-plus 能力盲测</h3>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-amber-950">
+            Provider
+            默认关闭。预检只在本机读取冻结帧并计算真实请求大小；刷新页面、查看历史和执行预检都不会发送图片。
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-amber-900">
+          真实外部调用：{latest?.external_call_count ?? 0}
+        </span>
+      </div>
+
+      <div aria-live="polite" className="mt-3 min-h-5 text-sm text-amber-900">
+        {error ? <span role="alert">操作失败：{error}</span> : message}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <button
+          className="secondary-action"
+          disabled={Boolean(busy)}
+          onClick={loadPreflight}
+          type="button"
+        >
+          {busy === 'preflight' ? '正在本地预检…' : '运行本地只读 preflight'}
+        </button>
+        <a className="secondary-action" href="/evaluation/reports">
+          返回评测历史报告
+        </a>
+      </div>
+
+      {preflight ? (
+        <div className="mt-4 space-y-4 rounded-2xl bg-white p-4 ring-1 ring-amber-200">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="真实 VLM 预检摘要">
+            <ProgressStat label="冻结候选" value={preflight.candidate_count} tone="neutral" />
+            <ProgressStat label="总调用上限" value={preflight.maximum_call_count} tone="amber" />
+            <ProgressStat label="总图片数" value={preflight.total_image_count} tone="neutral" />
+            <ProgressStat label="外部调用" value={preflight.external_call_count} tone="green" />
+          </div>
+          <p className="text-sm leading-6 text-neutral-700">
+            60 条各一次，冻结的 12 条“部分相关”边缘案例再各两次，共 {preflight.maximum_call_count}{' '}
+            次；请求体合计 {formatBytes(preflight.total_request_bytes)}。预算硬上限 ¥
+            {preflight.budget.max_cost_cny.toFixed(2)}。
+          </p>
+          <dl className="grid gap-2 text-sm sm:grid-cols-2">
+            <StatusRow
+              label="Provider 配置"
+              value={preflight.provider_configured ? '完整' : '缺失'}
+            />
+            <StatusRow
+              label="Provider 部署开关"
+              value={preflight.provider_enabled ? '已启用' : 'disabled'}
+            />
+            <StatusRow
+              label="独立视觉授权"
+              value={preflight.visual_authorization_exists ? '已存在' : '等待授权'}
+            />
+            <StatusRow label="停止条件" value="指纹漂移、预算/次数超限、outcome unknown" />
+          </dl>
+          {!preflight.visual_authorization_exists ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+              <label className="flex items-start gap-2 text-sm text-red-950">
+                <input
+                  checked={confirmed}
+                  className="mt-1"
+                  onChange={(event) => setConfirmed(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>
+                  我确认本次授权最多外发 {preflight.total_image_count} 张冻结索引帧、执行{' '}
+                  {preflight.maximum_call_count} 次请求，费用不超过 ¥
+                  {preflight.budget.max_cost_cny.toFixed(2)}。此授权与 AgentIntent 文本授权独立。
+                </span>
+              </label>
+              <button
+                className="primary-action mt-3"
+                disabled={!confirmed || Boolean(busy) || !preflight.provider_available}
+                onClick={authorize}
+                type="button"
+              >
+                {busy === 'authorize' ? '正在保存授权…' : '保存本次独立视觉授权'}
+              </button>
+            </div>
+          ) : (
+            <button
+              className="primary-action"
+              disabled={
+                Boolean(busy) || Boolean(latest && ['pending', 'running'].includes(latest.status))
+              }
+              onClick={startRealRun}
+              type="button"
+            >
+              {busy === 'start' ? '正在创建运行…' : '启动受控真实能力盲测'}
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      <div className="mt-4 space-y-3" aria-label="真实 VLM 历史只读报告">
+        {runs.length === 0 ? (
+          <p className="text-sm text-amber-900">真实 VLM：尚未执行。fake 指标不会填入这里。</p>
+        ) : (
+          runs.map((run) => <RealRunReport key={run.id} run={run} />)
+        )}
+      </div>
+    </section>
+  )
+}
+
+function RealRunReport({ run }: { run: VlmBlindRealRun }) {
+  const metrics = run.metrics as {
+    false_pass_count?: number
+    overall_correct?: number
+    overall_total?: number
+    group_correct?: Record<string, number>
+    condition_macro_accuracy?: number | null
+    condition_macro_accuracy_note?: string | null
+    stability_fully_consistent?: number
+    stability_total?: number
+    latency_ms?: { p50: number | null; p95: number | null }
+    eligible_for_real_top3_simulation?: boolean
+  } | null
+  return (
+    <article className="rounded-xl border border-amber-200 bg-white p-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-bold text-neutral-950">{realRunStatusLabel(run.status)}</p>
+        <span className="font-mono text-xs text-neutral-500">{run.id.slice(0, 8)}…</span>
+      </div>
+      <p className="mt-2 text-neutral-700">
+        调用 {run.external_call_count}/{run.planned_call_count}；成功 {run.succeeded_count}，失败{' '}
+        {run.failed_count}，结果未知 {run.unknown_count}。P50/P95、token
+        和费用只使用已持久化的真实响应事实。
+      </p>
+      {metrics ? (
+        <p className="mt-2 text-neutral-700">
+          错误通过 {metrics.false_pass_count ?? '—'}；总体正确 {metrics.overall_correct ?? '—'}/
+          {metrics.overall_total ?? 60}；条件三分类宏平均{' '}
+          {formatRatio(metrics.condition_macro_accuracy)}；边缘稳定{' '}
+          {metrics.stability_fully_consistent ?? '—'}/{metrics.stability_total ?? 12}。进入真实
+          Top-3 模拟：
+          {metrics.eligible_for_real_top3_simulation ? '达到全部门槛' : '未达到'}。
+        </p>
+      ) : (
+        <p className="mt-2 text-neutral-500">完整真实指标尚未生成。</p>
+      )}
+      {metrics?.group_correct ? (
+        <p className="mt-2 text-xs leading-5 text-neutral-600">
+          五组正确数（每组 12）：完全符合 {metrics.group_correct.exact_match ?? 0}；缺少必须条件{' '}
+          {metrics.group_correct.missing_must_have ?? 0}；命中排除条件{' '}
+          {metrics.group_correct.exclusion_hit ?? 0}；部分相关{' '}
+          {metrics.group_correct.partial_relevance ?? 0}；证据不足{' '}
+          {metrics.group_correct.insufficient_evidence ?? 0}。
+        </p>
+      ) : null}
+      <p className="mt-2 text-xs leading-5 text-neutral-600">
+        延迟 P50/P95：{formatMilliseconds(metrics?.latency_ms?.p50)}/
+        {formatMilliseconds(metrics?.latency_ms?.p95)}。P50 是一半请求不超过的耗时，P95 是 95%
+        请求不超过的耗时，越低越好。Token：{run.total_tokens ?? '未知'}；费用：
+        {run.billed_cost_cny === null ? '未知' : `¥${run.billed_cost_cny.toFixed(4)}`}。
+        {metrics?.condition_macro_accuracy_note ? ` ${metrics.condition_macro_accuracy_note}` : ''}
+      </p>
+    </article>
+  )
+}
+
+function StatusRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-neutral-50 px-3 py-2">
+      <dt className="font-semibold text-neutral-900">{label}</dt>
+      <dd className="mt-0.5 text-neutral-600">{value}</dd>
+    </div>
+  )
+}
+
+function realRunStatusLabel(status: VlmBlindRealRun['status']) {
+  return {
+    pending: '尚未开始',
+    running: '运行中',
+    succeeded: '完整成功',
+    completed_with_errors: '部分失败',
+    failed: '完整失败',
+    outcome_unknown: 'outcome unknown · 已停止且不会自动重放',
+  }[status]
+}
+
+function formatBytes(bytes: number) {
+  return `${(bytes / 1024 / 1024).toFixed(2)} MiB`
+}
+
+function formatMilliseconds(value: number | null | undefined) {
+  return value === null || value === undefined ? '未知' : `${value} ms`
 }
 
 function labelingStatusLabel(status: VlmBlindLabelingState['labels_status']) {

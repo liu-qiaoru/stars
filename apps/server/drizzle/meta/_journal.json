@@ -92,6 +92,13 @@
       "when": 1786682006211,
       "tag": "0012_phase_f_human_condition_labeling",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786939907394,
+      "tag": "0013_phase_f_real_vlm_capability",
+      "breakpoints": true
     }
   ]
 }

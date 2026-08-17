@@ -44,6 +44,10 @@ describe('createSettings', () => {
       dashscopeApiKey: undefined,
       shadowRerankMaxCalls: 1,
       shadowRerankMaxCostCny: 0.5,
+      vlmReviewProvider: 'disabled',
+      vlmReviewMaxCalls: 84,
+      vlmReviewMaxCostCny: 5,
+      vlmReviewTimeoutMs: 120000,
       captionIndexingEnabled: false,
       captionSearchEnabled: false,
       localVlmEnabled: false,
@@ -216,6 +220,35 @@ describe('createSettings', () => {
       agentWaitingTtlSeconds: 86400,
       agentWebPollIntervalMs: 2500,
     })
+  })
+
+  test('真实 VLM 视觉 Provider 独立默认关闭并限制 84 次与 5 元预算', () => {
+    expect(
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        RIGHT_CODE_BASE_URL: 'https://provider.example/v1',
+        RIGHT_CODE_API_KEY: 'configured-but-not-authorized',
+      }),
+    ).toMatchObject({
+      vlmReviewProvider: 'disabled',
+      vlmReviewMaxCalls: 84,
+      vlmReviewMaxCostCny: 5,
+    })
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        VLM_REVIEW_PROVIDER: 'rightapi',
+      }),
+    ).toThrow(/RIGHT_CODE_BASE_URL and RIGHT_CODE_API_KEY/)
+    expect(() =>
+      createSettings({
+        DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+        QDRANT_URL: 'http://localhost:6333',
+        VLM_REVIEW_MAX_CALLS: '85',
+      }),
+    ).toThrow('VLM_REVIEW_MAX_CALLS must be between 1 and 84')
   })
 
   test('端口不是数字时抛出明确错误', () => {

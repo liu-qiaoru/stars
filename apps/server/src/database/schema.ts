@@ -517,6 +517,145 @@ export const evaluationVlmBlindFakeResults = pgTable(
   ],
 )
 
+// 独立视觉授权绑定 dataset、人工标签和证据三份指纹。它只授权一次 Phase F 能力盲测，
+// 不会因为 AgentIntent 文本执行已开启而自动存在，也不保存 API Key。
+export const evaluationVlmBlindVisualAuthorizations = pgTable(
+  'evaluation_vlm_blind_visual_authorizations',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    labelingSessionId: uuid('labeling_session_id')
+      .notNull()
+      .references(() => evaluationVlmBlindLabelingSessions.id, { onDelete: 'cascade' }),
+    datasetFingerprint: text('dataset_fingerprint').notNull(),
+    labelsFingerprint: text('labels_fingerprint').notNull(),
+    evidenceFingerprint: text('evidence_fingerprint').notNull(),
+    preflightFingerprint: text('preflight_fingerprint').notNull(),
+    maxCalls: integer('max_calls').notNull(),
+    maxCostCny: numeric('max_cost_cny').notNull(),
+    status: text('status').notNull().default('active'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('evaluation_vlm_blind_visual_authorizations_preflight_unique').on(
+      table.preflightFingerprint,
+    ),
+    index('evaluation_vlm_blind_visual_authorizations_session_idx').on(table.labelingSessionId),
+  ],
+)
+
+// 真实能力盲测与 fake run 永久分表。父 run 冻结本次协议、指纹、预算和汇总指标；
+// 打开历史页面只读这些列，不会重新构造请求或调用 Provider。
+export const evaluationVlmBlindRealRuns = pgTable(
+  'evaluation_vlm_blind_real_runs',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    labelingSessionId: uuid('labeling_session_id')
+      .notNull()
+      .references(() => evaluationVlmBlindLabelingSessions.id, { onDelete: 'restrict' }),
+    authorizationId: uuid('authorization_id')
+      .notNull()
+      .references(() => evaluationVlmBlindVisualAuthorizations.id, { onDelete: 'restrict' }),
+    status: text('status').notNull().default('pending'),
+    provider: text('provider').notNull().default('rightapi'),
+    requestedModel: text('requested_model').notNull().default('qwen3.7-plus'),
+    protocolVersion: text('protocol_version').notNull(),
+    promptVersion: text('prompt_version').notNull(),
+    datasetFingerprint: text('dataset_fingerprint').notNull(),
+    labelsFingerprint: text('labels_fingerprint').notNull(),
+    evidenceFingerprint: text('evidence_fingerprint').notNull(),
+    caseCount: integer('case_count').notNull(),
+    plannedCallCount: integer('planned_call_count').notNull(),
+    externalCallCount: integer('external_call_count').notNull().default(0),
+    succeededCount: integer('succeeded_count').notNull().default(0),
+    failedCount: integer('failed_count').notNull().default(0),
+    unknownCount: integer('unknown_count').notNull().default(0),
+    maxCalls: integer('max_calls').notNull(),
+    maxCostCny: numeric('max_cost_cny').notNull(),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    billedCostCny: numeric('billed_cost_cny'),
+    metricsJson: jsonb('metrics_json'),
+    errorJson: jsonb('error_json'),
+    ...timestamps,
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('evaluation_vlm_blind_real_runs_authorization_unique').on(table.authorizationId),
+    index('evaluation_vlm_blind_real_runs_session_idx').on(table.labelingSessionId),
+  ],
+)
+
+// 每个计划槽位拥有稳定 repetition；显式 retry-unknown 用更高 attempt_number 新建行，
+// 从不覆盖原 dispatched attempt。step_attempt_id 是外部副作用的恢复身份。
+export const evaluationVlmBlindRealAttempts = pgTable(
+  'evaluation_vlm_blind_real_attempts',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => evaluationVlmBlindRealRuns.id, { onDelete: 'cascade' }),
+    caseId: uuid('case_id')
+      .notNull()
+      .references(() => evaluationVlmBlindCases.id, { onDelete: 'restrict' }),
+    repetition: integer('repetition').notNull(),
+    attemptNumber: integer('attempt_number').notNull().default(1),
+    retryOfAttemptId: uuid('retry_of_attempt_id').references(
+      (): AnyPgColumn => evaluationVlmBlindRealAttempts.id,
+      { onDelete: 'restrict' },
+    ),
+    stepAttemptId: uuid('step_attempt_id').notNull(),
+    status: text('status').notNull().default('pending'),
+    externalCallStatus: text('external_call_status').notNull().default('not_dispatched'),
+    requestFingerprint: text('request_fingerprint'),
+    responseFingerprint: text('response_fingerprint'),
+    responseModel: text('response_model'),
+    providerRequestId: text('provider_request_id'),
+    requestBytes: integer('request_bytes'),
+    imageCount: integer('image_count'),
+    actualSampleCount: integer('actual_sample_count'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    billedCostCny: numeric('billed_cost_cny'),
+    derivedStatus: text('derived_status'),
+    errorJson: jsonb('error_json'),
+    dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    latencyMs: integer('latency_ms'),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('evaluation_vlm_blind_real_attempts_slot_unique').on(
+      table.runId,
+      table.caseId,
+      table.repetition,
+      table.attemptNumber,
+    ),
+    uniqueIndex('evaluation_vlm_blind_real_attempts_step_unique').on(table.stepAttemptId),
+    index('evaluation_vlm_blind_real_attempts_run_status_idx').on(table.runId, table.status),
+  ],
+)
+
+export const evaluationVlmBlindRealResults = pgTable(
+  'evaluation_vlm_blind_real_results',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    attemptId: uuid('attempt_id')
+      .notNull()
+      .references(() => evaluationVlmBlindRealAttempts.id, { onDelete: 'cascade' }),
+    caseId: uuid('case_id')
+      .notNull()
+      .references(() => evaluationVlmBlindCases.id, { onDelete: 'restrict' }),
+    derivedStatus: text('derived_status').notNull(),
+    outputJson: jsonb('output_json'),
+    errorJson: jsonb('error_json'),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex('evaluation_vlm_blind_real_results_attempt_unique').on(table.attemptId)],
+)
+
 // Phase E 的影子重排事实与普通 evaluation_runs 分离：普通 Search/RRF 快照不可变，
 // 影子失败也只能影响本表状态，绝不能回写 production candidate rank。
 export const evaluationShadowRuns = pgTable(

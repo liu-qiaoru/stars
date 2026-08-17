@@ -6,6 +6,7 @@ import {
   vlmBlindCandidateReviewPacketSchema,
   vlmBlindConditionLabelInputSchema,
   vlmBlindLabelStageSchema,
+  vlmBlindVisualAuthorizationInputSchema,
   vlmCandidateReviewRequestSchema,
 } from '../schemas/index.js'
 
@@ -44,6 +45,25 @@ describe('Phase F VLM review protocol', () => {
     expect(
       vlmCandidateReviewRequestSchema.parse({ ...request, conditions: [] }).conditions,
     ).toEqual([])
+  })
+
+  test('binds visual authorization to one preflight fingerprint and hard budget', () => {
+    expect(
+      vlmBlindVisualAuthorizationInputSchema.parse({
+        confirmed: true,
+        preflight_fingerprint: 'a'.repeat(64),
+        max_calls: 84,
+        max_cost_cny: 5,
+      }),
+    ).toMatchObject({ expires_in_minutes: 60 })
+    expect(() =>
+      vlmBlindVisualAuthorizationInputSchema.parse({
+        confirmed: true,
+        preflight_fingerprint: 'a'.repeat(64),
+        max_calls: 85,
+        max_cost_cny: 5,
+      }),
+    ).toThrow()
   })
 
   test('rejects missing, duplicated, rewritten conditions and unknown evidence frames', () => {

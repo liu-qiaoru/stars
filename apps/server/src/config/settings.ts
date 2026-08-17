@@ -36,6 +36,11 @@ export interface Settings {
   dashscopeApiKey?: string
   shadowRerankMaxCalls?: number
   shadowRerankMaxCostCny?: number
+  // Phase F 视觉复核拥有独立部署闸门；AgentIntent 文本执行开关不能授权图片外发。
+  vlmReviewProvider?: 'disabled' | 'rightapi'
+  vlmReviewMaxCalls?: number
+  vlmReviewMaxCostCny?: number
+  vlmReviewTimeoutMs?: number
   captionIndexingEnabled: boolean
   captionSearchEnabled: boolean
   localVlmEnabled: boolean
@@ -309,6 +314,49 @@ const settingsSchema = z.object({
       }
       return cost
     }),
+  VLM_REVIEW_PROVIDER: z.enum(['disabled', 'rightapi']).default('disabled'),
+  VLM_REVIEW_MAX_CALLS: z
+    .string()
+    .default('84')
+    .transform((value, context) => {
+      const calls = Number(value)
+      if (!Number.isInteger(calls) || calls < 1 || calls > 84) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'VLM_REVIEW_MAX_CALLS must be between 1 and 84',
+        })
+        return z.NEVER
+      }
+      return calls
+    }),
+  VLM_REVIEW_MAX_COST_CNY: z
+    .string()
+    .default('5')
+    .transform((value, context) => {
+      const cost = Number(value)
+      if (!Number.isFinite(cost) || cost <= 0 || cost > 5) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'VLM_REVIEW_MAX_COST_CNY must be greater than 0 and at most 5',
+        })
+        return z.NEVER
+      }
+      return cost
+    }),
+  VLM_REVIEW_TIMEOUT_MS: z
+    .string()
+    .default('120000')
+    .transform((value, context) => {
+      const timeout = Number(value)
+      if (!Number.isInteger(timeout) || timeout < 1000 || timeout > 120000) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'VLM_REVIEW_TIMEOUT_MS must be between 1000 and 120000',
+        })
+        return z.NEVER
+      }
+      return timeout
+    }),
   CAPTION_INDEXING_ENABLED: z
     .enum(['true', 'false'])
     .default('false')
@@ -408,6 +456,13 @@ export function createSettings(env: Env = process.env): Settings {
       throw new Error('DASHSCOPE_API_KEY is required when SHADOW_RERANK_PROVIDER=dashscope')
     }
   }
+  if (parsed.VLM_REVIEW_PROVIDER === 'rightapi') {
+    if (!parsed.RIGHT_CODE_BASE_URL || !parsed.RIGHT_CODE_API_KEY) {
+      throw new Error(
+        'RIGHT_CODE_BASE_URL and RIGHT_CODE_API_KEY are required when VLM_REVIEW_PROVIDER=rightapi',
+      )
+    }
+  }
 
   return {
     serverHost: parsed.SERVER_HOST,
@@ -443,6 +498,10 @@ export function createSettings(env: Env = process.env): Settings {
     dashscopeApiKey: parsed.DASHSCOPE_API_KEY,
     shadowRerankMaxCalls: parsed.SHADOW_RERANK_MAX_CALLS,
     shadowRerankMaxCostCny: parsed.SHADOW_RERANK_MAX_COST_CNY,
+    vlmReviewProvider: parsed.VLM_REVIEW_PROVIDER,
+    vlmReviewMaxCalls: parsed.VLM_REVIEW_MAX_CALLS,
+    vlmReviewMaxCostCny: parsed.VLM_REVIEW_MAX_COST_CNY,
+    vlmReviewTimeoutMs: parsed.VLM_REVIEW_TIMEOUT_MS,
     captionIndexingEnabled: parsed.CAPTION_INDEXING_ENABLED,
     captionSearchEnabled: parsed.CAPTION_SEARCH_ENABLED,
     localVlmEnabled: parsed.LOCAL_VLM_ENABLED,

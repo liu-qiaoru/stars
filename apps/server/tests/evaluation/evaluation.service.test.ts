@@ -53,6 +53,10 @@ describe('Phase 6 evaluation runtime', () => {
       'evaluation_vlm_blind_fake_results',
       'evaluation_vlm_blind_fake_runs',
       'evaluation_vlm_blind_labeling_sessions',
+      'evaluation_vlm_blind_real_attempts',
+      'evaluation_vlm_blind_real_results',
+      'evaluation_vlm_blind_real_runs',
+      'evaluation_vlm_blind_visual_authorizations',
     ])
   })
 

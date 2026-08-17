@@ -255,7 +255,7 @@ export class VlmBlindLabelingService {
     for (const candidateCase of state.cases) {
       const caseConditions = state.conditions.filter((item) => item.caseId === candidateCase.id)
       try {
-        const request = await this.buildFakeRequest(
+        const request = await this.buildFrozenRequest(
           candidateCase,
           caseConditions,
           selectCurrentEvidence(state.evidence),
@@ -325,6 +325,74 @@ export class VlmBlindLabelingService {
       .insert(evaluationVlmBlindLabelingSessions)
       .values({ id: randomUUID(), datasetId })
       .onConflictDoNothing()
+  }
+
+  /**
+   * 真实 preflight 与受控运行共用同一份冻结输入构造。该方法只读 PostgreSQL 和本地
+   * evidence bundle；返回值仅在 Server 内存中包含 Base64，Controller 永不直接返回它。
+   */
+  async prepareCapabilityInput(datasetId: string) {
+    const state = await this.loadState(datasetId)
+    this.assertCandidatePoolFrozen(state.dataset.status)
+    if (
+      !state.session ||
+      state.session.status !== 'labels_frozen' ||
+      !state.dataset.frozenFingerprint ||
+      !state.session.labelsFingerprint ||
+      !allEvidenceSucceeded(state)
+    ) {
+      throw new ConflictException('dataset, evidence and human labels must be frozen first')
+    }
+    const currentEvidence = selectCurrentEvidence(state.evidence)
+    const evidenceFingerprint = createHash('sha256')
+      .update(
+        JSON.stringify(
+          currentEvidence
+            .map((item) => ({
+              source_id: item.sourceId,
+              artifact_sha256: item.artifactSha256,
+              input_sha256: item.inputSha256,
+            }))
+            .sort((left, right) => left.source_id.localeCompare(right.source_id)),
+        ),
+      )
+      .digest('hex')
+    const items = []
+    for (const candidateCase of state.cases) {
+      const conditions = state.conditions.filter((item) => item.caseId === candidateCase.id)
+      items.push({
+        case: candidateCase,
+        group: candidateCase.reviewedGroup ?? candidateCase.proposedGroup,
+        request: await this.buildFrozenRequest(candidateCase, conditions, currentEvidence),
+        human_status: deriveVlmReviewStatus(
+          conditions.map((condition) => ({
+            kind: condition.kind as 'must_have' | 'optional' | 'exclusion',
+            verdict: resolvedVerdict(condition)!,
+          })),
+        ),
+        human_conditions: conditions.map((condition) => ({
+          condition_id: condition.conditionId,
+          verdict: resolvedVerdict(condition)!,
+        })),
+      })
+    }
+    return {
+      dataset: state.dataset,
+      session: state.session,
+      evidence_fingerprint: evidenceFingerprint,
+      items,
+    }
+  }
+
+  /** Run 恢复只保存 labeling_session_id；先解析其 dataset，再复用同一冻结输入守卫。 */
+  async prepareCapabilityInputForRun(labelingSessionId: string) {
+    const [session] = await this.db
+      .select({ datasetId: evaluationVlmBlindLabelingSessions.datasetId })
+      .from(evaluationVlmBlindLabelingSessions)
+      .where(eq(evaluationVlmBlindLabelingSessions.id, labelingSessionId))
+      .limit(1)
+    if (!session) throw new NotFoundException('VLM blind labeling session not found')
+    return this.prepareCapabilityInput(session.datasetId)
   }
 
   private assertCandidatePoolFrozen(status: string) {
@@ -490,7 +558,7 @@ export class VlmBlindLabelingService {
     }
   }
 
-  private async buildFakeRequest(
+  private async buildFrozenRequest(
     candidateCase: typeof evaluationVlmBlindCases.$inferSelect,
     conditions: ConditionRow[],
     evidenceRows: Array<typeof candidateEvidence.$inferSelect>,

@@ -5,6 +5,7 @@ import type {
   VlmBlindCandidateReviewPacket,
   VlmBlindDataset,
   VlmBlindLabelingState,
+  VlmBlindRealPreflight,
 } from '../lib/api-client'
 
 const packet = {
@@ -99,6 +100,65 @@ const labelingState: VlmBlindLabelingState = {
 }
 
 describe('Phase F candidate review workspace', () => {
+  test('shows a local-only real VLM preflight and keeps fake metrics separate from real history', async () => {
+    const preflight: VlmBlindRealPreflight = {
+      dataset_id: 'dataset-1',
+      dataset_fingerprint: 'a'.repeat(64),
+      labels_fingerprint: 'b'.repeat(64),
+      evidence_fingerprint: 'c'.repeat(64),
+      preflight_fingerprint: 'd'.repeat(64),
+      provider_configured: true,
+      provider_enabled: false,
+      external_llm_enabled: true,
+      provider_available: false,
+      visual_authorization_exists: false,
+      authorization_id: null,
+      candidate_count: 60,
+      normal_call_count: 60,
+      stability_case_count: 12,
+      stability_extra_call_count: 24,
+      maximum_call_count: 84,
+      total_image_count: 420,
+      total_request_bytes: 20 * 1024 * 1024,
+      items: [],
+      budget: { max_calls: 84, max_cost_cny: 5 },
+      stop_conditions: ['outcome_unknown'],
+      external_call_count: 0,
+    }
+    const preflightVlmBlindReal = vi.fn().mockResolvedValue(preflight)
+    const listVlmBlindRealRuns = vi.fn().mockResolvedValue({ items: [] })
+    render(
+      <VlmBlindCandidateReviewWorkspace
+        packet={packet}
+        initialDataset={{ ...dataset, status: 'frozen', frozen_fingerprint: 'a'.repeat(64) }}
+        initialLabeling={{
+          ...labelingState,
+          labels_status: 'labels_frozen',
+          labels_fingerprint: 'b'.repeat(64),
+          labels_frozen_at: new Date().toISOString(),
+        }}
+        apiClient={
+          {
+            preflightVlmBlindReal,
+            listVlmBlindRealRuns,
+            getVlmBlindRealRun: vi.fn(),
+            mediaContentUrl: vi.fn(),
+          } as never
+        }
+      />,
+    )
+
+    expect(screen.getByText('真实 VLM：尚未执行。fake 指标不会填入这里。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '运行本地只读 preflight' }))
+
+    await waitFor(() => expect(preflightVlmBlindReal).toHaveBeenCalledWith('dataset-1'))
+    expect(screen.getByText('Provider 部署开关')).toBeInTheDocument()
+    expect(screen.getByText('disabled')).toBeInTheDocument()
+    expect(screen.getByText(/60 条各一次/)).toBeInTheDocument()
+    expect(screen.getAllByText(/真实外部调用：0/).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '保存本次独立视觉授权' })).toBeDisabled()
+  })
+
   test('moves a frozen candidate pool into evidence preparation and first-pass labeling', async () => {
     const firstPass = {
       ...labelingState,

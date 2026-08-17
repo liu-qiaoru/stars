@@ -4,6 +4,7 @@ import { EvaluationController } from '../../src/evaluation/evaluation.controller
 import { EvaluationService } from '../../src/evaluation/evaluation.service.js'
 import { ShadowRerankService } from '../../src/evaluation/shadow-rerank.service.js'
 import { VlmBlindDatasetService } from '../../src/evaluation/vlm-blind-dataset.service.js'
+import { VlmBlindCapabilityService } from '../../src/evaluation/vlm-blind-capability.service.js'
 import { VlmBlindLabelingService } from '../../src/evaluation/vlm-blind-labeling.service.js'
 
 describe('evaluation controller dependency injection', () => {
@@ -29,6 +30,9 @@ describe('evaluation controller dependency injection', () => {
     const vlmBlindLabeling = {
       get: vi.fn().mockResolvedValue({ dataset_id: 'dataset-1', candidate_status: 'frozen' }),
     }
+    const vlmBlindCapability = {
+      preflight: vi.fn().mockResolvedValue({ external_call_count: 0 }),
+    }
     const moduleRef = await Test.createTestingModule({
       controllers: [EvaluationController],
       providers: [
@@ -36,6 +40,7 @@ describe('evaluation controller dependency injection', () => {
         { provide: ShadowRerankService, useValue: shadowRerank },
         { provide: VlmBlindDatasetService, useValue: vlmBlindDatasets },
         { provide: VlmBlindLabelingService, useValue: vlmBlindLabeling },
+        { provide: VlmBlindCapabilityService, useValue: vlmBlindCapability },
       ],
     }).compile()
 
@@ -81,6 +86,10 @@ describe('evaluation controller dependency injection', () => {
         execution_number: 2,
       })
       expect(shadowRerank.retryAndSchedule).toHaveBeenCalledWith('run-id')
+      await expect(controller.preflightVlmBlindReal('dataset-1')).resolves.toMatchObject({
+        external_call_count: 0,
+      })
+      expect(vlmBlindCapability.preflight).toHaveBeenCalledWith('dataset-1')
       await expect(controller.getVlmBlindLabeling('dataset-1')).resolves.toMatchObject({
         candidate_status: 'frozen',
       })

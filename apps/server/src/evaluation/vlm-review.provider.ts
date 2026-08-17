@@ -13,11 +13,30 @@ type VlmConditionKind = z.infer<typeof vlmReviewConditionKindSchema>
 type VlmVerdict = z.infer<typeof vlmReviewVerdictSchema>
 
 export interface VlmReviewProvider {
+  /** Provider 是否会发生真实外部调用；preflight 与编排用它显示安全闸门。 */
+  readonly provider: 'fake' | 'rightapi'
+  readonly available: boolean
+  readonly external: boolean
+
   /**
    * Provider 只返回尚未信任的结构；调用方必须再用共享 Schema 对照本次请求。
-   * Phase F 当前只注册 fake，没有真实 HTTP 适配器，因此不可能外发图片。
+   * audit 只含请求 ID、模型和用量等安全元数据，不含原始响应或媒体内容。
    */
-  review(request: VlmReviewRequest): Promise<unknown>
+  review(
+    request: VlmReviewRequest,
+    signal?: AbortSignal,
+  ): Promise<{
+    output: unknown
+    audit: {
+      provider_request_id: string | null
+      response_model: string | null
+      input_tokens: number | null
+      output_tokens: number | null
+      total_tokens: number | null
+      billed_cost_cny: number | null
+      response_fingerprint: string
+    }
+  }>
 }
 
 /**
@@ -26,6 +45,9 @@ export interface VlmReviewProvider {
  * 误报为真实外部调用。
  */
 export class FakeVlmReviewProvider implements VlmReviewProvider {
+  readonly provider = 'fake' as const
+  readonly available = true
+  readonly external = false
   readonly requests: VlmReviewRequest[] = []
   readonly externalCallCount = 0
 
@@ -33,7 +55,19 @@ export class FakeVlmReviewProvider implements VlmReviewProvider {
 
   async review(request: VlmReviewRequest) {
     this.requests.push(request)
-    return this.resolver(request)
+    const output = this.resolver(request)
+    return {
+      output,
+      audit: {
+        provider_request_id: null,
+        response_model: null,
+        input_tokens: null,
+        output_tokens: null,
+        total_tokens: null,
+        billed_cost_cny: null,
+        response_fingerprint: 'fake',
+      },
+    }
   }
 }
 
@@ -101,8 +135,11 @@ export async function runVlmCandidateReview(provider: VlmReviewProvider, request
     return { output: null, status: 'review_not_applicable' as const, error: null }
   }
   let output: ReturnType<typeof parseVlmCandidateReviewOutput>
+  let audit: Awaited<ReturnType<VlmReviewProvider['review']>>['audit'] | null = null
   try {
-    output = parseVlmCandidateReviewOutput(request, await provider.review(request))
+    const providerResult = await provider.review(request)
+    audit = providerResult.audit
+    output = parseVlmCandidateReviewOutput(request, providerResult.output)
   } catch {
     // Provider 返回是不可信输入。不把 Zod 路径或 Provider 原始消息直接穿透给
     // 用户，只返回稳定错误码；正式 runner 将据此写入结构化审计事实。
@@ -110,6 +147,7 @@ export async function runVlmCandidateReview(provider: VlmReviewProvider, request
       output: null,
       status: 'review_failed' as const,
       error: { code: 'VLM_REVIEW_OUTPUT_INVALID' as const },
+      audit,
     }
   }
   const conditionKindById = new Map(
@@ -124,5 +162,6 @@ export async function runVlmCandidateReview(provider: VlmReviewProvider, request
       })),
     ),
     error: null,
+    audit,
   }
 }

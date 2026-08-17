@@ -665,6 +665,67 @@ export interface VlmBlindLabelingState {
   } | null
 }
 
+export interface VlmBlindRealPreflight {
+  dataset_id: string
+  dataset_fingerprint: string
+  labels_fingerprint: string
+  evidence_fingerprint: string
+  preflight_fingerprint: string
+  provider_configured: boolean
+  provider_enabled: boolean
+  external_llm_enabled: boolean
+  provider_available: boolean
+  visual_authorization_exists: boolean
+  authorization_id: string | null
+  candidate_count: number
+  normal_call_count: number
+  stability_case_count: number
+  stability_extra_call_count: number
+  maximum_call_count: number
+  total_image_count: number
+  total_request_bytes: number
+  items: Array<{
+    case_id: string
+    candidate_key: string
+    image_count: number
+    request_bytes: number
+    normal_calls: number
+    stability_extra_calls: number
+  }>
+  budget: { max_calls: number; max_cost_cny: number }
+  stop_conditions: string[]
+  external_call_count: 0
+}
+
+export interface VlmBlindRealRun {
+  id: string
+  status:
+    | 'pending'
+    | 'running'
+    | 'succeeded'
+    | 'completed_with_errors'
+    | 'failed'
+    | 'outcome_unknown'
+  provider: 'rightapi'
+  requested_model: 'qwen3.7-plus'
+  protocol_version: string
+  prompt_version: string
+  case_count: number
+  planned_call_count: number
+  external_call_count: number
+  succeeded_count: number
+  failed_count: number
+  unknown_count: number
+  input_tokens: number | null
+  output_tokens: number | null
+  total_tokens: number | null
+  billed_cost_cny: number | null
+  metrics: Record<string, unknown> | null
+  error: unknown
+  created_at: string
+  finished_at: string | null
+}
+
 export type CandidateEvidenceStatus =
   | 'queued'
   | 'running'
@@ -930,6 +991,35 @@ export function createApiClient(options: ApiClientOptions = {}) {
       }),
     runVlmBlindFake: (datasetId: string) =>
       request<VlmBlindLabelingState>(`/evaluation/vlm-blind/datasets/${datasetId}/fake-run`, {
+        method: 'POST',
+      }),
+    preflightVlmBlindReal: (datasetId: string) =>
+      request<VlmBlindRealPreflight>(`/evaluation/vlm-blind/datasets/${datasetId}/real-preflight`, {
+        method: 'GET',
+      }),
+    listVlmBlindRealRuns: (datasetId: string) =>
+      request<{ items: VlmBlindRealRun[] }>(
+        `/evaluation/vlm-blind/datasets/${datasetId}/real-runs`,
+        { method: 'GET' },
+      ),
+    getVlmBlindRealRun: (runId: string) =>
+      request<VlmBlindRealRun>(`/evaluation/vlm-blind/real-runs/${runId}`, { method: 'GET' }),
+    authorizeVlmBlindReal: (
+      datasetId: string,
+      input: {
+        confirmed: true
+        preflight_fingerprint: string
+        max_calls: number
+        max_cost_cny: number
+        expires_in_minutes?: number
+      },
+    ) =>
+      request<{ id: string }>(`/evaluation/vlm-blind/datasets/${datasetId}/visual-authorizations`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    startVlmBlindReal: (datasetId: string) =>
+      request<VlmBlindRealRun>(`/evaluation/vlm-blind/datasets/${datasetId}/real-runs`, {
         method: 'POST',
       }),
     getMedia: (id: string) =>

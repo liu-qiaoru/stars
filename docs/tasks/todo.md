@@ -411,6 +411,42 @@ Review：
   按用户本次明确要求跳过 Standards/Spec 双轴复审。真实 VLM 调用、图片外发、费用、Qdrant 写入
   和人工标签均为 0；页面停在“可开始准备证据/第一轮盲标”的边界，未进入 Phase G。
 
+### Phase F：真实 qwen3.7-plus 能力盲测执行边界
+
+- Start：2026-08-17。用户已经完成 60 条候选的 357/357 条件一审、357/357 独立复核和
+  36/36 争议裁决，并冻结 labeling session `4605b962-bb97-4a1b-8612-88edf56f7d6c`；标签指纹为
+  `5b98e0e86128047a3bc868cd25a107eba333116442eb43cbfa4264de2833a107`。
+- [x] 保留 fake run `1cadb7f8-32c6-4838-830f-054c83988920` 的独立历史：60/60 成功、外部调用
+      0；条件一致 191/357（53.50%），案例状态一致 18/60（30%）。这些数值只证明请求、严格解析、
+      Server 状态派生和指标链路能运行，不代表模型质量，也不会填入真实报告。
+- [x] 新增独立 RightAPI `qwen3.7-plus` Provider：固定非思考模式、Anthropic Messages Base64
+      图片与唯一强制 Tool Call；严格拒绝工具名、candidate/condition/frame 身份、重复、缺失或
+      额外项错误，不从 Markdown/自由文本猜测结果。
+- [x] 新增默认 `disabled` 的 `VLM_REVIEW_PROVIDER` 部署闸门，以及绑定 dataset、labels、evidence
+      和 preflight 指纹的独立视觉授权；仅有 RightAPI Key 或 AgentIntent 文本授权都不能发图。
+- [x] 新增 `0013` 增量迁移，分表保存视觉授权、真实 run、attempt 和 result。dispatch 先于网络
+      请求持久化；中断恢复为 `outcome_unknown` 且停止，只有显式 `retry-unknown` 才新建
+      `step_attempt_id`，旧 attempt 永不覆盖。
+- [x] 新增只读 preflight、受控运行、轮询和历史报告 API；正式协议固定 60 条各一次，并把冻结
+      `partial_relevance` 组 12 条各追加两次，总上限 84。报告保存错误通过、总体/分组正确数、
+      条件分类准确率、三次稳定性、P50/P95、token、费用和晋级门槛。
+- [x] 在既有 `/evaluation/vlm-blind` 页面增加本地 preflight、Provider/授权状态、84 次与预算确认、
+      真实运行状态及历史只读报告；保留评测主页和历史报告入口，没有新增孤立路由。
+- [x] 迁移前创建 `/private/tmp/stars-phase-f-labels-frozen-pre-real-vlm-20260817.dump`（4.2 MB，
+      SHA-256 `4db1b1ed64500bf810a6648d33f17ffb5211881b7a937e820f3519d161aeb984`）。迁移登记
+      19→20；迁移后媒体文件 35、Asset 7,940、场景 1,919、已索引 Vector Ref 7,564 不变，
+      Qdrant Point 仍为 8 / 5,629 / 1,927，真实 run/attempt 均为 0。
+- [x] 用真实冻结输入完成本地 preflight：dataset/labels 指纹一致，evidence 指纹
+      `21d543642fd1ffa77623b997930300e196e90bb3664bd1605d525bbabce19c5b`，60 条候选、84 次上限、
+      363 张累计外发图片、请求体合计 689,852,994 bytes，单候选 1～12 张、单请求
+      521,144～41,041,499 bytes；Provider 配置存在但部署闸门为 disabled，视觉授权不存在，
+      `external_call_count=0`。
+
+当前限制：冻结最终条件只有 yes=147、no=210，没有 uncertain 真值，因此严格的
+`yes/no/uncertain` 三分类宏平均无法计算，报告必须显示“未知/门槛未通过”，不能删除缺失类别或
+伪造分数。真实 VLM 调用、查询/图片外发和费用仍为 0；尚未生成真实质量指标，未进入真实 Top-3
+模拟或 Phase G。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run

@@ -8,6 +8,43 @@ afterEach(() => {
 })
 
 describe('typed API client', () => {
+  test('uses separate read-only preflight, visual authorization and real-run routes', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ external_call_count: 0 }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: 'authorization-1' }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'real-run-1' }), { status: 200 }))
+    const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })
+
+    await client.preflightVlmBlindReal('dataset-1')
+    await client.authorizeVlmBlindReal('dataset-1', {
+      confirmed: true,
+      preflight_fingerprint: 'a'.repeat(64),
+      max_calls: 84,
+      max_cost_cny: 5,
+    })
+    await client.startVlmBlindReal('dataset-1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://api.local/evaluation/vlm-blind/datasets/dataset-1/real-preflight',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://api.local/evaluation/vlm-blind/datasets/dataset-1/visual-authorizations',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'http://api.local/evaluation/vlm-blind/datasets/dataset-1/real-runs',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
   test('treats a successful empty shadow-rerank response as the documented not-run null state', async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }))
     const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })

@@ -293,6 +293,25 @@ export const vlmBlindConditionLabelInputSchema = z
   })
   .strict()
 
+// 视觉授权必须回传刚刚只读 preflight 的内容指纹，防止用户确认 A 输入后，Server
+// 实际执行已经漂移的 B 输入。授权只覆盖当前 Phase F 能力盲测，不覆盖 AgentIntent。
+export const vlmBlindVisualAuthorizationInputSchema = z
+  .object({
+    confirmed: z.literal(true),
+    preflight_fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    max_calls: z.number().int().min(1).max(84),
+    max_cost_cny: z.number().positive().max(5),
+    expires_in_minutes: z.number().int().min(5).max(1440).default(60),
+  })
+  .strict()
+
+export const vlmBlindRetryUnknownInputSchema = z
+  .object({
+    confirmed: z.literal(true),
+    reason: z.string().min(1).max(500),
+  })
+  .strict()
+
 // Agent V1 是 Server 控制的固定状态机。模型输出和 API 输入都只能使用这些状态，
 // 不能自造“思考中”或跳过等待授权边界的状态。
 export const agentRunStatusSchema = z.enum([

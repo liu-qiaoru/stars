@@ -17,10 +17,16 @@ export default async function VlmBlindCandidateReviewPage() {
     latest && initialDataset?.status === 'frozen'
       ? await client.getVlmBlindLabeling(latest.id)
       : null
+  // 历史真实报告只读 PostgreSQL，不重建图片请求；因此页面首次打开也能显示准确调用数。
+  const initialRealRuns =
+    latest && initialDataset?.status === 'frozen'
+      ? (await client.listVlmBlindRealRuns(latest.id)).items
+      : []
   return (
     <VlmBlindCandidateReviewWorkspace
       initialDataset={initialDataset}
       initialLabeling={initialLabeling}
+      initialRealRuns={initialRealRuns}
       packet={packetData as VlmBlindCandidateReviewPacket}
     />
   )
