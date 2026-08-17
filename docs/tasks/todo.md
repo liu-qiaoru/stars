@@ -465,6 +465,20 @@ Review：
 不创建真实 run。Smoke 完成后先核对响应模型、Tool Call、条件身份、token、费用、响应指纹和
 `outcome_unknown` 状态，再决定是否单独授权 84 次正式评测；不直接进入 Phase G。
 
+- [x] 用户明确授权后执行真实 smoke run `a5800b99-a391-4d7f-86f1-46ac1020c428`。第 1 条
+      `exact_match` 成功，响应模型 `qwen3.7-plus`，Provider request ID
+      `chatcmpl-b45dab7d-cfda-9bf2-9842-78b1899da460`，响应指纹
+      `b9d1447d5de5cae748e0e1f2a62f987f5b190a4ad6879fba78618e150ce32d07`；耗时 77,674 ms，
+      2,790 input tokens + 426 output tokens = 3,216 total tokens，案例状态与人工真值一致，6 个
+      条件中 5 个一致，唯一差异为 `optional-2`（模型 yes、冻结人工真值 no）。
+- [x] 第 2 条 `missing_must_have` 在 120,010 ms 超时并进入 `outcome_unknown`；Server 立即停止，
+      第 3～5 条保持 `not_dispatched`。最终实际外部调用 2 次、成功 1、结果未知 1、未外发 3，
+      没有自动重试。Provider 未返回成功请求的账单费用，超时请求是否产生 token/费用也未知，
+      因此 run 的 `billed_cost_cny` 保持 null，不能把未知费用按 0 报告。
+
+真实 smoke 已按停止条件结束。未经新的明确授权，不调用 `retry-unknown`，不补跑后三条，不启动
+84 次正式评测，也不进入 Phase G。
+
 ## 视频检索重建 Phase 9A-C2：未见样本与标签一致性复测
 
 - Start：2026-08-02。只读复用 Phase 8 正式 run
