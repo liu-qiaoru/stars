@@ -60,7 +60,7 @@ describe('Agent V1 协议', () => {
     ).toThrow()
   })
 
-  test('恢复请求使用固定只读搜索动作和 client_request_id 形成幂等边界', () => {
+  test('恢复请求保存真实补充文本，未传素材授权不新增授权', () => {
     const input = {
       waiting_step_id: '11111111-1111-4111-8111-111111111111',
       client_request_id: 'resume-001',
@@ -68,9 +68,7 @@ describe('Agent V1 协议', () => {
     }
 
     expect(resumeAgentRunInputSchema.parse(input)).toEqual(input)
-    expect(() =>
-      resumeAgentRunInputSchema.parse({ ...input, response: '只在家庭视频中搜索' }),
-    ).toThrow('continue_as_read_only_search_with_resolved_scope')
+    expect(resumeAgentRunInputSchema.parse({ ...input, response: '只在家庭视频中搜索' }).response).toBe('只在家庭视频中搜索')
   })
 
   test('导出选择只接受正向场景时间范围，确认必须携带等待步骤和幂等键', () => {

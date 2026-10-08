@@ -1,6 +1,17 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { Controller, Get, Headers, Inject, NotFoundException, Param, Res } from '@nestjs/common'
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Headers,
+  Inject,
+  NotFoundException,
+  Param,
+  Query,
+  Res,
+} from '@nestjs/common'
+import { MediaThumbnailService } from './media-thumbnail.service.js'
 import { MediaService } from './media.service.js'
 
 @Controller('media')
@@ -8,6 +19,8 @@ export class MediaController {
   constructor(
     @Inject(MediaService)
     private readonly mediaService: MediaService,
+    @Inject(MediaThumbnailService)
+    private readonly mediaThumbnailService: MediaThumbnailService,
   ) {}
 
   @Get(':id')
@@ -47,6 +60,32 @@ export class MediaController {
       'Content-Type': media.content_type,
     })
     return createReadStream(media.path).pipe(response)
+  }
+
+  @Get(':id/thumbnail')
+  async getMediaThumbnail(
+    @Param('id') id: string,
+    @Query('time_seconds') timeSecondsText: string | undefined,
+    @Res() response: any,
+  ) {
+    const timeSeconds = Number(timeSecondsText)
+    // 时间单位是秒。上限 24 小时防止恶意或错误参数让 FFmpeg 在无意义位置长时间 seek。
+    if (!Number.isFinite(timeSeconds) || timeSeconds < 0 || timeSeconds > 24 * 60 * 60) {
+      throw new BadRequestException('time_seconds must be between 0 and 86400')
+    }
+
+    const media = await this.mediaService.getMediaContent(id)
+    if (media.media_type !== 'video') {
+      throw new BadRequestException('Thumbnail endpoint only supports video media')
+    }
+    const thumbnail = await this.mediaThumbnailService.getThumbnail(media.path, timeSeconds)
+    response.status(200)
+    response.set({
+      'Cache-Control': 'private, max-age=3600',
+      'Content-Length': thumbnail.length,
+      'Content-Type': 'image/jpeg',
+    })
+    return response.send(thumbnail)
   }
 
   private async statMediaFile(path: string) {

@@ -14,7 +14,9 @@ import {
   agentRunEvents,
   agentRunSteps,
   agentRuns,
+  agentRerankRuns,
 } from '../../src/database/schema.js'
+import { AGENT_RERANK_POLICY } from '../../src/agent/agent-rerank.policy.js'
 import { createTestDatabase } from '../database/test-db.js'
 import { count, eq } from 'drizzle-orm'
 
@@ -196,6 +198,99 @@ describe('Agent run 租约仓库', () => {
         expect.objectContaining({
           stepAttemptId: second!.step.stepAttemptId,
           status: 'completed',
+        }),
+      ])
+    } finally {
+      await testDb.close()
+    }
+  })
+
+  test('搜索提交会原子冻结候选、创建产品 Rerank 尝试并进入 ranking', async () => {
+    const testDb = await createTestDatabase()
+    try {
+      const startedAt = new Date('2026-08-21T01:00:00.000Z')
+      const run = await createDurableAgentRun(
+        testDb.db,
+        {
+          prompt: '找海边日落的视频',
+          allowExternalText: true,
+          allowExternalVisual: true,
+          libraryIds: [],
+          mediaTypes: ['video'],
+        },
+        startedAt,
+      )
+      const intentClaim = await claimNextAgentRun(testDb.db, {
+        leaseOwner: 'server-a',
+        leaseDurationMs: 30_000,
+        now: startedAt,
+      })
+      await commitAgentStep(
+        testDb.db,
+        {
+          runId: run.id,
+          leaseOwner: 'server-a',
+          leaseVersion: intentClaim!.run.leaseVersion,
+          stepAttemptId: intentClaim!.step.stepAttemptId,
+          currentStatus: 'extracting_intent',
+          transition: { status: 'searching', nextStep: 'searching' },
+          outputJson: { intent: 'search' },
+        },
+        startedAt,
+      )
+      const searchClaim = await claimNextAgentRun(testDb.db, {
+        leaseOwner: 'server-a',
+        leaseDurationMs: 30_000,
+        now: new Date(startedAt.getTime() + 1),
+      })
+
+      const committed = await commitAgentStep(
+        testDb.db,
+        {
+          runId: run.id,
+          leaseOwner: 'server-a',
+          leaseVersion: searchClaim!.run.leaseVersion,
+          stepAttemptId: searchClaim!.step.stepAttemptId,
+          currentStatus: 'searching',
+          transition: { status: 'ranking', nextStep: 'reranking' },
+          outputJson: { candidate_count: 1 },
+          candidates: [
+            {
+              candidateKey: 'video:33333333-3333-4333-8333-333333333333',
+              fileId: '11111111-1111-4111-8111-111111111111',
+              fileGeneration: 1,
+              assetId: '22222222-2222-4222-8222-222222222222',
+              sceneId: '33333333-3333-4333-8333-333333333333',
+              sceneStartSeconds: 10,
+              sceneEndSeconds: 20,
+              rank: 1,
+              retrievalJson: { rrf_score: 0.0328 },
+            },
+          ],
+          rerankAttempt: {
+            attemptNo: 1,
+            completionStatus: 'succeeded',
+            protocolVersion: AGENT_RERANK_POLICY.protocolVersion,
+            maxCostCny: AGENT_RERANK_POLICY.maximumCostCny,
+          },
+        },
+        new Date(startedAt.getTime() + 2),
+      )
+
+      expect(committed).toMatchObject({ status: 'ranking', nextStep: 'reranking' })
+      await expect(
+        testDb.db.select().from(agentRunCandidates).where(eq(agentRunCandidates.runId, run.id)),
+      ).resolves.toEqual([
+        expect.objectContaining({ candidateKey: 'video:33333333-3333-4333-8333-333333333333' }),
+      ])
+      await expect(
+        testDb.db.select().from(agentRerankRuns).where(eq(agentRerankRuns.agentRunId, run.id)),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          attemptNo: 1,
+          completionStatus: 'succeeded',
+          status: 'preparing_evidence',
+          externalCallStatus: 'not_dispatched',
         }),
       ])
     } finally {

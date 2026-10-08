@@ -55,17 +55,24 @@ function successfulResponse(input: Record<string, unknown>) {
       id: 'msg_test',
       type: 'message',
       role: 'assistant',
-      model: 'qwen3.7-plus',
-      content: [
+      model: 'glm-5.3',
+      choices: [
         {
-          type: 'tool_use',
-          id: 'tool_test',
-          name: 'extract_agent_intent',
-          input,
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: 'ignored commentary',
+            tool_calls: [
+              {
+                type: 'function',
+                id: 'tool_test',
+                function: { name: 'extract_agent_intent', arguments: JSON.stringify(input) },
+              },
+            ],
+          },
         },
       ],
-      stop_reason: 'tool_use',
-      usage: { input_tokens: 123, output_tokens: 80 },
+      usage: { prompt_tokens: 123, completion_tokens: 80 },
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   )
@@ -143,24 +150,30 @@ describe('QwenAgentIntentRunner', () => {
     ])
     expect(request).toHaveBeenCalledTimes(1)
     const [url, init] = request.mock.calls[0]!
-    expect(url).toBe('https://right.example.test/v1/messages')
+    expect(url).toBe('https://right.example.test/v1/chat/completions')
     expect(init?.headers).toMatchObject({
-      'x-api-key': 'right-secret-key',
-      'anthropic-version': '2023-06-01',
+      Authorization: 'Bearer right-secret-key',
     })
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>
     expect(body).toMatchObject({
-      model: 'qwen3.7-plus',
+      model: 'glm-5.3',
       max_tokens: 2000,
-      thinking: { type: 'disabled' },
-      tool_choice: { type: 'tool', name: 'extract_agent_intent' },
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'low',
+      tool_choice: { type: 'function', function: { name: 'extract_agent_intent' } },
     })
-    expect(String(body.system)).toContain(AGENT_INTENT_PROMPT_VERSION)
-    expect(String(body.system)).toMatch(
+    expect(JSON.stringify(body.messages)).toContain(AGENT_INTENT_PROMPT_VERSION)
+    expect(JSON.stringify(body.messages)).toMatch(
       /visual means|spoken means|broadest safe scope|needs_clarification/,
     )
     expect(body.tools).toEqual([
-      expect.objectContaining({ name: 'extract_agent_intent', input_schema: expect.any(Object) }),
+      expect.objectContaining({
+        type: 'function',
+        function: expect.objectContaining({
+          name: 'extract_agent_intent',
+          parameters: expect.any(Object),
+        }),
+      }),
     ])
     const serialized = JSON.stringify(body)
     expect(serialized).toContain('帮我找红色汽车的视频')
@@ -169,8 +182,8 @@ describe('QwenAgentIntentRunner', () => {
 
   test('工具名错误时明确失败，不接受相似工具', async () => {
     const response = successfulResponse(validIntent())
-    const body = (await response.json()) as { content: Array<Record<string, unknown>> }
-    body.content[0]!.name = 'extract_intent'
+    const body = (await response.json()) as any
+    body.choices[0].message.tool_calls[0].function.name = 'extract_intent'
 
     await expectRunnerError(
       runnerReturning(new Response(JSON.stringify(body), { status: 200 })).extract({
@@ -185,7 +198,7 @@ describe('QwenAgentIntentRunner', () => {
     const response = new Response(
       JSON.stringify({
         id: 'msg_text',
-        model: 'qwen3.7-plus',
+        model: 'glm-5.3',
         stop_reason: 'end_turn',
         content: [{ type: 'text', text: JSON.stringify(validIntent()) }],
         usage: { input_tokens: 10, output_tokens: 10 },
@@ -204,20 +217,31 @@ describe('QwenAgentIntentRunner', () => {
 
   test('重复 Tool Call 时明确失败，不选择其中一个继续', async () => {
     const response = successfulResponse(validIntent())
-    const body = (await response.json()) as { content: Array<Record<string, unknown>> }
-    body.content.push({ ...body.content[0], id: 'tool_duplicate' })
+    const body = (await response.json()) as any
+    body.choices[0].message.tool_calls.push({
+      ...body.choices[0].message.tool_calls[0],
+      id: 'tool_duplicate',
+    })
 
     await expectRunnerError(
       runnerReturning(new Response(JSON.stringify(body), { status: 200 })).extract({
         userPrompt: '找视频',
         capabilityBoundary: { allowedMediaTypes: ['video'], hasEnforcedLibraryScope: false },
       }),
-      'AGENT_INTENT_TOOL_CALL_INVALID',
+      'AGENT_INTENT_RESPONSE_INVALID',
     )
   })
 
   test.each([
     ['未知枚举', validIntent({ search_scope: 'nearby' })],
+    [
+      '真实渠道回归：缺少 clarification_reason',
+      (() => {
+        const intent = validIntent() as Record<string, unknown>
+        delete intent.clarification_reason
+        return intent
+      })(),
+    ],
     [
       '缺少字段',
       (() => {
@@ -253,8 +277,8 @@ describe('QwenAgentIntentRunner', () => {
 
   test('Provider 报告输出超过 2000 tokens 时明确失败', async () => {
     const response = successfulResponse(validIntent())
-    const body = (await response.json()) as { usage: { output_tokens: number } }
-    body.usage.output_tokens = 2001
+    const body = (await response.json()) as { usage: { completion_tokens: number } }
+    body.usage.completion_tokens = 2001
 
     await expectRunnerError(
       runnerReturning(new Response(JSON.stringify(body), { status: 200 })).extract({
@@ -391,4 +415,14 @@ describe('QwenAgentIntentRunner', () => {
       }),
     ])
   })
+})
+
+test('在线明确 NOT_NEEDED 标记归一为 null，仍不补全缺失字段', async () => {
+  const result = await runnerReturning(
+    successfulResponse(validIntent({ clarification_reason: 'NOT_NEEDED' })),
+  ).extract({
+    userPrompt: '找视频',
+    capabilityBoundary: { allowedMediaTypes: ['video'], hasEnforcedLibraryScope: false },
+  })
+  expect(result.intent.clarification_reason).toBeNull()
 })

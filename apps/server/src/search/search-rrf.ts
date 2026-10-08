@@ -14,6 +14,8 @@ import type { HybridReason } from './search-hybrid.js'
  */
 export interface RrfSourceCandidate {
   asset_id: string
+  /** 业务图片身份与其Caption证据身份分开，不改变去重或排序。 */
+  evidence_asset_id?: string
   file_id: string
   media_type: string
   path: string
@@ -30,6 +32,7 @@ export interface RrfSourceCandidate {
 export interface RrfSearchResult {
   asset_id: string
   merged_asset_ids: string[]
+  source_matches: Array<{ asset_id: string; source: HybridReason; frame_time_seconds: number | null }>
   file_id: string
   media_type: string
   path: string
@@ -206,6 +209,8 @@ function toSearchResult(
   return {
     asset_id: representative.asset_id,
     merged_asset_ids: unique(evidence.map((candidate) => candidate.asset_id)),
+    source_matches: evidence.map(candidate => ({ asset_id: candidate.evidence_asset_id ?? candidate.asset_id,
+      source: candidate.reason, frame_time_seconds: candidate.best_frame_time_seconds })),
     file_id: representative.file_id,
     media_type: representative.media_type,
     path: representative.path,

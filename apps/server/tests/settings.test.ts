@@ -2,6 +2,12 @@ import { describe, expect, test } from 'vitest'
 import { createSettings } from '../src/config/settings.js'
 
 describe('createSettings', () => {
+  test('命中图文协议只选择DeepSeek，显式GLM配置在启动前报错，不自动切换', () => {
+    const env = { DATABASE_URL: 'postgres://user:pass@localhost/media_agent_test', QDRANT_URL: 'http://localhost:6333', AGENT_RETRIEVAL_EVIDENCE_MODE: 'matched_multimodal' }
+    expect(createSettings(env)).toMatchObject({ agentRetrievalModel: 'deepseek-v4-flash', agentRetrievalEvidenceMode: 'matched_multimodal', allowExternalLlm: false })
+    expect(() => createSettings({ ...env, AGENT_RETRIEVAL_MODEL: 'glm-5.3' })).toThrow()
+    expect(() => createSettings({ ...env, AGENT_RETRIEVAL_EVIDENCE_MODE: 'unrecognized' })).toThrow()
+  })
   test('从环境变量读取服务地址和外部依赖地址', () => {
     const settings = createSettings({
       SERVER_HOST: '0.0.0.0',
@@ -21,7 +27,19 @@ describe('createSettings', () => {
       anthropicApiKey: undefined,
       agentModel: 'disabled',
       agentMaxSteps: 4,
+      agentRetrievalMaxToolCalls: undefined,
+      agentRetrievalMaxSearchCalls: 3,
+      agentRetrievalMaxDetailCalls: 6,
+      agentRetrievalMaxModelCalls: 8,
+      agentRetrievalQualityReport: undefined,
+      agentRetrievalModel: 'glm-5.3',
+      agentRetrievalEvidenceMode: 'overview',
+      agentSceneInspectionEnabled: false,
+      agentRetrievalTimeoutMs: 600000,
+      agentRetrievalMaxNoProgress: 2,
+      agentRetrievalMaxRetries: 1,
       agentToolTimeoutMs: 10000,
+      agentModelTimeoutMs: 60000,
       rightCodeBaseUrl: undefined,
       rightCodeApiKey: undefined,
       agentExecutorEnabled: false,
@@ -316,7 +334,7 @@ describe('createSettings', () => {
         AGENT_ACTIVITY_TIMEOUT_MS: '120000',
       }),
     ).toThrow(
-      'AGENT_LEASE_DURATION_MS must be at least max(AGENT_ACTIVITY_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS) + 5000',
+      'AGENT_LEASE_DURATION_MS must be at least max(AGENT_ACTIVITY_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS, AGENT_MODEL_TIMEOUT_MS) + 5000',
     )
 
     expect(() =>
@@ -328,5 +346,12 @@ describe('createSettings', () => {
         AGENT_LEASE_DURATION_MS: '124999',
       }),
     ).toThrow('AGENT_LEASE_DURATION_MS must be at least')
+    expect(() => createSettings({
+      DATABASE_URL: 'postgres://user:pass@localhost:5432/media_agent_test',
+      QDRANT_URL: 'http://localhost:6333',
+      AGENT_MODEL_TIMEOUT_MS: '60000',
+      AGENT_ACTIVITY_TIMEOUT_MS: '10000',
+      AGENT_LEASE_DURATION_MS: '64999',
+    })).toThrow('AGENT_LEASE_DURATION_MS must be at least')
   })
 })

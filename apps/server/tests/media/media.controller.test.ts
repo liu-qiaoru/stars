@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Test } from "@nestjs/testing";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SETTINGS } from "../../src/config/settings.js";
 import { DATABASE, PG_POOL } from "../../src/database/database.module.js";
 import { createLibrary, createMediaAsset, createMediaFile } from "../../src/database/repositories.js";
 import { MediaController } from "../../src/media/media.controller.js";
 import { MediaModule } from "../../src/media/media.module.js";
+import { MEDIA_THUMBNAIL_RUNNER } from "../../src/media/media-thumbnail.service.js";
 import { MediaService } from "../../src/media/media.service.js";
 import { videoScenes } from "../../src/database/schema.js";
 import { createTestDatabase } from "../database/test-db.js";
@@ -21,8 +22,11 @@ const testSettings = {
   databaseUrl: "postgres://user:pass@localhost:5432/media_agent_test",
   qdrantUrl: "http://localhost:6333",
 };
+const thumbnailRunner = vi.fn();
 
 beforeEach(async () => {
+  thumbnailRunner.mockReset();
+  thumbnailRunner.mockResolvedValue(Buffer.from("jpeg-thumbnail"));
   const testDb = await createTestDatabase();
   db = testDb.db;
   closeDb = testDb.close;
@@ -36,6 +40,8 @@ beforeEach(async () => {
     .useValue(null)
     .overrideProvider(SETTINGS)
     .useValue(testSettings)
+    .overrideProvider(MEDIA_THUMBNAIL_RUNNER)
+    .useValue(thumbnailRunner)
     .compile();
 
   mediaController = moduleRef.get(MediaController);
@@ -131,5 +137,48 @@ describe("media API", () => {
       media_type: "image",
       content_type: "image/jpeg",
     });
+  });
+
+  test("thumbnail endpoint extracts one JPEG frame and returns cacheable image headers", async () => {
+    const library = await createLibrary(db, {
+      name: "Main Media",
+      rootPath: "/Volumes/Media",
+    });
+    const file = await createMediaFile(db, {
+      libraryId: library.id,
+      path: "/Volumes/Media/long-video.mp4",
+      relativePath: "long-video.mp4",
+      mediaType: "video",
+      sizeBytes: 1234,
+      mtimeMs: 1710000000000,
+    });
+    const response = {
+      status: vi.fn().mockReturnThis(),
+      set: vi.fn().mockReturnThis(),
+      send: vi.fn().mockReturnThis(),
+    };
+
+    await mediaController.getMediaThumbnail(file.id, "12.5", response);
+    await mediaController.getMediaThumbnail(file.id, "12.5", response);
+
+    // 同一文件和时间点的第二次请求命中内存缓存，不会再次启动 FFmpeg。
+    expect(thumbnailRunner).toHaveBeenCalledTimes(1);
+    expect(thumbnailRunner).toHaveBeenCalledWith({
+      path: "/Volumes/Media/long-video.mp4",
+      timeSeconds: 12.5,
+    });
+    expect(response.set).toHaveBeenCalledWith({
+      "Cache-Control": "private, max-age=3600",
+      "Content-Length": Buffer.byteLength("jpeg-thumbnail"),
+      "Content-Type": "image/jpeg",
+    });
+    expect(response.send).toHaveBeenCalledWith(Buffer.from("jpeg-thumbnail"));
+  });
+
+  test("thumbnail endpoint rejects an invalid seek time before reading media", async () => {
+    await expect(
+      mediaController.getMediaThumbnail("file-1", "not-a-number", {}),
+    ).rejects.toThrow("time_seconds must be between 0 and 86400");
+    expect(thumbnailRunner).not.toHaveBeenCalled();
   });
 });

@@ -37,6 +37,36 @@ describe('DashScopeShadowRerankProvider', () => {
     ).toBe(true)
   })
 
+  test('imageMime 参数决定 data URL 前缀，缺省保持 image/png 协议冻结', async () => {
+    // 产品 Rerank 传 image/jpeg 以缩小请求体；评测路径不传，继续发 PNG，
+    // 与 2026-08 之前的历史评测记录保持同一输入条件。
+    const fetchFn = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            output: {
+              results: Array.from({ length: 10 }, (_, index) => ({
+                index,
+                relevance_score: 1 - index / 10,
+              })),
+            },
+            usage: { total_tokens: 1 },
+            request_id: 'dashscope-jpeg-1',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    )
+    const provider = new DashScopeShadowRerankProvider(
+      { workspaceId: 'ws-test', apiKey: 'secret-test-key', imageMime: 'image/jpeg' },
+      fetchFn,
+    )
+    await provider.rerank(request, new AbortController().signal)
+    const [, init] = fetchFn.mock.calls[0]!
+    const body = JSON.parse(String(init?.body))
+    expect(body.input.documents[0].image).toMatch(/^data:image\/jpeg;base64,/)
+    expect(provider.requestBytes(request)).toBe(Buffer.byteLength(String(init?.body), 'utf8'))
+  })
+
   test('把冻结 Top-20 映射为官方北京专属接口且不外发本地审计身份', async () => {
     const fetchFn = vi.fn(
       async (_input: string | URL | Request, _init?: RequestInit) =>

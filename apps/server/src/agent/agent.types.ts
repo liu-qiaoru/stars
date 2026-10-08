@@ -1,5 +1,6 @@
 import type { z } from 'zod'
 import { agentNextStepSchema, agentRunStatusSchema } from '@local-media-agent/shared/schemas'
+import type { RetrievalDecisionDiagnostics } from './retrieval-decision.diagnostics.js'
 
 export const AGENT_STEP_HANDLER = Symbol('AGENT_STEP_HANDLER')
 
@@ -15,6 +16,8 @@ export class AgentStepExecutionError extends Error {
     readonly code: string,
     message: string,
     readonly outcomeUnknown = false,
+    /** 已脱敏的失败上下文；随步骤保存，不能传入原始响应或异常对象。 */
+    readonly diagnostics?: RetrievalDecisionDiagnostics,
   ) {
     super(message)
     this.name = 'AgentStepExecutionError'
@@ -33,12 +36,30 @@ export interface FrozenAgentCandidate {
   retrievalJson: Record<string, unknown>
 }
 
+export type AgentRerankCompletionStatus = 'waiting_for_export_selection' | 'succeeded'
+
+/**
+ * 搜索提交时一并冻结的 Rerank 尝试计划。
+ *
+ * attemptNo 是同一 Agent run 内从 1 开始的尝试编号；completionStatus 表示精排成功后
+ * 父 run 应进入的状态。把它和候选保存在同一事务里，Server 重启后也不需要靠页面状态
+ * 猜测接下来做什么。
+ */
+export interface FrozenAgentRerankAttempt {
+  attemptNo: number
+  completionStatus: AgentRerankCompletionStatus
+  protocolVersion: string
+  maxCostCny: number
+}
+
 export interface PreparedAgentStep {
   /**
    * prepare 阶段不得执行网络请求。Executor 会先持久化 dispatched，
    * 再在数据库事务外调用 execute，从而避免长事务和不明结果自动重放。
    */
   external: boolean
+  /** 本地硬超时保存此前已提交工作状态，迟到 Promise 不获得任何写权。 */
+  timeoutOutputJson?: unknown
   inputFingerprint?: string
   execute(): Promise<{
     transition: {
@@ -50,6 +71,8 @@ export interface PreparedAgentStep {
     outputJson: unknown
     /** searching 提交时与状态迁移放在同一短事务中冻结，避免 run 成功但候选只写了一半。 */
     candidates?: FrozenAgentCandidate[]
+    /** 非空搜索结果进入 ranking 时必须同时创建一次可恢复的产品 Rerank 尝试。 */
+    rerankAttempt?: FrozenAgentRerankAttempt
   }>
 }
 

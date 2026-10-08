@@ -95,6 +95,9 @@ pnpm dev:vlm                                                                 # V
 
 **检索评测与生产排序隔离。** 内部 `/evaluation` 流程将冻结查询、盲标结果、来源证据、当前混合排序名次和实验性无权重 RRF 名次持久化到 PostgreSQL。基线评测关闭查询扩展，使用按场景折叠的 `video_frame_vectors` 召回，并以 `k=60`、单位权重将视觉、Caption 和全文信号视为独立通道。原始余弦分数只用于通道内部诊断；RRF 分数只表示顺序，不是概率。必需通道不可用或出现完整性错误时，评测运行必须失败，不得生成部分指标。
 
+**Phase E 真实影子 Provider 默认禁用。** `qwen3-vl-rerank` 只允许通过阿里云百炼北京地域专用 Rerank HTTP 接口执行，配置闸门为 `SHADOW_RERANK_PROVIDER=disabled|dashscope`；仅存在 `DASHSCOPE_API_KEY` 不会启用外发，显式启用时还必须提供同地域 `DASHSCOPE_WORKSPACE_ID`。请求只包含完整原查询和 20 张派生 PNG，不包含候选 Key、指纹、路径、Caption 或转录。官方响应只提供 `total_tokens` 与 `request_id`，未提供的 token 拆分、响应模型和账单费用必须保存 null；按图片最高单价计算的 `estimated_cost_cny` 只是本地保守预算。`GET /evaluation/runs/:id/shadow-rerank/preflight` 只读计算真实 JSON 请求字节数和指纹，固定外部调用 0 次。
+首次 smoke 的 `SHADOW_RERANK_MAX_CALLS` 默认且必须保持 1；后续单独授权也只能设为 1～4，`SHADOW_RERANK_MAX_COST_CNY` 不得超过 0.5。每次 dispatch 前，Server 通过 PostgreSQL 表锁跨所有 Evaluation run 核对同一 Phase E 协议已经外发的次数与费用，并按 120,000 token 全图片单价为下一次预留理论最高 ¥0.216；另建 run 不能获得新额度。任一已外发 attempt 缺少用量时立即停止，run 汇总 token、耗时和估算也必须为 null，不能把未知按 0 或部分总量显示。只因次数或预算门被拦截且从未外发的 attempt，可在用户后来明确扩大授权后恢复；已外发请求绝不自动重放。
+
 **NestJS 模块结构。** 每个领域都是独立模块，包括 config、health、database、libraries、jobs、media、search、clips、agent、qdrant 和 model-gateway。通过 Symbol Token 注入依赖：`DATABASE`（Drizzle）、`SETTINGS`（解析后的环境变量）、`QDRANT_CLIENT`、`PG_POOL`。业务代码不得直接导入基础设施实现。
 
 **跨语言 `point_id` 必须一致。** Qdrant Point ID 使用确定性 UUIDv5（命名空间 `f3f4e35a-...`，输入使用 `|` 拼接）。TypeScript 的 `deterministicPointId` 与 Python 的 `uuid.uuid5` 必须生成完全相同的 ID；两端共同构成幂等 upsert 的事实标准。
@@ -119,6 +122,12 @@ pnpm dev:vlm                                                                 # V
 - 全仓库使用 ESM（`"type": "module"`）。
 - 本地 TypeScript import 必须包含 `.js` 扩展名，例如 `import { foo } from './bar.js'`。
 - pnpm 会从各工作区自己的目录执行命令；Server 会在存在时从 Monorepo 根目录加载 `.env`。
+
+## 检索 Agent 边界
+
+检索 Agent 新图文流程显式配置 `AGENT_RETRIEVAL_EVIDENCE_MODE=matched_multimodal`，意图与决策只用 RightAPI `deepseek-v4-flash`，每次提供最多20候选的实际命中图文，同次判断缺口与下一动作；图片需独立 `allow_external_retrieval_visual`，旧3候选场景授权不能覆盖。未设置新模式的旧部署保留overview及原默认GLM，历史任务不悄悄升级，失败不自动换模型。`retrieval_agent` 是新建任务默认流程，`legacy` 保留原有重排和导出。修改决策、详情、授权、恢复或页面时，先读 `docs/retrieval-agent.md`，其中维护实际命中来源、模型、预算和质量资格的完整约束。工具通过共享严格 Schema 校验，复用租约和步骤表，每轮决策与工具结果分别提交；当前增强质量未通过正式保留原文基线。
+
+用户输入授权不覆盖素材文字；`allow_external_media_text` 默认 false，独立授权后才可发送有上限的候选信息、预生成 Caption 与转录。可选场景采样观察默认关闭，仅显式选择 DeepSeek、启用场景工具并取得独立 `allow_external_scene_visual` 授权后，才可发送有界派生图片；该授权与素材文字、最终图片重排授权分开。默认外部开关保持关闭，自动化测试使用替身。证据身份检查只能证明来源存在，不能证明模型语义判断正确；采样帧不覆盖完整视频，采样未见不能证明整段不存在，连续动作仍须标为不确定。增强质量资格未通过时正式保留基线并说明原因。
 
 ## 文档索引
 
@@ -337,5 +346,30 @@ file.indexStatus = 'indexed'
 3. **保证可观测性（Make It Observable）**：即使问题难以定位，也不得用表面修复应付。应补充足够日志与可观测信息，确保问题复现时有证据可查。信息不足时应如实说明并增加日志，不得假装问题已解决。
 4. **为调试和追踪而设计（Design for Debugging / Traceability）**：关键路径必须保留足够的排查日志，使每个关键节点都可以追溯。
 5. **活文档 / 单一事实来源（Living Documentation / Single Source of Truth）**：项目关键技术栈或产品方向变化时，必须同步更新 `AGENTS.md`。文档必须随代码共同演进，不能成为过时的信息。
+
+### Git 提交信息
+
+每次创建 Git commit 时，提交信息必须使用 `<类型>: <描述>` 格式，例如 `docs: 明确 Agent run 使用租约版本拒绝过期执行器的迟到写入`。
+
+- `<类型>` 使用小写英文，根据本次提交的主要目的选择：`feat`、`fix`、`refactor`、`docs`、`test`、`chore`、`build`、`ci` 或 `perf`。
+- `<描述>` 使用中文完整说明“修改了哪个对象，以及产生了什么具体行为或结果”；必要时继续说明关键原因。描述必须让没有参与本次开发的人仅看提交信息就能理解变更范围。
+- 禁止使用 `update`、`fix bug`、`调整代码`、`更新文档`、`处理问题` 等缺少具体对象和结果的模糊短语。
+- 提交前必须核对暂存区实际内容，确保类型和描述覆盖本次 commit 的主要变化；提交信息不得描述未包含在暂存区中的工作。
+
+不合格示例：
+
+```text
+docs: 更新文档
+fix: 修复问题
+chore: 调整代码
+```
+
+合格示例：
+
+```text
+docs: 明确 qwen3.7-plus 分别承担 AgentIntent 与 VLM 复核且保持授权隔离
+fix: 为导出确认增加条件守卫以阻止并发请求创建重复 job
+test: 覆盖租约过期后旧执行器无法提交迟到结果的回归场景
+```
 
 必须使用中文回复。

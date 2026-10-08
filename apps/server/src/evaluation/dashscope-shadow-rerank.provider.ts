@@ -3,7 +3,6 @@ import type { Settings } from '../config/settings.js'
 import type {
   ShadowRerankProvider,
   ShadowRerankProviderResult,
-  ShadowRerankRequest,
 } from './shadow-rerank.provider.js'
 import {
   DisabledShadowRerankProvider,
@@ -43,9 +42,25 @@ const dashScopeErrorSchema = z
 export interface DashScopeShadowRerankProviderOptions {
   workspaceId: string
   apiKey: string
+  // 外发图片的 MIME 类型。缺省 image/png，保持 Phase E 评测协议冻结；
+  // 产品 Rerank 显式传 image/jpeg，用有损压缩换取远低于网关上限的请求体。
+  imageMime?: string
 }
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+
+/** DashScope 线协议同时承载固定 Evaluation Top-20 和产品 1～20 候选。 */
+export interface DashScopeRerankWireRequest {
+  model: 'qwen3-vl-rerank'
+  query: string
+  top_n: number
+  documents: Array<{
+    index: number
+    candidate_key: string
+    evidence_sha256: string
+    image_base64: string
+  }>
+}
 
 type ShadowRerankSettings = Pick<
   Settings,
@@ -73,21 +88,23 @@ export function createShadowRerankProvider(settings: ShadowRerankSettings): Shad
 export class DashScopeShadowRerankProvider implements ShadowRerankProvider {
   readonly available = true
   private readonly endpoint: string
+  private readonly imageMime: string
 
   constructor(
     private readonly options: DashScopeShadowRerankProviderOptions,
     private readonly fetchFn: FetchLike = fetch,
   ) {
     this.endpoint = `https://${options.workspaceId}.cn-beijing.maas.aliyuncs.com${ENDPOINT_PATH}`
+    this.imageMime = options.imageMime ?? 'image/png'
   }
 
   /** 与 rerank 共用同一序列化函数，测试可证明授权前预览值与实际 body 不会漂移。 */
-  requestBytes(request: ShadowRerankRequest) {
-    return dashScopeShadowRerankRequestBytes(request)
+  requestBytes(request: DashScopeRerankWireRequest) {
+    return dashScopeShadowRerankRequestBytes(request, this.imageMime)
   }
 
   async rerank(
-    request: ShadowRerankRequest,
+    request: DashScopeRerankWireRequest,
     signal: AbortSignal,
   ): Promise<ShadowRerankProviderResult> {
     const response = await this.fetchFn(this.endpoint, {
@@ -97,7 +114,7 @@ export class DashScopeShadowRerankProvider implements ShadowRerankProvider {
         'content-type': 'application/json',
       },
       signal,
-      body: serializeDashScopeRequest(request),
+      body: serializeDashScopeRequest(request, this.imageMime),
     })
     const rawText = await response.text()
     let rawBody: unknown
@@ -157,13 +174,13 @@ export class DashScopeShadowRerankProvider implements ShadowRerankProvider {
  * candidate_key 与证据 SHA-256 只用于本地审计。供应商只获得按冻结顺序排列的图片，
  * 从返回 index 即可回映，因而无需泄露任何本地身份、指纹或路径信息。
  */
-function serializeDashScopeRequest(request: ShadowRerankRequest) {
+function serializeDashScopeRequest(request: DashScopeRerankWireRequest, imageMime = 'image/png') {
   return JSON.stringify({
     model: request.model,
     input: {
       query: { text: request.query },
       documents: request.documents.map((document) => ({
-        image: `data:image/png;base64,${document.image_base64}`,
+        image: `data:${imageMime};base64,${document.image_base64}`,
       })),
     },
     parameters: { return_documents: false, top_n: request.top_n },
@@ -171,6 +188,9 @@ function serializeDashScopeRequest(request: ShadowRerankRequest) {
 }
 
 /** 供只读 preflight 使用；只返回数字，不暴露序列化后的查询或图片。 */
-export function dashScopeShadowRerankRequestBytes(request: ShadowRerankRequest) {
-  return Buffer.byteLength(serializeDashScopeRequest(request), 'utf8')
+export function dashScopeShadowRerankRequestBytes(
+  request: DashScopeRerankWireRequest,
+  imageMime = 'image/png',
+) {
+  return Buffer.byteLength(serializeDashScopeRequest(request, imageMime), 'utf8')
 }

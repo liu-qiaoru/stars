@@ -13,6 +13,7 @@ type RouteRule = {
 const rules: Record<string, RouteRule> = {
   '/': { entry: [{ source: 'app/page.tsx', pattern: /redirect\('\/search'\)/ }] },
   '/agent': shellRule('/agent'),
+  '/agent/audit': shellRule('/agent/audit'),
   '/evaluation': shellRule('/evaluation'),
   '/evaluation/phase9a-c2': {
     entry: [{ source: 'components/evaluation-workspace.tsx', pattern: /\/evaluation\/phase9a-c2/ }],

@@ -18,6 +18,7 @@ import {
 import { createSettings } from '../../src/config/settings.js'
 import {
   agentRunCandidates,
+  agentRerankRuns,
   agentRunAuthorizations,
   agentRunSteps,
   agentRuns,
@@ -254,7 +255,7 @@ describe('AgentV1StepHandler', () => {
         limit: 20,
         offset: 0,
         include_diagnostics: false,
-      })
+      }, { onProgress: expect.any(Function) })
       await expect(
         testDb.db.select().from(agentRunCandidates).where(eq(agentRunCandidates.runId, run.id)),
       ).resolves.toEqual([
@@ -280,7 +281,7 @@ describe('AgentV1StepHandler', () => {
       ])
       const api = new AgentService(testDb.db, settings(), handler)
       await expect(api.getRun(run.id)).resolves.toMatchObject({
-        status: 'succeeded',
+        status: 'ranking',
         intent: expect.objectContaining({ search_scope: 'visual', media_types: ['video'] }),
         conditions: [
           expect.objectContaining({
@@ -294,23 +295,24 @@ describe('AgentV1StepHandler', () => {
           media_types: ['video'],
           library_ids: [libraryId],
         },
-        candidates: [
-          expect.objectContaining({
-            file_id: fileId,
-            file_generation: 7,
-            asset_id: assetId,
-            scene_id: sceneId,
-            rank: 1,
-            retrieval: expect.objectContaining({ score_kind: 'rrf_score' }),
-          }),
-        ],
+        // 普通 API 在 ranking 阶段隐藏内部 RRF；上方数据库断言仍证明快照已冻结。
+        candidates: [],
       })
+      await expect(
+        testDb.db.select().from(agentRerankRuns).where(eq(agentRerankRuns.agentRunId, run.id)),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          attemptNo: 1,
+          completionStatus: 'succeeded',
+          status: 'preparing_evidence',
+        }),
+      ])
     } finally {
       await testDb.close()
     }
   })
 
-  test('明确导出意图在搜索后等待用户选择，不把候选阶段误报为 succeeded', async () => {
+  test('明确导出意图但没有候选时以空结果结束，不等待不存在的选择', async () => {
     const testDb = await createTestDatabase()
     try {
       const runner: AgentIntentRunner = {
@@ -351,9 +353,9 @@ describe('AgentV1StepHandler', () => {
         testDb.db.select().from(agentRuns).where(eq(agentRuns.id, run.id)),
       ).resolves.toEqual([
         expect.objectContaining({
-          status: 'waiting_for_export_selection',
-          waitingStepId: expect.any(String),
-          waitingExpiresAt: expect.any(Date),
+          status: 'succeeded',
+          waitingStepId: null,
+          waitingExpiresAt: null,
         }),
       ])
     } finally {
@@ -625,6 +627,7 @@ describe('AgentV1StepHandler', () => {
       expect(search).toHaveBeenCalledTimes(1)
       expect(search).toHaveBeenCalledWith(
         expect.objectContaining({ search_scope: scope, media_types: mediaTypes }),
+        { onProgress: expect.any(Function) },
       )
     } finally {
       await testDb.close()

@@ -33,6 +33,7 @@ describe('database migration chain', () => {
       '0012_phase_f_human_condition_labeling.sql',
       '0013_phase_f_real_vlm_capability.sql',
       '0014_flawless_shaman.sql',
+      '0015_spicy_ego.sql',
     ])
     expect(metadataFiles).toEqual([
       '0000_snapshot.json',
@@ -50,6 +51,7 @@ describe('database migration chain', () => {
       '0012_snapshot.json',
       '0013_snapshot.json',
       '0014_snapshot.json',
+      '0015_snapshot.json',
       '_journal.json',
     ])
     const journal = JSON.parse(await readFile(resolve('drizzle/meta/_journal.json'), 'utf8')) as {
@@ -71,6 +73,7 @@ describe('database migration chain', () => {
       '0012_phase_f_human_condition_labeling',
       '0013_phase_f_real_vlm_capability',
       '0014_flawless_shaman',
+      '0015_spicy_ego',
     ])
 
     const sql = await readFile(resolve('drizzle', migrationFiles[0]!), 'utf8')

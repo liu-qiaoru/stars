@@ -474,7 +474,7 @@ Phase C 只有在外部文本部署开关、RightAPI URL/Key、后台执行器�
 {
   "phase": "C",
   "provider": "rightapi",
-  "model": "qwen3.7-plus",
+  "model": "glm-5.3",
   "run_creation_available": false,
   "external_text": {
     "deployment_enabled": false,
@@ -507,16 +507,20 @@ Phase C 只有在外部文本部署开关、RightAPI URL/Key、后台执行器�
   "prompt": "帮我找红色汽车的视频",
   "allow_external_text": true,
   "allow_external_visual": false,
+  "allow_external_media_text": false,
+  "workflow": "retrieval_agent",
   "library_ids": [],
   "media_types": ["video"]
 }
 ```
 
+- `workflow` 默认 `retrieval_agent`，执行多轮检索后将有效视觉候选交给最终重排。`legacy` 保留原有重排与导出确认路径，必须具备视觉重排配置和独立图片授权。
+- `allow_external_media_text` 默认 `false`，只在用户独立授权后允许发送候选标识、有限媒体信息、已有画面描述、重叠转录和证据标识。未授权时意图识别完成后进入可恢复的等待态。该授权不包含图片或路径。
 - `prompt` 最多 4000 个 Unicode 字符，超限拒绝，不静默截断。
 - `allow_external_text` 是本 run 发送用户原 prompt 的授权，Agent V1 必须为 `true`。
 - `allow_external_visual` 是独立视觉授权。默认 `false`；只有产品 Rerank 已通过
   `AGENT_RERANK_PROVIDER=dashscope` 显式启用时才能设为 `true`。授权范围固定为完整原查询和
-  最多 20 张派生 PNG，不包含路径、Caption、转录、候选 Key 或指纹。
+  最多 20 张派生图片（视频先生成 PNG，发送时按预算编码为 JPEG），不包含路径、Caption、转录、候选 Key 或指纹。
 - `library_ids` / `media_types` 是 Server 强制范围上限，不由模型扩大。
 
 ```json
@@ -530,6 +534,10 @@ Provider 部署开关、RightAPI 配置、Server handler 或本 run 文本授权
 Server 在写数据库前返回 503/400，不创建假成功 run。
 
 ## GET /agent/runs/{id}
+
+多轮任务新增 `retrieval`：包含 `pending`（下一工具名）、`tool_calls`、`model_calls`、`queries`（实际查询、候选标识、逐轮 ranks 与 sources）、`baseline`（完整原文、步骤与冻结候选）、`details`（有来源、真实时间及截断标志的证据）、`assessments`（逐候选逐条件 satisfied/not_satisfied/unknown）、`stop_reason`。新记录的 `queries[].ranks[].hits` 包含折叠前各素材的 `asset_id`、该次搜索原始 `rank` 和 `sources`；历史记录可缺省此字段，不能凭空补造历史命中。`gaps` 保存每次行动的原条件身份、缺口类型、检查候选与证据、缺失证据及下一步目的；`checked[].read_status` 由程序确定，not_read 不代表读过正文。`rejected_judgments` 记录被降为unknown的判断与固定原因，不保存模型思考。`clarification_question` 为当前待回答的问题。原始工具结果仍在步骤表保存；`retrieval.unavailable_candidates` 标记完成后又失效的候选，这些候选不会出现在可预览列表。`usage.external_calls_dispatched` 按步骤派发表计数，包含失败和未知结果，不能直接当成成功请求数或账单。
+
+多轮任务最终 `candidates` 包含真实文件、场景和预览时间，并附 `query_sources`。成功按最终重排顺序返回；准备期间不返回内部候选作为最终结果。质量未验收时 `result_mode=baseline`、`quality_status=not_accepted`、`fallback_reason` 说明为何正式保留原文基线。增强、重排超时或未知失败时可返回已提交基线的前10条检索顺序，明确 `final_rerank_status=not_completed`；取消不返回新结果。`experimental_candidate_keys` 仅审计实验选择，不替换正式名单。 冻结验收报告的`frozen_suite_accepted`仅表示有限查询集不下降；`enhanced_selection_quality_accepted`另表示新增席位是否经过不同输入的人工对照。报告不是任务成功状态，不通过HTTP自动启用增强；本次同输入响应复用不授予新增席位策略推广资格。步骤输出以 `rerank_candidate_keys` 冻结最多20条正式候选，基线不能因描述缺失或GLM判断被删除；不同轮原始分数不混算。纯音频或没有场景身份的转录保留只读展示，以 `retrieval.rerank_not_applicable=true` 标记。条件判断是模型意见，程序仅检查引用真实性，排序不证明所有条件满足。无需新增数据库迁移，字段使用已有JSON状态；历史缺口不能补还原。
 
 返回用户可见状态、下一步、逐 run 授权、规范化步骤尝试、冻结候选、脱敏错误和事件。
 活动执行时间超过 `AGENT_ACTIVITY_TIMEOUT_MS`（默认 120000 毫秒，即 120 秒）时进入
@@ -590,8 +598,9 @@ allowlist 的非敏感运行参数。响应不包含 Key、Provider URL或任意
 
 请求必须完整且只能包含：`enabled`、`tool_timeout_ms`、`lease_duration_ms`、
 `activity_timeout_ms`、`waiting_ttl_seconds`、`executor_interval_ms`、`web_poll_interval_ms`。
+另支持 `model_timeout_ms`（外部意图/决策模型的独立等待上限，单位毫秒，范围 1000～120000，启动默认 60000）；旧客户端省略该字段时保留当前值。
 未知字段返回 400。Server 强制 `lease_duration_ms >= max(activity_timeout_ms,
-tool_timeout_ms) + 5000`。响应的 `apply_behavior` 标注当前字段均立即生效；当前实现只在
+tool_timeout_ms, model_timeout_ms) + 5000`。本地工具与模型分别使用各自时限，仍受活动步骤和整任务剩余时间限制。响应的 `apply_behavior` 标注当前字段均立即生效；当前实现只在
 本 Server 进程保存覆盖值，进程重启后重新读取环境变量。
 
 ## POST /agent/runs/{id}/resume
@@ -603,16 +612,14 @@ tool_timeout_ms) + 5000`。响应的 `apply_behavior` 标注当前字段均立�
 {
   "waiting_step_id": "11111111-1111-4111-8111-111111111111",
   "client_request_id": "resume-001",
-  "response": "continue_as_read_only_search_with_resolved_scope"
+  "response": "只找白天道路上的红色汽车",
+  "allow_external_media_text": true
 }
 ```
 
-Phase B 只接受固定动作 `continue_as_read_only_search_with_resolved_scope`，表示用户明确把
-歧义目标覆盖为“无副作用的只读搜索”，并接受页面展示的 `resolved_scope`；这同时排除导出等
-副作用解释。其他自由文本不符合共享 Schema，返回 400，不会保存后静默忽略，也不会再次调用 AgentIntent。
-成功后返回 `{ "run_id": "...", "status": "queued" }`。等待步骤过期返回 410，
-同时 run 进入 `expired` 终态；步骤身份或状态不匹配返回 409。成功恢复后固定
-`next_step=searching`，不会再次执行已经完成的 AgentIntent。
+`retrieval_agent` 保存真实补充文本，恢复后同时保留原目标、条件和硬范围；回答中的指令不能扩大素材库权限。素材文字授权必须通过独立布尔字段表达，文本中写“同意”不会自动授权。恢复请求省略该字段保留已有授权；显式 true 授权，显式 false 撤回。`allow_external_visual` 同样为可选独立布尔授权，省略时保留原选择。检索完成后缺少图片授权会返回 `retrieval.awaiting_rerank_authorization=true` 并保存选中集合；页面提交固定确认“开始最终重排”和勾选字段，恢复后直接进入重排，不重新解释查询或再次调用决策模型。
+`legacy` 仍只接受固定 `continue_as_read_only_search_with_resolved_scope`，其他文本返回 409。
+成功返回 `{ "run_id": "...", "status": "queued" }`。等待步骤过期返回 410；步骤身份或状态不匹配返回 409。成功恢复使用已完成意图和原任务候选，不创建新 run。
 
 ## POST /agent/runs/{id}/cancel
 
@@ -962,3 +969,103 @@ second_pass | adjudication | ready_to_freeze | labels_frozen`。证据准备由 
 
 `POST /jobs/{id}/retry` 只接受 `failed` 任务，并复制原任务已经校验的输入创建新的
 `queued` 任务。原失败任务保持不变，便于保留错误详情和审计链。
+
+### Agent 任务详情的执行进度
+
+`GET /agent/runs/:id` 新增 `progress` 数组，供检索页在运行中及恢复后展示实际步骤。
+每项包含 `id`、`label`、`status`、`started_at`、`finished_at` 和 `parent_id`。
+时间为 ISO 格式，`finished_at=null` 表示没有完成时间；`parent_id` 将检索内部的召回/排名融合关联到实际执行步骤。
+状态包含 `running`、`succeeded`、`failed`、`outcome_unknown`、`lease_expired`、`interrupted`、`stopped` 等；应结合标签区分等待输入、取消与任务结束。
+
+该字段由已持久化的任务、步骤和安全轨迹生成，不包含原始模型响应、隐藏思考、Caption、转录或路径。
+页面沿用任务详情轮询；短阶段可能首次出现时已完成。普通 `/search` 的响应与排序保持不变。
+
+
+### 多轮检索预算与候选选择补充（2026-10-06）
+
+GET任务的retrieval.budget包含limits.maximum_tools/maximum_searches/maximum_details/maximum_models及已执行searches/details，模型实际次数继续用model_calls。额度在首轮冻结，失败也计入；progress_facts记录新候选/新正文数量，不能解释为语义验证成功。settings.retrieval_limits同时展示分类部署上限，但HTTP不能扩大它们。
+
+retrieval.selection保存policy_version、qualification_id、正式candidate_keys、experimental_candidate_keys、result_mode、fallback_reason及配置/素材摘要。正式result_mode可能为baseline或enhanced；后者quality_status=accepted_for_frozen_case，仅表示同版本、同原文/范围/素材及同名单已经通过完整人工对照。无资格、损坏、范围或配置不符等仍baseline/not_accepted；失败原因与最终重排状态分别展示。evaluation只来自隔离验收的内部装配，不是创建任务的HTTP参数，不配置正式资格。原始基线名单和各轮来源保留。
+
+等待图片授权后沿用已提交名单，身份失效停止外发并返回明确错误AGENT_RERANK_SELECTION_CHANGED，不能恢复时换一组图片。结果未知不自动重放。新增字段复用JSON步骤状态，无本次迁移/回填/重新索引；旧记录缺少字段时只从实际已提交工具结果补账，不能补造语义证据。
+# 检索内部决策上下文补充（2026-10-06）
+
+`inspection_checkpoint`、文件UUID分组和最近缺口历史是服务端生成的内部模型输入，不是客户端可更改的权限或预算。最低现有候选检查数已达到不等于证据支持目标，也不强制补搜。未达到当前版本人工质量资格时API仍返回基线结果；模型请求字节限制、分类预算和未知结果禁止重放继续适用。该补充没有新增HTTP启用开关或数据库字段。
+
+已确定收到的动作格式错误可在审计步骤`diagnostics.issues`及内部下一轮`last_decision_error.issues`查看：`code`、`path`、可选`expected_type`/`received_type`（固定类型名称）和`unrecognized_key_count`（仅数量）。字段位置由共享动作Schema白名单限制，最多20项；`omitted_issue_count`表示其余省略数量。错误值、自造字段名、响应正文及模型思考不保存；未知外发仍不重试。内部反馈不是新增客户端授权字段。
+
+隔离质量报告另保存`validation_scope`、逐查询`evidence.experiment_source`/`decision_model_substitute`及`autonomous_glm_supplement_verified`。`local_selection_control`表示本地替身选名单后执行真实图片重排：可以检验该有限名单的排序质量，不能作为GLM自主决策或完整新协议质量资格。正式`retrieval.selection`仍由服务端重新验证资格，无客户端启用参数。
+
+### 多轮概要与批量详情协议（2026-10-06）
+
+内部动作增加`get_segment_details_batch { candidate_keys: string[1..3], gap }`，身份不得重复或属于其他任务。单条动作兼容旧步骤。每个候选分别占用`retrieval.budget.details`和`tool_calls`一个位置；`tool_calls`表示操作额度用量，不是模型请求数或付费次数。不能通过批量扩大HTTP请求的预算。
+
+新任务GET的`retrieval.evidence_protocol=overview-batch-v1`；`overviews`按候选身份保存`candidate_key/level=overview/status/evidence[0..1]/truncated/continuous_action_verified=false`。正文仅为当前有效预生成Caption，最多240个Unicode字符，来源、时间及指纹仍可检查，不含转录、图片或路径。`overview_budget`含`maximum_candidates/maximum_characters_per_candidate/inspected`，默认最多3轮搜索乘20即60个唯一候选读取尝试；失败也计数。无素材文字授权时不准备概要；独立授权恢复后先本地提交概要，再请求模型。
+
+`gaps[].gap.checked[].evidence_level`由程序标记identity/overview/detail。概要与完整详情不同；概要截断不能作为未提及或反证的依据。至少两份完整概要的引用可支持补搜规划，非unknown的最终判断仍需可见完整详情；程序身份校验不保证模型语义正确。概要读取不计入逐候选完整详情预算，另有固定独立读取上限。
+
+基线搜索先原子提交候选/原文/名次/来源，概要另步提交正文及计数；`evidence_preparation=candidate_overviews`为纯本地步骤。`stop_reason=overview_timeout`表示概要准备超时，先前基线保留；`context_limit`表示实际编码请求超过100000字节，决策派发为0。旧任务缺失概要字段时不隐式扩额。最终名单、授权恢复与基线资格门不改变。
+
+
+### 明确模型失败的使用量投影（2026-10-06）
+
+`GET /agent/runs/:id`的`retrieval.model_calls`以已派发的searching步骤为下限；HTTP拒绝、失败和结果未知也计入，不能因失败步骤没有成功状态快照而显示0。意图步骤仍单独列入总体`usage.external_calls_dispatched`。模型明确失败且未保存停止原因时投影`stop_reason=model_failed`；已提交原文候选可以基线顺序展示，`final_rerank_status=not_completed`。这是只读状态投影，不调用模型、不重排、不改历史证据；实际费用/用量缺失不能从调用次数推断为0。
+
+
+### 当前真实验收边界（2026-10-06 下午）
+
+RightAPI下午已返回正常响应；统一概要/批量协议的五视觉查询真实最终对照与本地空结果控制均逐项不下降，使用已有104条人工标签，不以任务成功状态作为判据。动作/位置/排除各2次决策、3详情主动found，没有工具额度停止。但本查询集无GLM自主补搜新候选，frozen_suite_accepted=true与enhanced_selection_quality_accepted=false必须分开；正式retrieval.selection仍baseline/quality_not_accepted，qualified-report未生成。普通模型条件判断与人工相关性存在差异，身份校验不能证明语义，不能据此删除基线。缺失对照阻塞已解除，后续需真实有缺口的案例才能补验新增路径，禁止强制补搜或冒充人工真值。有限样本结果不保证未来查询；详细报告位于.scratch/retrieval-quality/GOAL20-STATUS-2026-10-06.md。
+## 2026-10-06 文字支持与视觉核实边界
+
+决策协议 evidence-planning-v6-text-verification。Caption 为预生成模型描述，可能误认对象、位置或静态动作；证据身份、同帧、版本检查只验证来源，不能验证语义。模型的 satisfied/not_satisfied 保留为文字判断，不代表视觉条件已核实。详情工具仍只读取已有文字，没有增加视觉检查工具。
+
+视觉条件存在时，模型 finish 的提交保存程序字段 `retrieval.visual_verification={status:"unverified",reason:"text_only_tools",model_stop_reason:原模型停止原因}`。原动作仍在步骤审计记录。通过引用校验的 found 或 conditions_not_met 转为 `stop_reason=visual_evidence_unverified`；缺条件支持仍为 insufficient_evidence；空结果、调用失败、预算原因分别保留。新字段可缺省以兼容历史任务。页面显示“文字规划已结束，画面条件尚未核实”与“文字线索支持/不支持（模型判断）”。
+
+这不会强制补搜、删除基线候选或额外调用图片模型。可结束文字规划，再进行独立授权的最终图片重排；排序完成也不保证全部条件或连续动作满足。纯转录词语匹配保留现有边界。新协议配置指纹改变，旧验收不能启用当前增强，正式名单继续基线。
+
+### 检索Agent v7：独立场景图片授权及观察
+
+`POST /agent/runs`新增可选`allow_external_scene_visual: boolean`（默认false，仅retrieval_agent）。`POST /agent/runs/:id/resume`支持同名可选字段：省略保留授权，false撤销，true只授权RightAPI deepseek-v4-flash的有界采样图；不能代替allow_external_visual（百炼最终重排）或allow_external_media_text（素材文字）。授权和等待态恢复同事务提交；重复client_request_id不重复授权/执行。服务未显式启用DeepSeek场景工具时，创建时勾选该权限返回400。
+
+`GET /agent/capabilities`和`GET /agent/settings`的model是实际显式配置（默认glm-5.3）。capabilities额外提供scene_inspection（provider/model、最多3候选、每候选3帧）或scene_inspection_available。外部开关及凭证缺失仍不可用，不返回Key/URL。
+
+`GET /agent/runs/:id`的authorization增加allow_external_scene_visual。retrieval可包含awaiting_scene_authorization、model_configuration、scene_inspections；pending动作增加inspect_segment_frames。观察记录包含candidate_key、file_generation、frames[{frame_id,time_seconds,sha256}]、status=prepared|observed，以及observed时的observation{candidate_key,summary,conditions[{condition_id,status,frame_ids,observation}]}。provider保存已知用量/请求身份；即使观察字段或引用无效、status仍prepared，也保留已知provider元数据，未提供的用量/账单保持null，不把无效观察作为证据。无路径、图像编码或模型思考。details.evidence.source新增scene_visual_observation，引用可追踪采样帧的模型意见。
+
+visual_verification仍status=unverified，reason=text_only_tools|sampled_frames，model_stop_reason保存模型原始结束意见。sampled_frames只证明本任务有模型观察返回，不代表人工验证或连续视频核实。新增停止原因scene_inspection_unavailable、scene_inspection_limit、scene_preparation_failed、scene_evidence_changed、scene_observation_failed、model_configuration_changed；最终重排状态与质量门仍独立。
+
+共享TypeScript Schema是动作/响应的权威定义。HTTP请求不接受路径、帧时间或任意模型覆盖参数。新模型选择通过部署环境AGENT_RETRIEVAL_MODEL，默认GLM；没有自动换模型/未知请求重放逻辑。场景取帧复用服务端本地缩略图组件，不增加Worker Job Schema、迁移或索引重建。
+
+### 显式检索范围与采样覆盖边界（v8）
+
+创建任务可选`search_scope: visual|spoken|all`，省略继续由意图模型解析。显式值作为不可放宽范围与任务一并提交，并发送为意图能力边界`enforced_search_scope`；意图返回不同值以`AGENT_SCOPE_EXCEEDED`停止，不能改查另一种数据。Web多轮设置提供“检索内容范围”；转录只用video/audio，画面只用image/video。原文不改写；转录仍沿用词语选择和全文匹配边界，不套用视觉必需首轮原文规则。
+
+视频`scene_inspections`可包含`normalizations[{condition_id,original_status,reason}]`，reason为`sampled_frames_not_exhaustive|continuous_action_unverified`。采样视频的not_satisfied保守降unknown，不能由三帧没看到目标断言整个场景不存在；连续/先后同理。原模型状态以降级记录保存，返回观察已是程序保守状态。页面解释采样覆盖限制，不删除基线。此检查只证明采样不完整，不验证模型语义。
+
+
+### 检索Agent v9：命中图文统一决策
+
+创建`POST /agent/runs`新增`allow_external_retrieval_visual?: boolean`，默认false，仅retrieval_agent且matched_multimodal/DeepSeek可用时接受。恢复`POST /agent/runs/:id/resume`同名可选字段：省略保留、false撤销、true只授权RightAPI `deepseek-v4-flash`的最多20候选、每候选1张实际命中JPEG/请求，不能代替素材文字、旧场景看图或百炼重排许可。回复文本不授予图片权限。授权、回复及等待恢复原子提交，client_request_id保证重复请求不重复执行。
+
+capabilities新增`matched_evidence{available,maximum_candidates:20,maximum_frames_per_candidate:1}`；settings.capabilities新增`matched_evidence_available`。GET run.authorization增加`allow_external_retrieval_visual`。`retrieval.awaiting_retrieval_visual_authorization=true`时独立等待，Web显示勾选及“授权并判断命中图文”，不要求填写新检索要求。新创建/恢复请求的字段仍按共享TypeScript Schema严格校验。
+
+新模式`retrieval.evidence_protocol=matched-multimodal-v1`，`model_configuration.evidence_mode=matched_multimodal`。`matched_evidence{candidate_keys,fingerprint,records}`按候选保存`candidate_key/level=matched/file_generation/status/truncated/continuous_action_verified=false/evidence[]`；证据source为`matched_visual_frame|pre_generated_caption|transcript`，包含真实来源evidence_id及时间，图片text仅帧身份/摘要/查询步骤，不含图片编码或路径。`matched_evidence_query_count`关联本轮准备状态。`queries[].ranks[].hits[].source_matches`保留`asset_id/source=vector_match|caption_match|transcript_match/frame_time_seconds`；对应RRF检索结果也附带该可追溯来源，排序不变。
+
+运行状态边界：当前本地设置接口已确认DeepSeek命中图文模式可用；仅新建`retrieval_agent`且素材文字/命中图片授权齐全才执行此决策，`POST /search`与`legacy`不因此调用检索决策模型。模型可返回`finish:partial`而不补搜，这不是质量验收通过。2026-10-07新增单查询的独立本地选择真实重排对照不下降，也不自动修改产品质量资格或正式结果模式；见仓库`.scratch/retrieval-quality/sofa-phone/final-quality-report-r49.json`。
+
+结构化缺口`checked[].evidence_level`新增matched，引用必须属于本轮已提供证据。命中文字每候选最多两份、每份1200 Unicode字符；视觉每候选最多1张256像素内/20,000字节JPEG，同次请求最多20候选，总请求750,000字节。采样视频的否定仍降unknown并保存sampled_frames_not_exhaustive拒绝依据；连续/先后仍无法确认。新增停止原因matched_evidence_unavailable/failed/changed；最终重排状态、正式结果模式与质量资格仍独立，未通过新版本验收保留baseline。
+
+新图文动作采用共享retrievalMatchedActionSchema：每轮finish最多2份关键候选判断（每份仍含全部原条件），gap.checked最多3份。输入仍最多20候选、最终名单不缩减；这是2000输出token内的解释上限，不能当成候选淘汰。旧动作Schema仍保留20份上限供历史任务兼容。
+
+`gap.kind=stale|tool_failed`可以引用本轮真实`matched`失效/读取失败记录的空`evidence_ids`，服务端覆写实际`read_status`；空引用不支持语义条件判断。费用在外发前拒绝时`stop_reason=cost_limit`，正式基线及最终重排状态独立保存。页面的“命中图文已准备”不代表请求已经发送或模型已经检查。
+
+### 命中决策停止依据（2026-10-07）
+
+新增策略`model_configuration.decision_policy_version=matched-pixel-stop-v2`，不改变素材传输许可`matched-multimodal-v1`或图片/费用上限。旧overview动作可省略`finish.stop_basis`；新命中模式必须提交并通过上下文校验，才保存至`retrieval.stop_basis`及同一已提交步骤。
+
+`stop_basis`包含`kind=sufficient_evidence|no_useful_next_action|no_results`、最多31个原`condition_ids`、最多3个`checked`候选/当前证据引用，以及`search`、`detail`两对象。每个对象含`status=not_useful|exhausted|not_needed`及最多240字符的非空`reason`。partial/insufficient_evidence/conditions_not_met必须解释两种行动不再有用或实际额度耗尽，关联已承认未知的原条件；无判断时关联全部非可选原条件。不能以not_needed回避缺口。完整支持才可sufficient_evidence，实际空搜索才可no_results；预算仍由程序核对，来源身份有效不保证语义正确。
+
+遗漏、伪造条件/候选/证据或虚称预算耗尽：`AGENT_STOP_BASIS_INVALID`写入已有有限纠正记录；不增加调用上限，耗尽纠正后以insufficient_evidence保底。视觉条件仅描述或转录引用时降unknown，`rejected_judgments.reason=visual_requires_pixel_evidence`保留被拒依据，不能据此删除基线。页面展示停止涉及原条件和两种行动理由，并明确属于模型意见。
+
+未完成规划的旧策略任务恢复时`model_configuration_changed`停止增强；已经提交`rerank_candidate_keys`的交接不因此次策略版本变化重新做决策或换名单。质量配置摘要同时改变，旧资格不得用于新策略。上述字段使用已有JSON列，无迁移/回填/重新索引。
+
+`stop_reason=cost_limit`表示外发前的费用预留拒绝，增强决策未发送，已完成基线可继续独立最终重排；页面明确费用停止，不表示质量验证成功。全文查询没有成功搜索快照时不得提交no_results，未搜索空名单与成功空结果独立。

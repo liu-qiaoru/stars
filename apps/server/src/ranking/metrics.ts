@@ -39,7 +39,7 @@ export interface RankingMetrics {
 export function calculateRankingMetrics(
   rankedCandidateKeys: string[],
   judgments: Map<string, 0 | 1 | 2 | null>,
-  options: { knownTargetKey: string | null },
+  options: { knownTargetKey: string | null; fixedCutoff?: boolean },
 ): RankingMetrics {
   const unjudgeableCount = [...judgments.values()].filter((value) => value === null).length
   if (options.knownTargetKey !== null) {
@@ -70,10 +70,10 @@ export function calculateRankingMetrics(
     value === null ? [] : [value],
   )
   return {
-    precisionAt5: precisionAt(judged, 5),
-    precisionAt10: precisionAt(judged, 10),
-    ndcgAt10: ndcgAt(judged, sharedIdealRelevance, 10),
-    ndcgAt20: ndcgAt(judged, sharedIdealRelevance, 20),
+    precisionAt5: precisionAt(judged, 5, options.fixedCutoff),
+    precisionAt10: precisionAt(judged, 10, options.fixedCutoff),
+    ndcgAt10: ndcgAt(judged, sharedIdealRelevance, 10, options.fixedCutoff),
+    ndcgAt20: ndcgAt(judged, sharedIdealRelevance, 20, options.fixedCutoff),
     hitAt5: null,
     hitAt10: null,
     hitAt20: null,
@@ -84,20 +84,21 @@ export function calculateRankingMetrics(
 
 // Precision@K：前 K 条里相关（等级 > 0）的比例；候选不足 K 条时按实际条数算。
 // 没有任何可判定候选时返回 null，表示"无法计算"而非"得分为 0"。
-function precisionAt(relevance: number[], k: number) {
+function precisionAt(relevance: number[], k: number, fixedCutoff = false) {
   const visible = relevance.slice(0, k)
-  if (!visible.length) {
+  if (!visible.length && !fixedCutoff) {
     return null
   }
-  return visible.filter((value) => value > 0).length / visible.length
+  // Agent 质量验收固定观察 K 个位置：缺失位置按未命中处理，不能缩小分母美化。
+  return visible.filter((value) => value > 0).length / (fixedCutoff ? k : visible.length)
 }
 
 // nDCG（Normalized Discounted Cumulative Gain，归一化折损累计增益）结果在 [0,1]。
 // 折损累计增益 = Σ (2^相关等级 - 1) / log2(名次+1)：相关等级越高、排得越靠前，收益越大。
 // 理想分母使用两种排序共同人工判断池中的等级降序排列；这样遗漏高度相关候选也会被扣分。
-function ndcgAt(relevance: number[], sharedIdealRelevance: number[], k: number) {
+function ndcgAt(relevance: number[], sharedIdealRelevance: number[], k: number, fixedCutoff = false) {
   const visible = relevance.slice(0, k)
-  if (!visible.length) {
+  if (!visible.length && !fixedCutoff) {
     return null
   }
   const dcg = discountedGain(visible)

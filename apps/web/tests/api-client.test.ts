@@ -219,6 +219,14 @@ describe('typed API client', () => {
     )
   })
 
+  test('builds static scene thumbnail URLs', () => {
+    const client = createApiClient({ baseUrl: 'http://api.local', fetcher: fetchMock })
+
+    expect(client.mediaThumbnailUrl('file-1', 12.5)).toBe(
+      'http://api.local/media/file-1/thumbnail?time_seconds=12.5',
+    )
+  })
+
   test('posts clip export requests with time range', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ job_id: 'job-1', status: 'queued' }), { status: 200 }),

@@ -1,3 +1,5 @@
+import type { RetrievalVisualVerification, RetrievalStopBasis } from '../../../packages/shared/schemas/retrieval-agent.js'
+
 export type MediaType = 'image' | 'video' | 'audio' | 'document' | 'unknown'
 
 export const queryExpansionModes = ['original', 'translate', 'expand'] as const
@@ -410,13 +412,49 @@ export interface AgentToolCallSummary {
 }
 
 export interface AgentRunDetail {
+  /** 安全执行时间线；不包含模型思考或素材正文。旧服务端可以不返回。 */
+  progress?: Array<{ id: string; label: string; status: string; started_at: string; finished_at: string | null; parent_id: string | null }>
   id: string
   status: string
   next_step?: string
+  workflow?: 'retrieval_agent' | 'legacy'
+  clarification_question?: string | null
+  retrieval?: { pending: string | null; tool_calls: number; model_calls: number; stop_reason?: string; question?: string;
+    awaiting_rerank_authorization?: boolean; awaiting_scene_authorization?: boolean;
+    scene_inspections?: Record<string, { status: string; frames: Array<{ frame_id: string; time_seconds: number | null; sha256: string }>; normalizations?: Array<{ condition_id: string; original_status: string; reason: 'sampled_frames_not_exhaustive' | 'continuous_action_unverified' }>; observation?: { summary: string; conditions: Array<{ condition_id: string; status: string; observation: string }> } }>; rerank_not_applicable?: boolean;
+    /** 程序保存的核实边界沿用共享类型，历史任务可缺省。 */
+    visual_verification?: RetrievalVisualVerification;
+    stop_basis?: RetrievalStopBasis;
+    result_mode?: 'baseline' | 'enhanced' | 'evaluation'; fallback_reason?: string;
+    quality_status?: 'not_accepted' | 'accepted_for_frozen_case';
+    budget?: { limits: { maximum_tools: number; maximum_searches: number; maximum_details: number; maximum_models: number }; searches: number; details: number };
+    awaiting_retrieval_visual_authorization?: boolean;
+    matched_evidence?: { candidate_keys: string[]; fingerprint: string; records: Record<string, { status: string; evidence: Array<{ evidence_id: string; source: string; text: string; truncated: boolean }> }> };
+    overview_budget?: { maximum_candidates: number; maximum_characters_per_candidate: number; inspected: number };
+    overviews?: Record<string, { level: 'overview'; status: string; truncated: boolean; evidence: Array<{ evidence_id: string; source: string; text: string; truncated: boolean }> }>;
+    selection?: { policy_version: string; qualification_id: string | null };
+    final_rerank_status?: 'succeeded' | 'not_completed' | 'pending';
+    gaps?: Array<{ step_id: string; action: string; gap: { condition_ids: string[]; kind: string;
+      checked: Array<{ candidate_key: string; evidence_ids: string[]; evidence_level?: 'identity' | 'overview' | 'detail' | 'matched' }>; missing_evidence: string;
+      next_step_reason: string; preserves_original_goal: boolean } }>;
+    unavailable_candidates?: Array<{ candidate_key: string; status: string }>
+    queries: Array<{ step_id: string; query: string; candidate_keys: string[];
+      ranks?: Array<{ candidate_key: string; rank: number; sources: string[];
+        hits?: Array<{ asset_id: string; rank: number; sources: string[] }> }> }>;
+    details: Record<string, { status: string; truncated: boolean; evidence: Array<{ evidence_id: string; source: string; text: string; start_seconds: number | null; end_seconds: number | null; crosses_scene_boundary: boolean; truncated: boolean }> }>;
+    assessments?: Array<{ candidate_key: string; conditions: Array<{ condition_id: string; status: string; evidence_ids: string[] }> }> } | null
   prompt: string
   summary: string | null
   waiting_step_id?: string | null
   error?: { code: string; message: string } | null
+  authorization?: {
+    allow_external_text: boolean
+    allow_external_visual: boolean
+    allow_external_media_text?: boolean
+    allow_external_scene_visual?: boolean
+    allow_external_retrieval_visual?: boolean
+    granted_at: string
+  } | null
   intent?: {
     goal: string
     search_scope: SearchScope
@@ -441,6 +479,8 @@ export interface AgentRunDetail {
   steps?: Array<{
     step_attempt_id: string
     step: string
+    action?: string | null
+    tool_status?: string | null
     status: string
   }>
   tool_calls: AgentToolCallSummary[]
@@ -460,7 +500,8 @@ export interface AgentRunDetail {
     scene_start_seconds: number | null
     scene_end_seconds: number | null
     rank: number
-    retrieval: {
+    /** 历史响应兼容；产品接口不再返回内部 RRF 诊断。 */
+    retrieval?: {
       media_type?: MediaType
       score?: number
       score_kind?: string
@@ -468,7 +509,7 @@ export interface AgentRunDetail {
       reasons?: string[]
       source_scores?: Record<string, number>
     }
-    review_status: 'not_run'
+    review_status?: 'not_run'
     unverified_condition_ids?: string[]
   }>
   export_job?: {
@@ -480,37 +521,73 @@ export interface AgentRunDetail {
   } | null
 }
 
-export interface AgentRerankRun {
+export interface AgentAuditRunSummary {
   id: string
-  agent_run_id: string
-  status:
-    | 'preparing_evidence'
-    | 'running'
-    | 'succeeded'
-    | 'failed'
-    | 'outcome_unknown'
-    | 'not_applicable'
-  external_call_status: 'not_dispatched' | 'dispatched' | 'completed'
-  provider: string
-  requested_model: string
-  provider_request_id: string | null
-  request_bytes: number | null
-  total_tokens: number | null
-  estimated_cost_cny: number | null
-  latency_ms: number | null
-  error: { code: string; message: string | null } | null
-  rankings: Array<{
-    candidate_key: string
-    rrf_rank: number
-    rerank_rank: number | null
-    relevance_score: number | null
+  query: string
+  status: string
+  attempt_count: number
+  error_code: string | null
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+}
+
+export interface AgentAuditRunDetail {
+  run: AgentAuditRunSummary & {
+    next_step: string
+    enforced_scope: unknown
+    error: { code: string; message: string | null } | null
+  }
+  authorizations: unknown[]
+  agent_behavior: { steps: unknown[]; events: unknown[]; tool_calls: unknown[] }
+  trace: Array<{
+    span_id: string
+    parent_span_id: string | null
+    component: string
+    operation: string
+    status: string
+    duration_ms: number | null
+    external_call_status: string
+    request_summary: unknown
+    response_summary: unknown
+    error: { code: string; message: string | null } | null
   }>
-  feedback: 'rerank_better' | 'rrf_better' | 'same' | null
+  rrf_results: Array<{
+    candidate_id: string
+    candidate_key: string
+    file_id: string
+    file_generation: number
+    asset_id: string
+    scene_id: string | null
+    scene_start_seconds: number | null
+    scene_end_seconds: number | null
+    rrf_rank: number
+    retrieval: unknown
+  }>
+  rerank_attempts: Array<{
+    id: string
+    attempt_no: number
+    status: string
+    external_call_status: string
+    provider_request_id: string | null
+    request_bytes: number | null
+    total_tokens: number | null
+    estimated_cost_cny: number | null
+    latency_ms: number | null
+    error: { code: string; message: string | null } | null
+    rankings: Array<{
+      candidate_id: string
+      candidate_key: string
+      rrf_rank: number
+      rerank_rank: number | null
+      relevance_score: number | null
+    }>
+  }>
 }
 
 export interface AgentSettingsResponse {
   provider: 'rightapi'
-  model: 'qwen3.7-plus'
+  model: 'glm-5.3' | 'deepseek-v4-flash'
   prompt_version: string
   schema_version: string
   api_key: { configured: boolean }
@@ -518,12 +595,14 @@ export interface AgentSettingsResponse {
     external_text_available: boolean
     external_visual_available: boolean
     rerank_available: boolean
-    vlm_review_available: false
+    scene_inspection_available?: boolean
+    matched_evidence_available?: boolean
     unavailable_reasons: string[]
   }
   editable: {
     enabled: boolean
     tool_timeout_ms: number
+    model_timeout_ms: number
     lease_duration_ms: number
     activity_timeout_ms: number
     waiting_ttl_seconds: number
@@ -873,6 +952,12 @@ export function createApiClient(options: ApiClientOptions = {}) {
               .join(',')}`
       return `${baseUrl}/media/${id}/content${fragment}`
     },
+    /**
+     * 场景卡片使用静态 JPEG，避免每个场景都创建一个 HTMLVideoElement 和视频解码器。
+     * time_seconds 是该场景的开始时间，Server 会通过受限并发的 FFmpeg 只读提取一帧。
+     */
+    mediaThumbnailUrl: (id: string, timeSeconds: number) =>
+      `${baseUrl}/media/${id}/thumbnail?time_seconds=${encodeURIComponent(Math.max(0, timeSeconds))}`,
     searchMedia: (input: SearchRequest) =>
       request<SearchResponse>('/search', { method: 'POST', body: JSON.stringify(input) }),
     listEvaluationSets: () =>
@@ -1094,8 +1179,13 @@ export function createApiClient(options: ApiClientOptions = {}) {
       }),
     createAgentRun: (input: {
       prompt: string
+      search_scope?: 'visual' | 'spoken' | 'all'
       allow_external_text: boolean
       allow_external_visual?: boolean
+      allow_external_media_text?: boolean
+    allow_external_scene_visual?: boolean
+    allow_external_retrieval_visual?: boolean
+      workflow?: 'retrieval_agent' | 'legacy'
       media_types?: MediaType[]
       library_ids?: string[]
     }) =>
@@ -1108,23 +1198,15 @@ export function createApiClient(options: ApiClientOptions = {}) {
         method: 'GET',
         signal: options.signal,
       }),
-    startAgentRerank: (id: string, input: { confirmed: true; max_cost_cny: number }) =>
-      request<AgentRerankRun>(`/agent/runs/${id}/rerank`, {
-        method: 'POST',
-        body: JSON.stringify(input),
-      }),
-    getAgentRerank: (id: string, options: { signal?: AbortSignal } = {}) =>
-      request<AgentRerankRun | null>(`/agent/runs/${id}/rerank`, {
+    listAgentAuditRuns: (options: { signal?: AbortSignal; limit?: number } = {}) =>
+      request<{ runs: AgentAuditRunSummary[] }>(
+        `/agent/audit/runs?limit=${options.limit ?? 50}`,
+        { method: 'GET', signal: options.signal },
+      ),
+    getAgentAuditRun: (id: string, options: { signal?: AbortSignal } = {}) =>
+      request<AgentAuditRunDetail>(`/agent/audit/runs/${id}`, {
         method: 'GET',
         signal: options.signal,
-      }),
-    saveAgentRerankFeedback: (
-      id: string,
-      input: { verdict: 'rerank_better' | 'rrf_better' | 'same' },
-    ) =>
-      request<AgentRerankRun>(`/agent/rerank-runs/${id}/feedback`, {
-        method: 'PUT',
-        body: JSON.stringify(input),
       }),
     createCandidateEvidence: (input: {
       source: CandidateEvidenceSource
@@ -1196,6 +1278,9 @@ export function createApiClient(options: ApiClientOptions = {}) {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    resumeAgentRun: (id: string, input: { waiting_step_id: string; client_request_id: string; response: string; allow_external_media_text?: boolean; allow_external_visual?: boolean; allow_external_scene_visual?: boolean
+    allow_external_retrieval_visual?: boolean }) =>
+      request<{ run_id: string; status: string }>(`/agent/runs/${id}/resume`, { method: 'POST', body: JSON.stringify(input) }),
     cancelAgentRun: (id: string, input: { client_request_id: string; reason?: string }) =>
       request<{ run_id: string; status: string }>(`/agent/runs/${id}/cancel`, {
         method: 'POST',

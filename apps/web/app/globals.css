@@ -1312,3 +1312,332 @@ button:disabled {
   background: var(--canvas);
   color: var(--body);
 }
+
+/* 工作台页头只保留“页面名称 + 一句用途”两层。图标与标题组成同一视觉锚点，页面操作放在
+   右侧；下方卡片从具体功能开始，避免连续出现三个相近标题。 */
+.workspace-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.5rem 0 0.25rem;
+}
+
+.workspace-header-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.875rem;
+}
+
+.workspace-header-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  place-items: center;
+  border: 1px solid #d8e2f2;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #ffffff, #edf3ff);
+  box-shadow: var(--shadow-1);
+  color: #315fcd;
+}
+
+.workspace-header-copy {
+  min-width: 0;
+}
+
+.workspace-header-copy h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(1.6rem, 2.3vw, 1.9rem);
+  font-weight: 680;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.workspace-header-copy p {
+  max-width: 48rem;
+  margin: 0.3rem 0 0;
+  color: var(--mute);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.workspace-header-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@media (max-width: 720px) {
+  .workspace-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .workspace-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+/* 智能检索使用“用户请求 -> 检索回复 -> 继续输入”的 Chat 节奏。Server 中的
+   Run 仍彼此独立，这些样式只表达当前页面会话，不暗示模型会自动继承上轮语义。 */
+.agent-chat-shell {
+  /* 回复内的面板共用缩进及窄屏切换规则，避免日志与前面的概览宽度不一致。 */
+  --agent-content-inset: 2.9rem;
+  display: grid;
+  width: min(1080px, 100%);
+  min-height: calc(100dvh - 8rem);
+  margin: 0 auto;
+  padding-bottom: 12rem;
+  grid-template-rows: auto minmax(18rem, 1fr) auto;
+  gap: 1rem;
+}
+
+.agent-chat-stream { display: grid; align-content: start; gap: 2.5rem; min-width: 0; padding: 1.5rem 0 2rem; }
+.agent-chat-shell-empty .agent-chat-stream { align-content: center; padding-block: 0; }
+.agent-chat-empty { display: grid; max-width: 42rem; place-items: center; justify-self: center; padding: clamp(3rem, 9vh, 6rem) 1rem; text-align: center; }
+.agent-chat-shell-empty .agent-chat-empty { padding: 1rem; }
+.agent-chat-empty-icon,
+.agent-response-avatar { display: grid; place-items: center; border: 1px solid #d8e2f2; background: #edf3ff; color: #315fcd; }
+.agent-chat-empty-icon { width: 48px; height: 48px; border-radius: 14px; box-shadow: var(--shadow-2); }
+.agent-chat-empty h2 { margin: 1.1rem 0 0; color: var(--ink); font-size: clamp(1.45rem, 3vw, 2rem); font-weight: 680; letter-spacing: -0.025em; }
+.agent-chat-empty > p { margin: 0.55rem 0 0; color: var(--mute); font-size: 0.9375rem; }
+.agent-chat-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin-top: 1.5rem; }
+.agent-chat-suggestions button,
+.agent-history-toggle { border: 1px solid var(--hairline); background: #ffffffcc; color: var(--body); }
+.agent-chat-suggestions button { min-height: 36px; border-radius: 8px; padding: 0.45rem 0.75rem; font-size: 0.75rem; }
+.agent-chat-suggestions button:hover,
+.agent-history-toggle:hover { border-color: var(--hairline-strong); color: var(--ink); }
+.agent-chat-turn { display: grid; gap: 1.25rem; }
+.agent-chat-turn-archived { border-bottom: 1px solid var(--hairline); padding-bottom: 2.5rem; }
+.agent-user-message { display: grid; max-width: min(42rem, 82%); justify-self: end; gap: 0.25rem; }
+.agent-user-message > p { margin: 0; border-radius: 14px 14px 4px 14px; background: var(--primary); padding: 0.8rem 1rem; box-shadow: 0 7px 20px #1831531c; color: var(--on-primary); font-size: 0.9375rem; line-height: 1.55; white-space: pre-wrap; }
+.agent-assistant-message { display: grid; min-width: 0; gap: 1.1rem; }
+.agent-response-header { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 0.7rem; }
+.agent-response-avatar { width: 34px; height: 34px; border-radius: 10px; }
+.agent-response-header strong { color: var(--ink); font-size: 0.875rem; }
+.agent-response-header p { margin: 0.2rem 0 0; color: var(--mute); font-size: 0.8125rem; line-height: 1.5; }
+.agent-processing { display: grid; gap: 0.8rem; margin-left: var(--agent-content-inset); border: 1px solid #d8e2f2; border-radius: 12px; background: linear-gradient(135deg, #f8fbff, #f2f6fd); padding: 0.85rem 1rem; }
+.agent-processing-message { display: flex; align-items: center; gap: 0.7rem; }
+.agent-processing-message strong { color: var(--ink); font-size: 0.8125rem; font-weight: 620; }
+.agent-thinking-dots { display: inline-flex; width: 30px; height: 22px; align-items: center; justify-content: center; gap: 3px; border-radius: 7px; background: #e3ebfb; }
+.agent-thinking-dots i { width: 4px; height: 4px; border-radius: 50%; background: #315fcd; opacity: 0.35; }
+.agent-processing-phases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem; }
+.agent-processing-phases span { display: flex; min-width: 0; align-items: center; gap: 0.4rem; color: var(--mute); font-size: 0.6875rem; }
+.agent-processing-phases span > i { width: 6px; height: 6px; flex: none; border: 1px solid #b8c8e2; border-radius: 50%; background: transparent; }
+.agent-processing-phases .agent-processing-phase-done { color: #587096; }
+.agent-processing-phases .agent-processing-phase-done > i { border-color: #6f8fcf; background: #6f8fcf; }
+.agent-processing-phases .agent-processing-phase-active { color: #234f9e; font-weight: 650; }
+.agent-processing-phases .agent-processing-phase-active > i { border-color: #315fcd; background: #315fcd; box-shadow: 0 0 0 3px #dce7fb; }
+.agent-run-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; margin-left: var(--agent-content-inset); border: 1px solid var(--hairline); border-radius: 10px; background: #f8fafc; }
+.agent-run-overview > div { display: grid; gap: 0.2rem; padding: 0.7rem 0.8rem; }
+.agent-run-overview > div + div { border-left: 1px solid var(--hairline); }
+.agent-run-overview span,
+.agent-confirmation-panel small { color: var(--mute); font-size: 0.6875rem; }
+.agent-run-overview strong { overflow: hidden; color: var(--ink); font-size: 0.8125rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.agent-inline-action-panel,
+.agent-export-panel,
+.agent-confirmation-panel,
+.agent-job-status { margin-left: var(--agent-content-inset); border: 1px solid var(--hairline); border-radius: 12px; background: var(--canvas); padding: 1rem; }
+.agent-inline-action-panel p,
+.agent-confirmation-panel p,
+.agent-job-status p { margin: 0; color: var(--body); font-size: 0.8125rem; line-height: 1.55; }
+.agent-inline-action-panel > div { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.agent-condition-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-left: var(--agent-content-inset); }
+.agent-condition-list > span { display: inline-flex; align-items: center; gap: 0.45rem; min-height: 32px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--canvas); padding: 0.35rem 0.6rem; color: var(--ink); font-size: 0.75rem; }
+.agent-condition-list small { color: var(--mute); font-size: 0.625rem; }
+.agent-result-section { display: grid; gap: 0.9rem; margin-left: var(--agent-content-inset); }
+.agent-result-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+.agent-result-heading h2 { margin: 0; color: var(--ink); font-size: 1rem; font-weight: 680; }
+.agent-result-heading p { margin: 0.25rem 0 0; color: var(--mute); font-size: 0.75rem; }
+.agent-result-heading > strong { color: var(--body); font-size: 0.75rem; white-space: nowrap; }
+.agent-result-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.agent-result-grid-archived { margin-left: var(--agent-content-inset); }
+.agent-result-card { overflow: hidden; border: 1px solid var(--hairline); border-radius: 12px; background: var(--canvas); box-shadow: var(--shadow-1); transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease; }
+.agent-result-card:hover { border-color: var(--hairline-strong); box-shadow: var(--shadow-2); transform: translateY(-1px); }
+.agent-result-selected { border-color: var(--primary); box-shadow: 0 0 0 2px #d3e5ff; }
+.agent-result-card img,
+.agent-result-card video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #121820; object-fit: contain; }
+.agent-result-card audio { display: block; width: calc(100% - 1.5rem); min-height: 4rem; margin: 0.75rem; }
+.agent-result-copy { display: grid; gap: 0.6rem; padding: 0.8rem; }
+.agent-result-copy > div { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.agent-result-copy strong { color: var(--ink); font-size: 0.8125rem; }
+.agent-result-copy p,
+.agent-result-empty { margin: 0; color: var(--mute); font-size: 0.75rem; }
+.agent-result-copy .inline-flex { justify-self: start; }
+.agent-history-toggle { width: fit-content; min-height: 34px; margin-left: var(--agent-content-inset); border-radius: 8px; padding: 0.4rem 0.65rem; font-size: 0.75rem; }
+.agent-export-panel { display: grid; gap: 0.9rem; }
+.agent-export-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.agent-export-fields > div { display: grid; gap: 0.4rem; }
+.agent-export-panel > .inline-flex,
+.agent-confirmation-panel > .inline-flex { justify-self: start; }
+.agent-confirmation-panel { display: grid; gap: 0.5rem; margin: 0; background: var(--canvas-soft); }
+.agent-job-status { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 0.75rem; }
+.agent-job-status strong { color: var(--ink); font-size: 0.8125rem; }
+.agent-job-status > span { color: var(--body); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.agent-run-meta { width: fit-content; margin-left: var(--agent-content-inset); color: var(--mute); font-size: 0.6875rem; }
+.agent-run-meta summary,
+.agent-authorization-details summary { cursor: pointer; }
+.agent-run-meta p { overflow-wrap: anywhere; margin: 0.45rem 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.agent-conversation-end { scroll-margin-bottom: 12rem; }
+/* 输入区相对浏览器视口固定，不随长结果列表滚动。页面底部预留了同等空间，确保最后一条
+   结果仍能完整滚到输入框上方，不会被固定层遮住。 */
+.agent-composer-dock { position: fixed; z-index: 10; right: 0; bottom: 0; left: 0; width: min(1080px, calc(100vw - 3rem)); margin: 0 auto; padding: 0.75rem 0 max(1.5rem, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, #f7f9fc 18%, #f7f9fc 100%); pointer-events: none; }
+.agent-composer-dock > form { pointer-events: auto; }
+.agent-chat-composer { display: grid; overflow: hidden; border: 1px solid var(--hairline-strong); border-radius: 16px; background: #ffffffed; box-shadow: 0 16px 44px #1831531f, inset 0 1px 0 #ffffff; backdrop-filter: blur(18px) saturate(1.15); }
+.agent-chat-composer textarea { min-height: 64px; max-height: 160px; resize: vertical; border: 0; border-radius: 0; background: transparent; padding: 0.9rem 1rem 0.5rem; font-size: 0.9375rem; line-height: 1.5; box-shadow: none; }
+.agent-chat-composer textarea:focus-visible { box-shadow: none; outline: none; }
+.agent-composer-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.5rem 0.65rem; }
+.agent-authorization-toggle { display: inline-flex; min-width: 0; align-items: center; gap: 0.5rem; color: var(--body); font-size: 0.75rem; font-weight: 550; }
+.agent-authorization-toggle input { width: 15px; height: 15px; accent-color: var(--primary); }
+.agent-composer-toolbar .inline-flex { min-height: 36px; border-radius: 9px; padding-inline: 0.8rem; }
+.agent-authorization-details,
+.agent-composer-status { margin: 0; border-top: 1px solid var(--hairline); padding: 0.55rem 0.9rem; color: var(--mute); font-size: 0.6875rem; line-height: 1.5; }
+.agent-authorization-details p { margin: 0.45rem 0 0; }
+.agent-composer-status { background: var(--canvas-soft); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .agent-thinking-dots i { animation: agent-thinking 1.1s ease-in-out infinite; }
+  .agent-thinking-dots i:nth-child(2) { animation-delay: 140ms; }
+  .agent-thinking-dots i:nth-child(3) { animation-delay: 280ms; }
+}
+
+@keyframes agent-thinking {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+@media (max-width: 700px) {
+  .agent-chat-shell { --agent-content-inset: 0rem; min-height: calc(100dvh - 7rem); padding-bottom: 11rem; }
+  .agent-chat-stream { gap: 2rem; padding-top: 0.75rem; }
+  .agent-user-message { max-width: 92%; }
+  .agent-run-overview,
+  .agent-result-grid,
+  .agent-export-fields { grid-template-columns: minmax(0, 1fr); }
+  .agent-run-overview > div + div { border-top: 1px solid var(--hairline); border-left: 0; }
+  .agent-result-grid-archived .agent-result-card:nth-child(n + 3) { display: none; }
+  .agent-job-status { grid-template-columns: minmax(0, 1fr) auto; }
+  .agent-job-status > span { grid-column: 2; }
+  .agent-composer-toolbar .inline-flex span { display: none; }
+  .agent-composer-dock { width: calc(100vw - 2rem); }
+}
+
+/* 审计对照以紧凑缩略图辅助判断候选身份。视频只显示 Server 提取的静态场景帧，
+   避免一张表同时创建大量解码器；点击后再打开受控媒体内容。 */
+.audit-compare-table th { color: var(--mute); font-size: 0.75rem; font-weight: 650; }
+.audit-compare-table td { vertical-align: middle; }
+.audit-candidate-cell { display: grid; min-width: 17rem; grid-template-columns: 128px minmax(0, 1fr); align-items: center; gap: 0.75rem; }
+.audit-candidate-preview { position: relative; display: block; overflow: hidden; width: 128px; height: 72px; border: 1px solid var(--hairline); border-radius: 9px; background: #121820; }
+.audit-candidate-preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.audit-candidate-preview > span { position: absolute; right: 0.35rem; bottom: 0.3rem; border-radius: 5px; background: #12233fd9; padding: 0.15rem 0.35rem; color: #f7f9fc; font-size: 0.625rem; }
+.audit-candidate-preview:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.audit-candidate-copy { display: grid; min-width: 0; gap: 0.25rem; }
+.audit-candidate-copy strong { color: var(--ink); font-size: 0.8125rem; }
+.audit-candidate-copy span { overflow: hidden; color: var(--mute); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.6875rem; text-overflow: ellipsis; white-space: nowrap; }
+.audit-candidate-copy small { color: var(--body); font-size: 0.6875rem; }
+
+
+/* 运行详情沿用检索对话的面板、颜色与字号；长历史在面板内滚动，保留结果区空间。 */
+.agent-run-progress { width: auto; min-width: 0; overflow: hidden; border: 1px solid var(--hairline); border-radius: 12px; background: var(--canvas); }
+.agent-run-progress summary { display: flex; align-items: center; gap: 0.75rem; min-height: 44px; padding: 0.75rem 1rem; list-style: none; color: var(--body); }
+.agent-run-progress summary::-webkit-details-marker { display: none; }
+.agent-run-progress summary:hover { background: var(--canvas-soft); }
+.agent-run-progress summary:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; border-radius: 10px; }
+.agent-run-progress-heading { display: inline-flex; flex: none; align-items: center; gap: 0.5rem; color: var(--ink); font-size: 0.8125rem; font-weight: 600; }
+.agent-run-progress-heading > svg { color: var(--mute); }
+.agent-run-progress-current { min-width: 0; overflow: hidden; margin-left: auto; text-overflow: ellipsis; white-space: nowrap; color: var(--mute); font-size: 0.6875rem; }
+.agent-run-progress-chevron { flex: none; margin-left: auto; color: var(--mute); transition: transform 150ms ease; }
+.agent-run-progress-current + .agent-run-progress-chevron { margin-left: 0; }
+.agent-run-progress[open] .agent-run-progress-chevron { transform: rotate(180deg); }
+.agent-run-progress ol { max-height: 20rem; overflow-y: auto; overscroll-behavior: contain; list-style: none; margin: 0; padding: 0.4rem 0.75rem; border-top: 1px solid var(--hairline); scrollbar-width: thin; }
+.agent-run-progress li { display: flex; align-items: flex-start; gap: 0.625rem; padding: 0.625rem 0.5rem; border-radius: 8px; }
+.agent-run-progress li[data-status="running"] { background: var(--canvas-soft-2); }
+.agent-run-progress .agent-run-progress-child { margin-left: 1.125rem; }
+.agent-run-progress-dot { display: grid; place-items: center; width: 14px; height: 14px; margin-top: 2px; border: 1px solid var(--hairline-strong); border-radius: 50%; color: var(--mute); flex: none; }
+.agent-run-progress-dot[data-status="running"] { border: 4px solid var(--primary); background: var(--canvas); }
+.agent-run-progress-dot[data-status="succeeded"] { border-color: transparent; background: var(--success-soft); color: var(--success); }
+.agent-run-progress-dot[data-status="failed"], .agent-run-progress-dot[data-status="timed_out"] { border-color: var(--error); background: var(--error-soft); }
+.agent-run-progress-dot[data-status="outcome_unknown"], .agent-run-progress-dot[data-status="interrupted"], .agent-run-progress-dot[data-status="lease_expired"] { border-color: var(--warning); background: var(--warning-soft); }
+.agent-run-progress-content { flex: 1; min-width: 0; }
+.agent-run-progress-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+.agent-run-progress-line strong { color: var(--body); font-size: 0.75rem; font-weight: 500; overflow-wrap: anywhere; }
+.agent-run-progress li[data-status="running"] strong { color: var(--ink); font-weight: 600; }
+.agent-run-progress-status { color: var(--mute); font-size: 0.6875rem; white-space: nowrap; }
+.agent-run-progress small { display: block; margin-top: 0.2rem; color: var(--mute); font-size: 0.625rem; font-variant-numeric: tabular-nums; }
+.agent-run-progress > p { padding: 0.65rem 1rem; margin: 0; }
+.agent-run-progress .agent-run-progress-id { border-top: 1px solid var(--hairline); background: var(--canvas-soft); font-size: 0.625rem; }
+@media (prefers-reduced-motion: reduce) {
+  .agent-run-progress-chevron { transition: none; }
+}
+
+/* 取消属于次要任务操作，贴近任务状态；设置集中收纳，避免授权项撑满输入工具栏。 */
+.agent-response-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 0.4rem; }
+.agent-response-actions .agent-cancel-action { min-height: 28px; height: 28px; padding: 0 0.5rem; color: var(--mute); font-size: 0.6875rem; }
+.agent-response-actions .agent-cancel-action:hover { color: var(--ink); }
+.agent-search-settings { flex: 1; min-width: 0; }
+.agent-search-settings > summary { display: flex; align-items: center; gap: 0.45rem; width: fit-content; min-height: 36px; padding: 0.35rem 0.5rem; border-radius: 8px; color: var(--body); font-size: 0.75rem; cursor: pointer; list-style: none; }
+.agent-search-settings > summary::-webkit-details-marker { display: none; }
+.agent-search-settings > summary:hover { background: var(--canvas-soft-2); }
+.agent-search-settings > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.agent-search-mode { padding-left: 0.45rem; border-left: 1px solid var(--hairline-strong); color: var(--mute); font-size: 0.6875rem; }
+.agent-search-settings-body { display: grid; gap: 0.75rem; margin: 0.4rem 0.5rem; padding: 0.8rem; border: 1px solid var(--hairline); border-radius: 10px; background: var(--canvas-soft); }
+.agent-setting-option { display: flex; align-items: flex-start; gap: 0.6rem; cursor: pointer; }
+.agent-setting-option input { flex: none; width: 14px; height: 14px; margin: 3px 0 0; accent-color: var(--primary); }
+.agent-setting-option > span { min-width: 0; }
+.agent-setting-option strong { display: block; color: var(--body); font-size: 0.75rem; font-weight: 500; line-height: 1.5; }
+.agent-setting-option small { display: block; margin-top: 0.2rem; color: var(--mute); font-size: 0.6875rem; line-height: 1.5; }
+.agent-composer-toolbar { align-items: flex-start; }
+@media (max-width: 700px) {
+  .agent-response-header { grid-template-columns: auto minmax(0, 1fr); }
+  .agent-response-actions { grid-column: 2; justify-content: flex-start; }
+  .agent-search-settings-body { margin-inline: 0; padding: 0.65rem; }
+  .agent-search-mode { display: none; }
+}
+
+/* 检索方式互斥，使用原生单选组支持键盘切换；授权继续作为独立复选项。 */
+.agent-workflow-options { display: grid; gap: 0.65rem; min-width: 0; margin: 0; padding: 0 0 0.8rem; border: 0; border-bottom: 1px solid var(--hairline); }
+.agent-workflow-options legend { padding: 0 0 0.6rem; color: var(--ink); font-size: 0.75rem; font-weight: 600; }
+
+/* 多轮检索的长日志按需查看，限高滚动避免轮询追加时不断把结果向下推。 */
+.agent-retrieval-activity { display: grid; min-width: 0; gap: 0.75rem; margin-left: var(--agent-content-inset); }
+.agent-retrieval-notices { display: grid; gap: 0.5rem; }
+.agent-retrieval-notices:empty { display: none; }
+.agent-retrieval-notices > p { margin: 0; color: var(--mute); font-size: 0.75rem; line-height: 1.65; }
+.agent-retrieval-notices > [role="alert"] { padding: 0.75rem 0.9rem; font-size: 0.75rem; line-height: 1.65; }
+.agent-retrieval-log { min-width: 0; overflow: hidden; border: 1px solid var(--hairline); border-radius: 12px; background: var(--canvas); }
+.agent-retrieval-log > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem 0.8rem; min-height: 48px; padding: 0.75rem 0.9rem; cursor: pointer; list-style: none; }
+.agent-retrieval-log > summary::-webkit-details-marker { display: none; }
+.agent-retrieval-log > summary:hover { background: var(--canvas-soft); }
+.agent-retrieval-log > summary:focus-visible,
+.agent-retrieval-log-body:focus-visible { outline: 2px solid var(--ring); outline-offset: -3px; border-radius: 10px; }
+.agent-retrieval-log-heading { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--ink); font-size: 0.8125rem; font-weight: 600; }
+.agent-retrieval-log-heading > svg { color: var(--mute); }
+.agent-retrieval-log-state { flex: 1; min-width: 0; color: var(--body); font-size: 0.75rem; overflow-wrap: anywhere; }
+.agent-retrieval-log-count { color: var(--mute); font-size: 0.6875rem; font-variant-numeric: tabular-nums; }
+.agent-retrieval-log-toggle { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: auto; color: var(--mute); font-size: 0.6875rem; }
+.agent-retrieval-log-toggle svg { transition: transform 150ms ease; }
+.agent-retrieval-log[open] .agent-retrieval-log-toggle svg { transform: rotate(180deg); }
+.agent-retrieval-log-body { max-height: min(28rem, 55dvh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; border-top: 1px solid var(--hairline); padding: 0 1rem; }
+.agent-retrieval-log-section { display: grid; gap: 0.65rem; padding: 1rem 0; color: var(--body); font-size: 0.75rem; line-height: 1.75; overflow-wrap: anywhere; }
+.agent-retrieval-log-section + .agent-retrieval-log-section { border-top: 1px solid var(--hairline); }
+.agent-retrieval-log-section h3 { margin: 0; color: var(--ink); font-size: 0.75rem; font-weight: 600; }
+.agent-retrieval-log-section p { margin: 0; }
+.agent-retrieval-log-section > div { border-left: 2px solid var(--hairline-strong); padding-left: 0.75rem; }
+.agent-retrieval-log-section > div p + p { margin-top: 0.3rem; color: var(--mute); }
+.agent-retrieval-log-section strong { font-weight: 500; }
+@media (max-width: 640px) {
+  .agent-retrieval-log > summary { gap: 0.5rem; }
+  .agent-retrieval-log-state { flex-basis: calc(100% - 7rem); }
+  .agent-retrieval-log-count { padding-left: 1.3rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-retrieval-log-toggle svg { transition: none; }
+}

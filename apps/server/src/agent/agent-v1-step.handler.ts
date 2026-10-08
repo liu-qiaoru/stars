@@ -1,7 +1,8 @@
+import { agentSearchProgress } from './agent-search-progress.js'
 import { randomUUID } from 'node:crypto'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { Inject, Injectable, Optional } from '@nestjs/common'
-import { agentIntentSchema } from '@local-media-agent/shared/schemas'
+import { agentIntentSchema, retrievalSourceMatchSchema } from '@local-media-agent/shared/schemas'
 import { z } from 'zod'
 import { SETTINGS, type Settings } from '../config/settings.js'
 import { DATABASE } from '../database/database.module.js'
@@ -24,12 +25,16 @@ import {
 import { AgentStepExecutionError } from './agent.types.js'
 import type { AgentStepHandler, FrozenAgentCandidate, PreparedAgentStep } from './agent.types.js'
 import { AgentRuntimeConfigService } from './agent-runtime-config.service.js'
+import { AGENT_RERANK_POLICY } from './agent-rerank.policy.js'
+import { finishAgentTraceSpan, startAgentTraceSpan } from './agent-trace.repository.js'
 
 const supportedSearchMediaTypes = ['image', 'video', 'audio'] as const
 type SupportedSearchMediaType = (typeof supportedSearchMediaTypes)[number]
 
 const enforcedScopeSchema = z
   .object({
+    retrieval_agent: z.boolean().optional(),
+    search_scope: z.enum(['visual', 'spoken', 'all']).optional(),
     library_ids: z.array(z.string().uuid()),
     media_types: z.array(z.enum(['image', 'video', 'audio', 'document'])),
   })
@@ -81,6 +86,7 @@ const searchCandidateSchema = z
     primary_reason: z.enum(['vector_match', 'caption_match', 'transcript_match']),
     reasons: z.array(z.enum(['vector_match', 'caption_match', 'transcript_match'])),
     source_scores: z.record(z.string(), z.number()),
+    source_matches: z.array(retrievalSourceMatchSchema).max(3).optional(),
   })
   .passthrough()
 
@@ -99,7 +105,11 @@ export class AgentV1StepHandler implements AgentStepHandler {
     @Inject(SETTINGS) private readonly settings: Settings,
     @Inject(AGENT_INTENT_RUNNER) private readonly intentRunner: AgentIntentRunner,
     @Inject(SearchService) private readonly searchService: SearchService,
-    @Optional() private readonly runtimeConfig?: AgentRuntimeConfigService,
+    // tsx/esbuild 不生成 design:paramtypes 元数据,按类型注入会静默得到 undefined;
+    // 可选依赖同样必须显式 @Inject 类令牌(见 agent.service.ts 同类注释)。
+    @Optional()
+    @Inject(AgentRuntimeConfigService)
+    private readonly runtimeConfig?: AgentRuntimeConfigService,
   ) {}
 
   isReady() {
@@ -137,7 +147,7 @@ export class AgentV1StepHandler implements AgentStepHandler {
       .object({
         fields: z
           .array(z.string())
-          .length(2)
+          .min(2)
           .refine(
             (fields) =>
               fields.includes('user_prompt') && fields.includes('deidentified_capability_boundary'),
@@ -154,6 +164,7 @@ export class AgentV1StepHandler implements AgentStepHandler {
     const runnerInput = {
       userPrompt: input.prompt,
       capabilityBoundary: {
+        ...(scope.search_scope ? { enforcedSearchScope: scope.search_scope } : {}),
         // 只发送媒体类型能力和“是否有硬素材库范围”这一布尔值；不发送 UUID 或名称。
         allowedMediaTypes: scope.media_types.length
           ? scope.media_types
@@ -177,6 +188,12 @@ export class AgentV1StepHandler implements AgentStepHandler {
           enforced_scope: enforcedScope,
           provider: validated.provider,
         }
+        // 模型提取的短条件可能遗漏动作、位置或排除词。保留完整原文作为组合条件锚点，
+        // 让每次 finish 都要报告整体目标的不确定性；不是用字符串校验证明语义正确。
+        if (scope.retrieval_agent && !outputJson.conditions.some(condition => condition.source_text === input.prompt))
+          outputJson.conditions.push({ condition_id: randomUUID(), source_text: input.prompt,
+            normalized_source_text: input.prompt, kind: 'must_have',
+            evidence_type: enforcedScope.search_scope === 'spoken' ? 'spoken' : 'visual' })
         if (validated.intent.needs_clarification) {
           return {
             transition: {
@@ -230,18 +247,49 @@ export class AgentV1StepHandler implements AgentStepHandler {
     return {
       external: false,
       execute: async () => {
-        // query 保持用户提交的完整原文；original 明确绕过 DeepSeek 查询扩展，rrf 固定排序。
-        const response = await this.searchService.search({
-          query: input.prompt,
-          query_expansion_mode: 'original',
-          ranking_mode: 'rrf',
-          search_scope: intentOutput.enforced_scope.search_scope,
-          media_types: intentOutput.enforced_scope.media_types,
-          library_ids: intentOutput.enforced_scope.library_ids,
-          limit: 20,
-          offset: 0,
-          include_diagnostics: false,
+        const trace = await startAgentTraceSpan(this.db, {
+          runId: input.runId,
+          component: 'search-service',
+          operation: 'hybrid_search',
+          requestSummaryJson: {
+            query_length: [...input.prompt].length,
+            ranking_mode: 'rrf',
+            limit: AGENT_RERANK_POLICY.maximumCandidateCount,
+            search_scope: intentOutput.enforced_scope.search_scope,
+            media_types: intentOutput.enforced_scope.media_types,
+            library_count: intentOutput.enforced_scope.library_ids.length,
+          },
         })
+        // query 保持用户提交的完整原文；original 明确绕过 DeepSeek 查询扩展，rrf 固定排序。
+        let response: Awaited<ReturnType<SearchService['search']>>
+        try {
+          response = await this.searchService.search({
+            query: input.prompt,
+            query_expansion_mode: 'original',
+            ranking_mode: 'rrf',
+            search_scope: intentOutput.enforced_scope.search_scope,
+            media_types: intentOutput.enforced_scope.media_types,
+            library_ids: intentOutput.enforced_scope.library_ids,
+            limit: AGENT_RERANK_POLICY.maximumCandidateCount,
+            offset: 0,
+            include_diagnostics: false,
+          }, { onProgress: agentSearchProgress(this.db, input) })
+          await finishAgentTraceSpan(this.db, {
+            runId: input.runId,
+            spanId: trace.spanId,
+            status: 'succeeded',
+            responseSummaryJson: { candidate_count: response.results.length },
+          })
+        } catch (error) {
+          await finishAgentTraceSpan(this.db, {
+            runId: input.runId,
+            spanId: trace.spanId,
+            status: 'failed',
+            errorCode: 'AGENT_SEARCH_FAILED',
+            errorMessage: 'SearchService 检索失败。',
+          })
+          throw error
+        }
         const candidates = await this.freezeCandidates(
           response.results,
           intentOutput.enforced_scope,
@@ -249,24 +297,47 @@ export class AgentV1StepHandler implements AgentStepHandler {
         const expectsExport =
           intentOutput.intent.goal === 'export_clip' &&
           intentOutput.intent.requested_effect?.type === 'export_clip'
+        if (!candidates.length) {
+          // 没有候选就没有可交给模型比较的内容。此时以“成功但结果为空”结束，不能伪造
+          // Rerank，也不能让导出流程等待一个永远不存在的选择。
+          return {
+            transition: { status: 'succeeded' as const },
+            outputJson: {
+              candidate_count: 0,
+              enforced_scope: intentOutput.enforced_scope,
+            },
+            candidates,
+          }
+        }
         return {
-          transition: expectsExport
-            ? {
-                status: 'waiting_for_export_selection',
-                waitingStepId: randomUUID(),
-                waitingExpiresAt: new Date(
+          // RRF 只完成多通道融合，非空结果必须进入 ranking 等待产品 Rerank；普通 API
+          // 在父 run 离开该状态前不得把 RRF 候选当成最终结果返回给用户。
+          transition: {
+            status: 'ranking' as const,
+            nextStep: 'reranking' as const,
+            // 导出选择只在 Rerank 成功后对用户开放，但等待身份和过期时间先随搜索事务
+            // 冻结，避免精排跨 Server 重启后无法恢复原来的交互期限。
+            waitingStepId: expectsExport ? randomUUID() : undefined,
+            waitingExpiresAt: expectsExport
+              ? new Date(
                   Date.now() +
                     (this.runtimeConfig?.values().waiting_ttl_seconds ??
                       this.settings.agentWaitingTtlSeconds) *
                       1000,
-                ),
-              }
-            : { status: 'succeeded' },
+                )
+              : undefined,
+          },
           outputJson: {
             candidate_count: candidates.length,
             enforced_scope: intentOutput.enforced_scope,
           },
           candidates,
+          rerankAttempt: {
+            attemptNo: 1,
+            completionStatus: expectsExport ? 'waiting_for_export_selection' : 'succeeded',
+            protocolVersion: AGENT_RERANK_POLICY.protocolVersion,
+            maxCostCny: AGENT_RERANK_POLICY.maximumCostCny,
+          },
         }
       },
     }
@@ -285,6 +356,9 @@ export class AgentV1StepHandler implements AgentStepHandler {
     enforced: z.infer<typeof enforcedScopeSchema>,
   ) {
     const intent = validated.intent
+    // 显式范围来自客户端/冻结验收输入，不是模型意见；不相等时停止，不能改写成另一种检索。
+    if (enforced.search_scope && intent.search_scope !== enforced.search_scope)
+      failStep('AGENT_SCOPE_EXCEEDED', '模型意图改变了明确选择的检索范围。')
     const allowedByScope: Record<typeof intent.search_scope, SupportedSearchMediaType[]> = {
       visual: ['image', 'video'],
       spoken: ['audio', 'video'],
@@ -359,7 +433,7 @@ export class AgentV1StepHandler implements AgentStepHandler {
     return [...new Set(resolved)]
   }
 
-  private async loadCommittedIntent(runId: string) {
+  async loadCommittedIntent(runId: string) {
     const [row] = await this.db
       .select({ outputJson: agentRunSteps.outputJson })
       .from(agentRunSteps)
@@ -379,7 +453,7 @@ export class AgentV1StepHandler implements AgentStepHandler {
     return parsed.data
   }
 
-  private async freezeCandidates(
+  async freezeCandidates(
     rawResults: unknown[],
     enforcedScope: z.infer<typeof storedIntentOutputSchema>['enforced_scope'],
   ): Promise<FrozenAgentCandidate[]> {
@@ -473,6 +547,7 @@ export class AgentV1StepHandler implements AgentStepHandler {
           reasons: candidate.reasons,
           source_scores: candidate.source_scores,
           best_frame_time_seconds: candidate.best_frame_time_seconds,
+          source_matches: candidate.source_matches,
         },
       }
     })

@@ -31,6 +31,16 @@ function candidate(
 }
 
 describe('RRF production search adapter', () => {
+  test('preserves the winning visual frame and actual caption asset separately after image identity folding', () => {
+    const [result] = buildRrfSearchResults([
+      candidate({ asset_id: 'source-image', source_signal: 'visual', media_type: 'image', scene_id: null }),
+      candidate({ asset_id: 'source-image', evidence_asset_id: 'caption-evidence', source_signal: 'caption', media_type: 'image', scene_id: null }),
+    ], { limit: 20, offset: 0, includeDiagnostics: false })
+    expect(result?.source_matches).toEqual([
+      { asset_id: 'source-image', source: 'vector_match', frame_time_seconds: null },
+      { asset_id: 'caption-evidence', source: 'caption_match', frame_time_seconds: null },
+    ])
+  })
   test('merges visual and Caption evidence by stable video scene identity', () => {
     const results = buildRrfSearchResults(
       [

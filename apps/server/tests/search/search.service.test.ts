@@ -884,3 +884,19 @@ describe('search service', () => {
     expect(result.results).toEqual([])
   })
 })
+
+test('搜索完成前发出真实召回与 RRF 阶段，空结果也正常结束', async () => {
+  const onProgress = vi.fn().mockResolvedValue(undefined)
+  const result = await service.search({ query: 'no matching audio', search_scope: 'spoken' }, { onProgress })
+  expect(result.results).toEqual([])
+  expect(onProgress.mock.calls).toEqual([
+    ['retrieving', 'running'], ['retrieving', 'succeeded'], ['rrf', 'running'], ['rrf', 'succeeded'],
+  ])
+})
+
+test('检索失败记录失败阶段，不伪造 RRF 已执行', async () => {
+  const onProgress = vi.fn().mockResolvedValue(undefined)
+  embedText.mockRejectedValueOnce(new Error('embedding unavailable'))
+  await expect(service.search({ query: 'sunset', search_scope: 'visual' }, { onProgress })).rejects.toThrow()
+  expect(onProgress.mock.calls).toEqual([['retrieving', 'running'], ['retrieving', 'failed']])
+})

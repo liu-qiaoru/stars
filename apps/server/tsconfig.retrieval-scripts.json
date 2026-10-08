@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "scripts/accept-retrieval-quality.ts",
+    "scripts/explore-retrieval-queries.ts",
+    "scripts/prepare-sofa-phone-review.ts",
+    "scripts/prepare-sofa-phone-rerank.ts",
+    "scripts/report-sofa-phone-local-quality.ts",
+    "scripts/report-sofa-phone-final-quality.ts",
+    "scripts/report-retrieval-quality.ts",
+    "scripts/compile-retrieval-qualification.ts",
+    "scripts/prepare-retrieval-supplement.ts",
+    "scripts/prepare-retrieval-supplement-review.ts",
+    "scripts/prepare-retrieval-supplement-rerank.ts",
+    "scripts/verify-retrieval-frozen.ts",
+    "scripts/audit-retrieval-evidence.ts",
+    "scripts/prepare-human-target-proposal.ts",
+    "scripts/probe-rightapi-deepseek.ts"
+  ]
+}

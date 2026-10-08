@@ -7,15 +7,12 @@ import {
   createAgentRunInputSchema,
   resumeAgentRunInputSchema,
   retryUnknownAgentRunInputSchema,
-  startAgentRerankInputSchema,
-  agentRerankFeedbackInputSchema,
 } from '@local-media-agent/shared/schemas'
 import { AgentService } from './agent.service.js'
 import {
   AgentRuntimeConfigService,
   type EditableAgentConfig,
 } from './agent-runtime-config.service.js'
-import { AgentRerankService } from './agent-rerank.service.js'
 
 /** Agent V1 HTTP API：Controller 只转发请求；执行、确认守卫与配置校验均由领域服务完成。 */
 @Controller('agent')
@@ -23,7 +20,6 @@ export class AgentController {
   constructor(
     @Inject(AgentService) private readonly agentService: AgentService,
     @Inject(AgentRuntimeConfigService) private readonly runtimeConfig: AgentRuntimeConfigService,
-    @Inject(AgentRerankService) private readonly rerankService: AgentRerankService,
   ) {}
 
   @Get('capabilities')
@@ -49,24 +45,6 @@ export class AgentController {
   @Get('runs/:id')
   getRun(@Param('id') id: string) {
     return this.agentService.getRun(id)
-  }
-
-  @Post('runs/:id/rerank')
-  startRerank(@Param('id') id: string, @Body() body: z.input<typeof startAgentRerankInputSchema>) {
-    return this.rerankService.start(id, body)
-  }
-
-  @Get('runs/:id/rerank')
-  getRerank(@Param('id') id: string) {
-    return this.rerankService.getForAgentRun(id)
-  }
-
-  @Put('rerank-runs/:id/feedback')
-  saveRerankFeedback(
-    @Param('id') id: string,
-    @Body() body: z.input<typeof agentRerankFeedbackInputSchema>,
-  ) {
-    return this.rerankService.saveFeedback(id, body)
   }
 
   @Post('runs/:id/resume')

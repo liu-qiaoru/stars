@@ -1,12 +1,21 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import type { AgentNextStep, AgentRunStatus, FrozenAgentCandidate } from './agent.types.js'
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import type {
+  AgentNextStep,
+  AgentRunStatus,
+  FrozenAgentCandidate,
+  FrozenAgentRerankAttempt,
+} from './agent.types.js'
+import { AGENT_RERANK_POLICY } from './agent-rerank.policy.js'
+import type { RetrievalDecisionDiagnostics } from './retrieval-decision.diagnostics.js'
 import type { Database } from '../database/repositories.js'
 import {
   agentRunAuthorizations,
   agentRunCandidates,
   agentRunEvents,
   agentRunInputs,
+  agentRerankRankings,
+  agentRerankRuns,
   agentRunSteps,
   agentRuns,
   agentSideEffects,
@@ -19,8 +28,11 @@ import {
 const CLAIMABLE_STATUSES: AgentRunStatus[] = ['queued', 'extracting_intent', 'searching']
 
 const ALLOWED_EXECUTOR_TRANSITIONS: Partial<Record<AgentRunStatus, AgentRunStatus[]>> = {
-  extracting_intent: ['searching', 'waiting_for_user_input', 'failed', 'timed_out'],
+  extracting_intent: ['extracting_intent', 'searching', 'waiting_for_user_input', 'failed', 'timed_out'],
   searching: [
+    'searching',
+    'waiting_for_user_input',
+    'ranking',
     'waiting_for_export_selection',
     'succeeded',
     'failed',
@@ -96,8 +108,13 @@ export async function createDurableAgentRun(
     prompt: string
     allowExternalText: boolean
     allowExternalVisual: boolean
+    retrievalAgent?: boolean
+    allowExternalMediaText?: boolean
+    allowExternalSceneVisual?: boolean
+    allowExternalRetrievalVisual?: boolean
     libraryIds: string[]
     mediaTypes: string[]
+    searchScope?: 'visual' | 'spoken' | 'all'
   },
   now = new Date(),
 ) {
@@ -112,6 +129,8 @@ export async function createDurableAgentRun(
         prompt: input.prompt,
         nextStep: 'extracting_intent',
         enforcedScopeJson: {
+          ...(input.retrievalAgent ? { retrieval_agent: true } : {}),
+          ...(input.searchScope ? { search_scope: input.searchScope } : {}),
           library_ids: input.libraryIds,
           media_types: input.mediaTypes,
         },
@@ -127,15 +146,16 @@ export async function createDurableAgentRun(
       allowExternalText: input.allowExternalText,
       allowExternalVisual: input.allowExternalVisual,
       textScopeJson: input.allowExternalText
-        ? { fields: ['user_prompt', 'deidentified_capability_boundary'] }
+        ? { fields: ['user_prompt', 'deidentified_capability_boundary', ...(input.allowExternalMediaText ? ['retrieval_evidence_text'] : [])] }
         : { fields: [] },
-      visualScopeJson: input.allowExternalVisual
+      visualScopeJson: { ...(input.allowExternalVisual
         ? {
-            fields: ['full_user_query', 'rrf_top20_derived_pngs'],
-            maximum_image_count: 20,
-            protocol_version: 'qwen3-vl-rerank-top20-v1',
+            fields: ['full_user_query', 'retrieval_candidate_derived_images'],
+            maximum_image_count: AGENT_RERANK_POLICY.maximumCandidateCount,
+            protocol_version: AGENT_RERANK_POLICY.protocolVersion,
           }
-        : { fields: [] },
+        : { fields: [] }), scene_inspection: { allowed: input.allowExternalSceneVisual ?? false, provider: 'rightapi', model: 'deepseek-v4-flash', maximum_candidates: 3, maximum_frames_per_candidate: 3 },
+        retrieval_evidence: { allowed: input.allowExternalRetrievalVisual ?? false, provider: 'rightapi', model: 'deepseek-v4-flash', maximum_candidates: 20, maximum_frames_per_candidate: 1, protocol: 'matched-multimodal-v1' } },
       grantedAt: now,
     })
     await tx.insert(agentRunEvents).values({
@@ -146,6 +166,8 @@ export async function createDurableAgentRun(
         next_step: 'extracting_intent',
         external_text_authorized: input.allowExternalText,
         external_visual_authorized: input.allowExternalVisual,
+        external_scene_visual_authorized: input.allowExternalSceneVisual ?? false,
+        external_retrieval_visual_authorized: input.allowExternalRetrievalVisual ?? false,
       },
       createdAt: now,
     })
@@ -340,6 +362,7 @@ export async function commitAgentStep(
     }
     outputJson: unknown
     candidates?: FrozenAgentCandidate[]
+    rerankAttempt?: FrozenAgentRerankAttempt
   },
   now = new Date(),
 ) {
@@ -357,6 +380,30 @@ export async function commitAgentStep(
     throw new Error(
       'waiting_for_user_input requires waitingStepId, waitingExpiresAt and nextStep=searching',
     )
+  }
+  const entersRanking = input.transition.status === 'ranking'
+  if (
+    entersRanking &&
+    (input.transition.nextStep !== 'reranking' ||
+      !input.rerankAttempt ||
+      !input.candidates?.length ||
+      input.candidates.length > AGENT_RERANK_POLICY.maximumCandidateCount)
+  ) {
+    throw new Error(
+      `ranking requires nextStep=reranking, 1-${AGENT_RERANK_POLICY.maximumCandidateCount} candidates and one Rerank attempt`,
+    )
+  }
+  if (!entersRanking && input.rerankAttempt) {
+    throw new Error('Rerank attempt can only be created while entering ranking')
+  }
+  if (
+    input.rerankAttempt &&
+    (!Number.isInteger(input.rerankAttempt.attemptNo) ||
+      input.rerankAttempt.attemptNo < 1 ||
+      input.rerankAttempt.protocolVersion !== AGENT_RERANK_POLICY.protocolVersion ||
+      input.rerankAttempt.maxCostCny !== AGENT_RERANK_POLICY.maximumCostCny)
+  ) {
+    throw new Error('Rerank attempt does not match the fixed Agent product policy')
   }
   return db.transaction(async (transaction) => {
     const tx = transaction as Database
@@ -419,9 +466,9 @@ export async function commitAgentStep(
       throw new Error('Claimed Agent step disappeared before commit')
     }
     if (input.candidates?.length) {
-      // 候选快照与 searching → succeeded 使用同一个事务。任何候选身份不完整、唯一键
-      // 冲突或外键错误都会回滚 run 状态，绝不留下“成功但候选只写了一部分”的事实。
-      await tx.insert(agentRunCandidates).values(
+      // 状态与候选同事务提交。多轮搜索重复身份保留首次快照，每轮来源仍在步骤输出；
+      // legacy 保持原有唯一键冲突即失败的行为，不静默掩盖其错误。
+      const insertCandidates = tx.insert(agentRunCandidates).values(
         input.candidates.map((candidate) => ({
           id: randomUUID(),
           runId: input.runId,
@@ -439,6 +486,25 @@ export async function commitAgentStep(
           createdAt: now,
         })),
       )
+      if ((run.enforcedScopeJson as { retrieval_agent?: boolean }).retrieval_agent) {
+        await insertCandidates.onConflictDoNothing({ target: [agentRunCandidates.runId, agentRunCandidates.candidateKey] })
+      } else await insertCandidates
+    }
+    if (input.rerankAttempt) {
+      // Rerank 行与候选及 searching → ranking 状态在同一事务中提交。只要任一写入失败，
+      // 三者都会一起回滚，因此后台不会看到一个缺少完整候选快照的可执行精排任务。
+      await tx.insert(agentRerankRuns).values({
+        id: randomUUID(),
+        agentRunId: input.runId,
+        attemptNo: input.rerankAttempt.attemptNo,
+        completionStatus: input.rerankAttempt.completionStatus,
+        protocolVersion: input.rerankAttempt.protocolVersion,
+        maxCostCny: String(input.rerankAttempt.maxCostCny),
+        status: 'preparing_evidence',
+        externalCallStatus: 'not_dispatched',
+        createdAt: now,
+        updatedAt: now,
+      })
     }
     await tx.insert(agentRunEvents).values({
       id: randomUUID(),
@@ -447,6 +513,7 @@ export async function commitAgentStep(
       payloadJson: {
         step_attempt_id: input.stepAttemptId,
         next_status: input.transition.status,
+        rerank_attempt_no: input.rerankAttempt?.attemptNo,
       },
       createdAt: now,
     })
@@ -469,6 +536,8 @@ export async function commitAgentStepFailure(
     errorCode: string
     errorMessage: string
     outcomeUnknown: boolean
+    /** 仅接收 Runner 生成的安全摘要，保存在现有步骤 JSON 中，无需新增数据表。 */
+    diagnostics?: RetrievalDecisionDiagnostics
   },
   now = new Date(),
 ) {
@@ -500,6 +569,11 @@ export async function commitAgentStepFailure(
       .returning()
     if (!run) return undefined
 
+    // 错误事件与终态原子提交。只引用已提交的基线快照，绝不为保底重放模型/搜索。
+    const priorSteps = await tx.select({ output: agentRunSteps.outputJson }).from(agentRunSteps)
+      .where(and(eq(agentRunSteps.runId, input.runId), eq(agentRunSteps.status, 'completed')))
+      .orderBy(asc(agentRunSteps.createdAt))
+    const baselineAvailable = priorSteps.some(row => Boolean((row.output as { retrieval_state?: { baseline?: unknown } } | null)?.retrieval_state?.baseline))
     const [step] = await tx
       .update(agentRunSteps)
       .set({
@@ -512,6 +586,7 @@ export async function commitAgentStepFailure(
         errorCode: input.errorCode,
         errorMessage: input.errorMessage,
         finishedAt: now,
+        ...(input.diagnostics ? { outputJson: { diagnostics: input.diagnostics } } : {}),
         updatedAt: now,
       })
       .where(
@@ -530,6 +605,8 @@ export async function commitAgentStepFailure(
       payloadJson: {
         step_attempt_id: input.stepAttemptId,
         error_code: input.errorCode,
+        ...(baselineAvailable ? { result_mode: 'baseline', fallback_reason: input.outcomeUnknown ? 'external_outcome_unknown' : 'step_failed',
+          final_rerank_status: 'not_completed' } : {}),
       },
       createdAt: now,
     })
@@ -776,14 +853,15 @@ export async function resumeWaitingAgentRun(
     waitingStepId: string
     clientRequestId: string
     response: string
+    allowExternalMediaText?: boolean
+    allowExternalSceneVisual?: boolean
+    allowExternalRetrievalVisual?: boolean
+    allowExternalVisual?: boolean
   },
   now = new Date(),
 ): Promise<UserInputResult> {
-  // Phase B 不让模型在澄清后重新解释自由文本。唯一固定动作表示用户明确接受 Server
-  // 已解析并展示的安全范围；其他文本无法可靠改变旧 AgentIntent，因此直接拒绝。
-  if (input.response !== 'continue_as_read_only_search_with_resolved_scope') {
-    return { kind: 'invalid_state' }
-  }
+  // 新流程保存真实用户回答；legacy 的固定恢复动作在读取 workflow 后继续单独约束。
+  if (!input.response.trim() || [...input.response].length > 2000) return { kind: 'invalid_state' }
   const [existingInput] = await db
     .select()
     .from(agentRunInputs)
@@ -809,6 +887,8 @@ export async function resumeWaitingAgentRun(
 
   const [current] = await db.select().from(agentRuns).where(eq(agentRuns.id, input.runId)).limit(1)
   if (!current) return { kind: 'not_found' }
+  const retrievalAgent = (current.enforcedScopeJson as { retrieval_agent?: boolean }).retrieval_agent === true
+  if (!retrievalAgent && input.response !== 'continue_as_read_only_search_with_resolved_scope') return { kind: 'invalid_state' }
   if (current.status !== 'waiting_for_user_input') return { kind: 'invalid_state' }
   if (current.waitingStepId !== input.waitingStepId) return { kind: 'step_mismatch' }
   if (!current.waitingExpiresAt || current.waitingExpiresAt <= now) {
@@ -841,7 +921,7 @@ export async function resumeWaitingAgentRun(
         waitingStepId: input.waitingStepId,
         clientRequestId: input.clientRequestId,
         inputType: 'clarification',
-        responseJson: { response: input.response },
+        responseJson: { response: input.response, ...(input.allowExternalRetrievalVisual === undefined ? {} : { allow_external_retrieval_visual: input.allowExternalRetrievalVisual }), ...(input.allowExternalSceneVisual === undefined ? {} : { allow_external_scene_visual: input.allowExternalSceneVisual }), ...(input.allowExternalMediaText === undefined ? {} : { allow_external_media_text: input.allowExternalMediaText }), ...(input.allowExternalVisual === undefined ? {} : { allow_external_visual: input.allowExternalVisual }) },
         createdAt: now,
       })
       .onConflictDoNothing()
@@ -873,8 +953,7 @@ export async function resumeWaitingAgentRun(
       .update(agentRuns)
       .set({
         status: 'queued',
-        // 固定澄清动作只确认使用已持久化的 resolved_scope；恢复继续搜索且不再次外发
-        // 用户原文。自由文本在事务前已拒绝，因此不会被保存后静默忽略。
+        // 恢复已保存状态：新流程下次决策会读取回答；legacy 仍继续固定只读搜索。
         nextStep: 'searching',
         waitingStepId: null,
         waitingExpiresAt: null,
@@ -894,6 +973,24 @@ export async function resumeWaitingAgentRun(
       .returning()
     if (!run) {
       throw new Error('Agent waiting state changed while clarification was being saved')
+    }
+    // 授权是用户单独勾选的事实；自由文本中提到授权不生效。
+    if (retrievalAgent && input.allowExternalMediaText !== undefined) {
+      await tx.update(agentRunAuthorizations).set({ textScopeJson: { fields: ['user_prompt', 'deidentified_capability_boundary', ...(input.allowExternalMediaText ? ['retrieval_evidence_text'] : [])] } }).where(eq(agentRunAuthorizations.runId, input.runId))
+    }
+    if (retrievalAgent && (input.allowExternalVisual !== undefined || input.allowExternalSceneVisual !== undefined || input.allowExternalRetrievalVisual !== undefined)) {
+      const [prior] = await tx.select().from(agentRunAuthorizations).where(eq(agentRunAuthorizations.runId, input.runId)).limit(1)
+      const oldScope = prior?.visualScopeJson as Record<string, unknown> ?? {}
+      // 与恢复状态同事务写入，重排服务不能看到“已恢复但授权尚未保存”的中间状态。
+      await tx.update(agentRunAuthorizations).set({
+        allowExternalVisual: input.allowExternalVisual ?? prior?.allowExternalVisual ?? false,
+        visualScopeJson: { ...(input.allowExternalVisual === undefined ? oldScope : input.allowExternalVisual
+          ? { fields: ['full_user_query', 'retrieval_candidate_derived_images'],
+            maximum_image_count: AGENT_RERANK_POLICY.maximumCandidateCount,
+            protocol_version: AGENT_RERANK_POLICY.protocolVersion } : { fields: [] }),
+          retrieval_evidence: input.allowExternalRetrievalVisual === undefined ? oldScope.retrieval_evidence ?? { allowed: false } : { allowed: input.allowExternalRetrievalVisual, provider: 'rightapi', model: 'deepseek-v4-flash', maximum_candidates: 20, maximum_frames_per_candidate: 1, protocol: 'matched-multimodal-v1' },
+          scene_inspection: input.allowExternalSceneVisual === undefined ? oldScope.scene_inspection ?? { allowed: false } : { allowed: input.allowExternalSceneVisual, provider: 'rightapi', model: 'deepseek-v4-flash', maximum_candidates: 3, maximum_frames_per_candidate: 3 } },
+      }).where(eq(agentRunAuthorizations.runId, input.runId))
     }
     await tx.insert(agentRunEvents).values({
       id: randomUUID(),
@@ -940,6 +1037,8 @@ export async function cancelDurableAgentRun(
     'waiting_for_export_selection',
     'waiting_for_confirmation',
     'outcome_unknown',
+    // 重排由独立执行器推进，无当前检索步骤需要释放；取消父任务阻止后续外发/复活。
+    'ranking',
   ].includes(current.status)
   if (!immediatelyCancellable && !['extracting_intent', 'searching'].includes(current.status)) {
     return { kind: 'invalid_state' }
@@ -1128,43 +1227,57 @@ export async function selectAgentExport(
     if (!run.waitingExpiresAt || run.waitingExpiresAt <= now) return { kind: 'expired' as const }
 
     const [candidate] = await tx
-      .select()
+      .select({ candidate: agentRunCandidates })
       .from(agentRunCandidates)
+      .innerJoin(
+        agentRerankRankings,
+        eq(agentRerankRankings.candidateId, agentRunCandidates.id),
+      )
+      .innerJoin(
+        agentRerankRuns,
+        and(
+          eq(agentRerankRuns.id, agentRerankRankings.rerankRunId),
+          eq(agentRerankRuns.agentRunId, input.runId),
+          eq(agentRerankRuns.status, 'succeeded'),
+        ),
+      )
       .where(
         and(
           eq(agentRunCandidates.runId, input.runId),
           eq(agentRunCandidates.candidateKey, input.candidateKey),
+          isNotNull(agentRerankRankings.rerankRank),
         ),
       )
       .limit(1)
     if (!candidate) return { kind: 'candidate_invalid' as const }
+    const selectedCandidate = candidate.candidate
     if (
-      !candidate.sceneId ||
-      candidate.sceneStartSeconds === null ||
-      candidate.sceneEndSeconds === null
+      !selectedCandidate.sceneId ||
+      selectedCandidate.sceneStartSeconds === null ||
+      selectedCandidate.sceneEndSeconds === null
     ) {
       return { kind: 'candidate_invalid' as const }
     }
     const [file] = await tx
       .select()
       .from(mediaFiles)
-      .where(and(eq(mediaFiles.id, candidate.fileId), isNull(mediaFiles.deletedAt)))
+      .where(and(eq(mediaFiles.id, selectedCandidate.fileId), isNull(mediaFiles.deletedAt)))
       .limit(1)
     const [scene] = await tx
       .select()
       .from(videoScenes)
-      .where(eq(videoScenes.id, candidate.sceneId))
+      .where(eq(videoScenes.id, selectedCandidate.sceneId))
       .limit(1)
     const scope = parseScope(run.enforcedScopeJson)
-    const sceneStart = Number(candidate.sceneStartSeconds)
-    const sceneEnd = Number(candidate.sceneEndSeconds)
+    const sceneStart = Number(selectedCandidate.sceneStartSeconds)
+    const sceneEnd = Number(selectedCandidate.sceneEndSeconds)
     if (
       !file ||
       file.mediaType !== 'video' ||
-      file.indexGeneration !== candidate.fileGeneration ||
+      file.indexGeneration !== selectedCandidate.fileGeneration ||
       !scene ||
       scene.fileId !== file.id ||
-      scene.indexGeneration !== candidate.fileGeneration ||
+      scene.indexGeneration !== selectedCandidate.fileGeneration ||
       Number(scene.startTimeSeconds) !== sceneStart ||
       Number(scene.endTimeSeconds) !== sceneEnd
     ) {
@@ -1191,7 +1304,7 @@ export async function selectAgentExport(
     const waitingStepId = randomUUID()
     const effectId = randomUUID()
     const preview: ExportPreview = {
-      candidate_key: candidate.candidateKey,
+      candidate_key: selectedCandidate.candidateKey,
       file_id: file.id,
       file_generation: file.indexGeneration,
       scene_id: scene.id,
@@ -1245,7 +1358,10 @@ export async function selectAgentExport(
       runId: input.runId,
       eventType: 'export_selection_saved',
       toolCallId,
-      payloadJson: { waiting_step_id: waitingStepId, candidate_key: candidate.candidateKey },
+      payloadJson: {
+        waiting_step_id: waitingStepId,
+        candidate_key: selectedCandidate.candidateKey,
+      },
       createdAt: now,
     })
     return { kind: 'accepted' as const, run: updatedRun, toolCallId, waitingStepId, preview }

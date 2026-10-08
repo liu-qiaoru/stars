@@ -1,3 +1,5 @@
+import { chatCompletionsUrl, chatRequest, chatResponse } from './rightapi-chat.protocol.js'
+import { retrievalModel, retrievalResponseModelMatches } from './retrieval-model.policy.js'
 import { createHash } from 'node:crypto'
 import { Inject, Injectable, Optional } from '@nestjs/common'
 import { agentIntentSchema } from '@local-media-agent/shared/schemas'
@@ -29,6 +31,7 @@ export interface AgentIntentRequest {
   capabilityBoundary: {
     allowedMediaTypes: AgentMediaType[]
     hasEnforcedLibraryScope: boolean
+    enforcedSearchScope?: 'visual' | 'spoken' | 'all'
   }
 }
 
@@ -141,7 +144,12 @@ export const AGENT_INTENT_INPUT_SCHEMA = {
     },
     needs_clarification: { type: 'boolean' },
     clarification_reason: {
-      anyOf: [{ type: 'string', minLength: 1, maxLength: 500 }, { type: 'null' }],
+      // 渠道实测会省略值为 null 的字段；在线协议显式用非空标记，落库仍为共享 Schema 的 null。
+      type: 'string',
+      description:
+        'Use NOT_NEEDED when needs_clarification is false; otherwise provide the question.',
+      minLength: 1,
+      maxLength: 500,
     },
     requested_effect: {
       anyOf: [
@@ -163,7 +171,11 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
     @Inject(SETTINGS) private readonly settings: Settings,
     @Inject(AGENT_INTENT_HTTP_CLIENT)
     private readonly request: typeof fetch,
-    @Optional() private readonly runtimeConfig?: AgentRuntimeConfigService,
+    // tsx/esbuild 不生成 design:paramtypes 元数据,按类型注入会静默得到 undefined;
+    // 可选依赖同样必须显式 @Inject 类令牌(见 agent.service.ts 同类注释)。
+    @Optional()
+    @Inject(AgentRuntimeConfigService)
+    private readonly runtimeConfig?: AgentRuntimeConfigService,
   ) {}
 
   isReady() {
@@ -198,14 +210,15 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
     try {
       response = await this.request(this.messagesUrl(), {
         method: 'POST',
+        redirect: 'error',
         headers: {
           'content-type': 'application/json',
-          'x-api-key': this.settings.rightCodeApiKey!,
-          'anthropic-version': '2023-06-01',
+          Authorization: `Bearer ${this.settings.rightCodeApiKey!}`,
         },
         body: JSON.stringify(this.requestBody(input)),
         signal: AbortSignal.timeout(
-          this.runtimeConfig?.values().tool_timeout_ms ?? this.settings.agentToolTimeoutMs,
+          // 意图识别也是外部模型请求，和多轮决策一起使用独立模型时限。
+          this.runtimeConfig?.values().model_timeout_ms ?? this.settings.agentModelTimeoutMs ?? 60_000,
         ),
       })
     } catch {
@@ -217,8 +230,9 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
     }
     if (!response.ok) {
       throw new AgentIntentRunnerError(
-        'AGENT_INTENT_HTTP_ERROR',
+        response.status === 429 ? 'AGENT_INTENT_RATE_LIMITED' : 'AGENT_INTENT_HTTP_ERROR',
         `RightAPI AgentIntent 请求返回 HTTP ${response.status}。`,
+        response.status >= 500,
       )
     }
 
@@ -235,7 +249,7 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
     }
     let raw: unknown
     try {
-      raw = JSON.parse(responseText)
+      raw = chatResponse(JSON.parse(responseText))
     } catch {
       throw new AgentIntentRunnerError(
         'AGENT_INTENT_RESPONSE_INVALID',
@@ -246,7 +260,7 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
     if (
       !parsedResponse.success ||
       parsedResponse.data.stop_reason !== 'tool_use' ||
-      parsedResponse.data.model !== AGENT_INTENT_MODEL
+      !retrievalResponseModelMatches(retrievalModel(this.settings), parsedResponse.data.model)
     ) {
       throw new AgentIntentRunnerError(
         'AGENT_INTENT_RESPONSE_INVALID',
@@ -266,7 +280,15 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
         'AgentIntent 响应工具名或工具结构不符合协议。',
       )
     }
-    const parsedIntent = agentIntentSchema.safeParse(toolUse.data.input)
+    // 仅转换协议定义的明确标记；缺失字段仍会被拒绝，不能默默补全模型输出。
+    const toolInput = toolUse.data.input as Record<string, unknown>
+    const normalizedInput =
+      toolInput &&
+      toolInput.needs_clarification === false &&
+      toolInput.clarification_reason === 'NOT_NEEDED'
+        ? { ...toolInput, clarification_reason: null }
+        : toolInput
+    const parsedIntent = agentIntentSchema.safeParse(normalizedInput)
     if (!parsedIntent.success) {
       throw new AgentIntentRunnerError(
         'AGENT_INTENT_SCHEMA_INVALID',
@@ -301,23 +323,23 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
   }
 
   private messagesUrl() {
-    const base = this.settings.rightCodeBaseUrl!.replace(/\/+$/, '')
-    if (base.endsWith('/messages')) return base
-    return base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`
+    return chatCompletionsUrl(this.settings.rightCodeBaseUrl!)
   }
 
   private requestBody(input: AgentIntentRequest) {
-    return {
-      model: AGENT_INTENT_MODEL,
+    return chatRequest({
+      model: retrievalModel(this.settings),
       max_tokens: 2000,
       temperature: 0,
-      thinking: { type: 'disabled' },
+      thinking: { type: retrievalModel(this.settings) === 'glm-5.3' ? 'enabled' : 'disabled' },
       system:
         `Protocol ${AGENT_INTENT_PROMPT_VERSION}. Classify the request exactly once; never create or rewrite a search query. ` +
         'visual means appearance in images or video frames; spoken means words heard in audio or video; all means either evidence type. ' +
         'Use the broadest safe scope when the request is not explicit, but never exceed allowed_media_types. ' +
         'Set needs_clarification=true only when missing information would change the goal, selected library, external-data authorization, or an export side effect. ' +
         'Copy library_references only from explicit library names in the prompt. goal=export_clip and requested_effect require an explicit export request; otherwise requested_effect is null. ' +
+        (input.capabilityBoundary.enforcedSearchScope ? 'The user explicitly selected enforced_search_scope. Preserve this exact scope. For spoken search, a non-empty opaque word or identifier can be a literal transcription keyword: do not require it to have a known visual meaning, do not rewrite it. Keep original requirements and use spoken evidence. ' : '') +
+        'Always include all eight keys: goal, search_scope, media_types, library_references, conditions, needs_clarification, clarification_reason, requested_effect. Never omit clarification_reason. Return every required field. When no clarification is needed, clarification_reason must be the literal string NOT_NEEDED; otherwise give a non-empty reason. requested_effect must be JSON null unless exporting. ' +
         'Copy every condition source_text exactly from a non-empty continuous span of the user prompt.',
       messages: [
         {
@@ -327,6 +349,7 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
             {
               type: 'text',
               text: JSON.stringify({
+                ...(input.capabilityBoundary.enforcedSearchScope ? { enforced_search_scope: input.capabilityBoundary.enforcedSearchScope } : {}),
                 allowed_media_types: input.capabilityBoundary.allowedMediaTypes,
                 has_enforced_library_scope: input.capabilityBoundary.hasEnforcedLibraryScope,
               }),
@@ -342,7 +365,7 @@ export class QwenAgentIntentRunner implements AgentIntentRunner {
         },
       ],
       tool_choice: { type: 'tool', name: AGENT_INTENT_TOOL_NAME },
-    }
+    })
   }
 }
 
@@ -358,7 +381,7 @@ export function normalizeForSourceValidation(value: string) {
  * 在解析 JSON 前按原始 UTF-8 字节限制 Provider 正文，不能信任响应自报 token 数。
  * 读取中断表示调用结果不明；完整正文超过 256 KiB 则是明确协议违规，可安全失败。
  */
-async function readResponseText(response: Response, maxBytes: number) {
+export async function readResponseText(response: Response, maxBytes: number) {
   const contentLength = Number(response.headers.get('content-length'))
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
     throw new AgentIntentRunnerError(

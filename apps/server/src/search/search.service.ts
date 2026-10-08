@@ -115,134 +115,153 @@ export class SearchService {
 
   async search(
     input: SearchRequest,
-    options: { sourceLimit?: number; strictIntegrity?: boolean } = {},
+    options: {
+      sourceLimit?: number
+      strictIntegrity?: boolean
+      /** 仅 Agent 注入持久化进度；普通搜索不写任务轨迹。回调不接收素材正文。 */
+      onProgress?: (
+        phase: 'retrieving' | 'rrf' | 'ranking',
+        status: 'running' | 'succeeded' | 'failed',
+      ) => Promise<void>
+    } = {},
   ) {
-    const searchStartedAt = performance.now()
-    const request = this.parseRequest(input)
-    const sourceLimit = options.sourceLimit ?? this.sourceLimit(request)
-    // 搜索范围在任何模型调用之前生效。spoken 只查 PostgreSQL 全文检索，因此不会触发
-    // 查询扩展、同步 embedding 或 Qdrant；visual 则完全跳过 transcript SQL。
-    const availableCollections =
-      request.search_scope === 'spoken'
-        ? []
-        : [
-            baseSearchCollections[0],
-            baseSearchCollections[1],
-            ...(this.settings.captionSearchEnabled ? [captionSearchCollection] : []),
-          ]
-    const vectorMediaTypes = request.media_types.length
-      ? request.media_types
-      : [...new Set(availableCollections.flatMap((entry) => entry.mediaTypes))]
-    const selectedCollections = availableCollections.filter((entry) =>
-      entry.mediaTypes.some((mediaType) => vectorMediaTypes.includes(mediaType)),
-    )
-    const queryVectorCache = new Map<string, Promise<number[]>>()
-    const embedQuery = (query: string, config: VectorCollectionConfig) => {
-      const key = `${config.modelName}:${config.modelVersion}:${config.vectorDim}:${query}`
-      const cached = queryVectorCache.get(key)
-      if (cached) {
-        return cached
+    let phase: 'retrieving' | 'rrf' | 'ranking' = 'retrieving'
+    await options.onProgress?.(phase, 'running')
+    try {
+      const searchStartedAt = performance.now()
+      const request = this.parseRequest(input)
+      const sourceLimit = options.sourceLimit ?? this.sourceLimit(request)
+      // 搜索范围在任何模型调用之前生效。spoken 只查 PostgreSQL 全文检索，因此不会触发
+      // 查询扩展、同步 embedding 或 Qdrant；visual 则完全跳过 transcript SQL。
+      const availableCollections =
+        request.search_scope === 'spoken'
+          ? []
+          : [
+              baseSearchCollections[0],
+              baseSearchCollections[1],
+              ...(this.settings.captionSearchEnabled ? [captionSearchCollection] : []),
+            ]
+      const vectorMediaTypes = request.media_types.length
+        ? request.media_types
+        : [...new Set(availableCollections.flatMap((entry) => entry.mediaTypes))]
+      const selectedCollections = availableCollections.filter((entry) =>
+        entry.mediaTypes.some((mediaType) => vectorMediaTypes.includes(mediaType)),
+      )
+      const queryVectorCache = new Map<string, Promise<number[]>>()
+      const embedQuery = (query: string, config: VectorCollectionConfig) => {
+        const key = `${config.modelName}:${config.modelVersion}:${config.vectorDim}:${query}`
+        const cached = queryVectorCache.get(key)
+        if (cached) {
+          return cached
+        }
+        const promise = this.queryVectorService.embedQuery(query, config)
+        queryVectorCache.set(key, promise)
+        return promise
       }
-      const promise = this.queryVectorService.embedQuery(query, config)
-      queryVectorCache.set(key, promise)
-      return promise
-    }
-    const expansionStartedAt = performance.now()
-    const queryVariants = selectedCollections.length
-      ? await this.queryExpansionService.expand(request.query, request.query_expansion_mode)
-      : []
-    const expansionDurationMs = performance.now() - expansionStartedAt
+      const expansionStartedAt = performance.now()
+      const queryVariants = selectedCollections.length
+        ? await this.queryExpansionService.expand(request.query, request.query_expansion_mode)
+        : []
+      const expansionDurationMs = performance.now() - expansionStartedAt
 
-    const vectorStartedAt = performance.now()
-    const vectorGroups = await Promise.all(
-      selectedCollections.map(async ({ collection }) => {
-        const config = VECTOR_COLLECTIONS[collection]
-        // 查询扩展先生成与通道无关的基础版本，再按目标模型选择实际查询语言。
-        // 逐 Point 诊断只记录该通道真正执行的版本，避免 UI 把未参与检索的版本标成候选。
-        const collectionQueryVariants = routeQueryVariantsForCollection(
-          queryVariants,
-          collection,
-          request.query_expansion_mode,
-        )
-        const collectionResult = await this.searchCollection(collection, {
-          queryVariants: collectionQueryVariants,
-          vectorConfig: config,
-          libraryIds: request.library_ids,
-          limit: sourceLimit,
-          embedQuery,
-          includeDiagnostics: request.include_diagnostics,
-        })
-        const results = await this.hydrateResults(
-          collection,
-          collectionResult.points,
-          {
-            mediaTypes: vectorMediaTypes,
-            libraryIds: request.library_ids,
-          },
-          {
-            includeDiagnostics: request.include_diagnostics,
-            queryVariantHitsByPointId: collectionResult.queryVariantHitsByPointId,
-          },
-        )
-        if (options.strictIntegrity && results.length !== collectionResult.points.length) {
-          throw new Error(
-            `search point hydration incomplete collection=${collection} points=${collectionResult.points.length} hydrated=${results.length}`,
+      const vectorStartedAt = performance.now()
+      const vectorGroups = await Promise.all(
+        selectedCollections.map(async ({ collection }) => {
+          const config = VECTOR_COLLECTIONS[collection]
+          // 查询扩展先生成与通道无关的基础版本，再按目标模型选择实际查询语言。
+          // 逐 Point 诊断只记录该通道真正执行的版本，避免 UI 把未参与检索的版本标成候选。
+          const collectionQueryVariants = routeQueryVariantsForCollection(
+            queryVariants,
+            collection,
+            request.query_expansion_mode,
           )
-        }
-
-        return {
-          collection,
-          score_kind: this.scoreKindForDistance(config.distance),
-          results,
-        }
-      }),
-    )
-    const vectorDurationMs = performance.now() - vectorStartedAt
-    const textStartedAt = performance.now()
-    const textGroup =
-      request.search_scope === 'visual'
-        ? undefined
-        : await this.textSearchGroup(request, { limit: sourceLimit, offset: 0 })
-    const textDurationMs = performance.now() - textStartedAt
-    const groups = [...vectorGroups, ...(textGroup ? [textGroup] : [])]
-
-    // groups 保留原始来源，便于调试召回；results 根据请求选择旧混合排序或正式 RRF。
-    // 两条路径都只消费 PostgreSQL 回表后的合法候选，最后才执行分页。
-    const rankingStartedAt = performance.now()
-    const results =
-      request.ranking_mode === 'rrf'
-        ? buildRrfSearchResults(this.toRrfCandidates(groups), {
-            limit: request.limit,
-            offset: request.offset,
+          const collectionResult = await this.searchCollection(collection, {
+            queryVariants: collectionQueryVariants,
+            vectorConfig: config,
+            libraryIds: request.library_ids,
+            limit: sourceLimit,
+            embedQuery,
             includeDiagnostics: request.include_diagnostics,
           })
-        : buildHybridResults(await this.toHybridCandidates(groups), {
-            limit: request.limit,
-            offset: request.offset,
-          })
-    const rankingDurationMs = performance.now() - rankingStartedAt
-    this.logger.log(
-      `search_timing scope=${request.search_scope} ranking=${request.ranking_mode} ` +
-        `variants=${queryVariants.length} collections=${selectedCollections.length} ` +
-        `expansion_ms=${Math.round(expansionDurationMs)} vector_ms=${Math.round(vectorDurationMs)} ` +
-        `fts_ms=${Math.round(textDurationMs)} ranking_ms=${Math.round(rankingDurationMs)} ` +
-        `total_ms=${Math.round(performance.now() - searchStartedAt)}`,
-    )
-    return {
-      limit: request.limit,
-      offset: request.offset,
-      results,
-      groups,
-      // Caption 原文属于本地媒体派生内容。只有调用方显式请求诊断时才返回实际
-      // 查询版本；逐 Point 证据也只会附加在对应 group result，默认响应保持原样。
-      ...(request.include_diagnostics
-        ? {
-            query_diagnostics: {
-              query_expansion_mode: request.query_expansion_mode as QueryExpansionMode,
-              query_variants: queryVariants,
+          const results = await this.hydrateResults(
+            collection,
+            collectionResult.points,
+            {
+              mediaTypes: vectorMediaTypes,
+              libraryIds: request.library_ids,
             },
+            {
+              includeDiagnostics: request.include_diagnostics,
+              queryVariantHitsByPointId: collectionResult.queryVariantHitsByPointId,
+            },
+          )
+          if (options.strictIntegrity && results.length !== collectionResult.points.length) {
+            throw new Error(
+              `search point hydration incomplete collection=${collection} points=${collectionResult.points.length} hydrated=${results.length}`,
+            )
           }
-        : {}),
+
+          return {
+            collection,
+            score_kind: this.scoreKindForDistance(config.distance),
+            results,
+          }
+        }),
+      )
+      const vectorDurationMs = performance.now() - vectorStartedAt
+      const textStartedAt = performance.now()
+      const textGroup =
+        request.search_scope === 'visual'
+          ? undefined
+          : await this.textSearchGroup(request, { limit: sourceLimit, offset: 0 })
+      const textDurationMs = performance.now() - textStartedAt
+      const groups = [...vectorGroups, ...(textGroup ? [textGroup] : [])]
+
+      // groups 保留原始来源，便于调试召回；results 根据请求选择旧混合排序或正式 RRF。
+      // 两条路径都只消费 PostgreSQL 回表后的合法候选，最后才执行分页。
+      await options.onProgress?.(phase, 'succeeded')
+      phase = request.ranking_mode === 'rrf' ? 'rrf' : 'ranking'
+      await options.onProgress?.(phase, 'running')
+      const rankingStartedAt = performance.now()
+      const results =
+        request.ranking_mode === 'rrf'
+          ? buildRrfSearchResults(this.toRrfCandidates(groups), {
+              limit: request.limit,
+              offset: request.offset,
+              includeDiagnostics: request.include_diagnostics,
+            })
+          : buildHybridResults(await this.toHybridCandidates(groups), {
+              limit: request.limit,
+              offset: request.offset,
+            })
+      const rankingDurationMs = performance.now() - rankingStartedAt
+      await options.onProgress?.(phase, 'succeeded')
+      this.logger.log(
+        `search_timing scope=${request.search_scope} ranking=${request.ranking_mode} ` +
+          `variants=${queryVariants.length} collections=${selectedCollections.length} ` +
+          `expansion_ms=${Math.round(expansionDurationMs)} vector_ms=${Math.round(vectorDurationMs)} ` +
+          `fts_ms=${Math.round(textDurationMs)} ranking_ms=${Math.round(rankingDurationMs)} ` +
+          `total_ms=${Math.round(performance.now() - searchStartedAt)}`,
+      )
+      return {
+        limit: request.limit,
+        offset: request.offset,
+        results,
+        groups,
+        // Caption 原文属于本地媒体派生内容。只有调用方显式请求诊断时才返回实际
+        // 查询版本；逐 Point 证据也只会附加在对应 group result，默认响应保持原样。
+        ...(request.include_diagnostics
+          ? {
+              query_diagnostics: {
+                query_expansion_mode: request.query_expansion_mode as QueryExpansionMode,
+                query_variants: queryVariants,
+              },
+            }
+          : {}),
+      }
+    } catch (error) {
+      await options.onProgress?.(phase, 'failed')
+      throw error
     }
   }
 
@@ -470,6 +489,8 @@ export class SearchService {
           // 图片的 Caption 向量来自独立 Caption Asset，但用户看到和评测匹配的对象是源图片。
           // PostgreSQL 已解析规范图片 Asset ID；视频仍使用各自证据 Asset 并按 scene_id 合并。
           asset_id: row.imageAssetId ?? row.assetId,
+          // Caption图片回源只改变业务身份，实际命中文字的身份仍用于Agent证据准备。
+          evidence_asset_id: row.assetId,
           file_id: row.fileId,
           media_type: row.mediaType,
           path: row.path,
@@ -556,6 +577,7 @@ export class SearchService {
         return [
           {
             asset_id: row.assetId,
+            evidence_asset_id: row.assetId,
             file_id: row.fileId,
             media_type: row.mediaType,
             path: row.path,
@@ -630,6 +652,8 @@ export class SearchService {
         source_signal: sourceSignal,
         source_key: group.collection,
         source_score: result.score,
+        evidence_asset_id: 'evidence_asset_id' in result && typeof result.evidence_asset_id === 'string'
+          ? result.evidence_asset_id : result.asset_id,
       }))
     })
   }

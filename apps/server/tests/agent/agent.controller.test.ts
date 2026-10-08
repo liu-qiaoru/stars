@@ -1,9 +1,12 @@
+import { startAgentTraceSpan } from '../../src/agent/agent-trace.repository.js'
 import { Test } from '@nestjs/testing'
 import { count, eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { AgentController } from '../../src/agent/agent.controller.js'
 import { AgentModule } from '../../src/agent/agent.module.js'
+import { AgentRerankService } from '../../src/agent/agent-rerank.service.js'
 import {
+  createDurableAgentRun,
   claimNextAgentRun,
   markAgentExternalCallDispatched,
   recoverExpiredAgentRuns,
@@ -12,6 +15,8 @@ import { AGENT_STEP_HANDLER, type AgentStepHandler } from '../../src/agent/agent
 import { SETTINGS, type Settings } from '../../src/config/settings.js'
 import { DATABASE, PG_POOL } from '../../src/database/database.module.js'
 import {
+  agentRerankRankings,
+  agentRerankRuns,
   agentRunCandidates,
   agentRunInputs,
   agentRuns,
@@ -97,6 +102,8 @@ async function compileAgentModule(
     .useValue(settings)
     .overrideProvider(AGENT_STEP_HANDLER)
     .useValue(handler)
+    .overrideProvider(AgentRerankService)
+    .useValue({ available: handler.isReady() })
     .compile()
 
   agentController = moduleRef.get(AgentController)
@@ -164,13 +171,33 @@ async function seedExportCandidate(runId: string) {
       review_status: 'not_run',
     },
   })
+  const rerankRunId = 'abababab-abab-4bab-8bab-abababababab'
+  await db.insert(agentRerankRuns).values({
+    id: rerankRunId,
+    agentRunId: runId,
+    attemptNo: 1,
+    completionStatus: 'waiting_for_export_selection',
+    protocolVersion: 'qwen3-vl-rerank-product-v1',
+    status: 'succeeded',
+    externalCallStatus: 'completed',
+    maxCostCny: '0.216',
+  })
+  await db.insert(agentRerankRankings).values({
+    id: 'acacacac-acac-4cac-8cac-acacacacacac',
+    rerankRunId,
+    candidateId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    candidateKey: `video:${sceneId}`,
+    rrfRank: 1,
+    rerankRank: 1,
+    relevanceScore: '0.9',
+  })
   await db
     .update(agentRuns)
     .set({
       status: 'waiting_for_export_selection',
       enforcedScopeJson: { library_ids: [libraryId], media_types: ['video'] },
       waitingStepId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
-      waitingExpiresAt: new Date('2026-08-19T00:00:00.000Z'),
+      waitingExpiresAt: new Date(Date.now() + 86400000),
     })
     .where(eq(agentRuns.id, runId))
   return { libraryId, fileId, sceneId, assetId, candidateKey: `video:${sceneId}` }
@@ -185,9 +212,8 @@ describe('Agent V1 API', () => {
 
   test('Phase B 处理器或 RightAPI 未就绪时，capabilities 明确不可用且创建前拒绝', async () => {
     expect(agentController.getCapabilities()).toMatchObject({
-      phase: 'C',
       provider: 'rightapi',
-      model: 'qwen3.7-plus',
+      model: 'glm-5.3',
       run_creation_available: false,
       external_text: {
         deployment_enabled: false,
@@ -225,7 +251,7 @@ describe('Agent V1 API', () => {
     const initial = agentController.getSettings()
     expect(initial).toMatchObject({
       provider: 'rightapi',
-      model: 'qwen3.7-plus',
+      model: 'glm-5.3',
       prompt_version: 'agent-intent-v1',
       schema_version: 'agent-intent-schema-v1',
       api_key: { configured: true },
@@ -238,6 +264,7 @@ describe('Agent V1 API', () => {
       agentController.saveSettings({
         enabled: true,
         tool_timeout_ms: 20_000,
+        model_timeout_ms: 25_000,
         lease_duration_ms: 35_000,
         activity_timeout_ms: 30_000,
         waiting_ttl_seconds: 86_400,
@@ -252,6 +279,7 @@ describe('Agent V1 API', () => {
       agentController.saveSettings({
         enabled: true,
         tool_timeout_ms: 20_000,
+        model_timeout_ms: 25_000,
         lease_duration_ms: 34_999,
         activity_timeout_ms: 30_000,
         waiting_ttl_seconds: 86_400,
@@ -306,7 +334,11 @@ describe('Agent V1 API', () => {
     )
 
     await expect(
-      agentController.createRun({ prompt: '找视频', allow_external_text: false }),
+      agentController.createRun({
+        prompt: '找视频',
+        allow_external_text: false,
+        allow_external_visual: true,
+      }),
     ).rejects.toMatchObject({ status: 400 })
     const [{ total }] = await db.select({ total: count() }).from(agentRuns)
     expect(total).toBe(0)
@@ -329,6 +361,7 @@ describe('Agent V1 API', () => {
       agentController.createRun({
         prompt: '找文档',
         allow_external_text: true,
+        allow_external_visual: true,
         media_types: ['document'],
       }),
     ).rejects.toMatchObject({ status: 400 })
@@ -352,7 +385,7 @@ describe('Agent V1 API', () => {
     const created = await agentController.createRun({
       prompt: '找红汽车的视频',
       allow_external_text: true,
-      allow_external_visual: false,
+      allow_external_visual: true,
       media_types: ['video'],
     })
 
@@ -362,9 +395,13 @@ describe('Agent V1 API', () => {
       id: created.run_id,
       status: 'queued',
       next_step: 'extracting_intent',
+      progress: [
+        expect.objectContaining({ id: 'created', label: '创建任务', status: 'succeeded' }),
+        expect.objectContaining({ id: 'run-state', label: '等待执行', status: 'running' }),
+      ],
       authorization: {
         allow_external_text: true,
-        allow_external_visual: false,
+        allow_external_visual: true,
       },
       steps: [],
     })
@@ -385,6 +422,7 @@ describe('Agent V1 API', () => {
     const created = await agentController.createRun({
       prompt: '找视频',
       allow_external_text: true,
+      allow_external_visual: true,
     })
     const waitingStepId = '11111111-1111-4111-8111-111111111111'
     await db
@@ -393,7 +431,7 @@ describe('Agent V1 API', () => {
         status: 'waiting_for_user_input',
         nextStep: 'searching',
         waitingStepId,
-        waitingExpiresAt: new Date('2026-08-19T00:00:00.000Z'),
+        waitingExpiresAt: new Date(Date.now() + 86400000),
       })
       .where(eq(agentRuns.id, created.run_id))
     const input = {
@@ -426,7 +464,7 @@ describe('Agent V1 API', () => {
     expect(total).toBe(1)
   })
 
-  test('resume 在共享 Schema 层拒绝自由文本，不保存也不重新排队', async () => {
+  test('原有流程拒绝自由文本，不保存也不重新排队', async () => {
     await closeCurrentModule()
     const handler: AgentStepHandler = { isReady: () => true, prepare: prepareStep }
     await compileAgentModule(
@@ -440,7 +478,9 @@ describe('Agent V1 API', () => {
     )
     const created = await agentController.createRun({
       prompt: '找视频',
+      workflow: 'legacy',
       allow_external_text: true,
+      allow_external_visual: true,
     })
     const waitingStepId = '99999999-9999-4999-8999-999999999999'
     await db
@@ -449,7 +489,7 @@ describe('Agent V1 API', () => {
         status: 'waiting_for_user_input',
         nextStep: 'searching',
         waitingStepId,
-        waitingExpiresAt: new Date('2026-08-19T00:00:00.000Z'),
+        waitingExpiresAt: new Date(Date.now() + 86400000),
       })
       .where(eq(agentRuns.id, created.run_id))
 
@@ -459,7 +499,7 @@ describe('Agent V1 API', () => {
         client_request_id: 'resume-free-text',
         response: '随便继续吧',
       } as never),
-    ).rejects.toMatchObject({ status: 400 })
+    ).rejects.toMatchObject({ status: 409 })
     const [{ total }] = await db
       .select({ total: count() })
       .from(agentRunInputs)
@@ -482,6 +522,7 @@ describe('Agent V1 API', () => {
     const created = await agentController.createRun({
       prompt: '找视频',
       allow_external_text: true,
+      allow_external_visual: true,
     })
     const waitingStepId = '22222222-2222-4222-8222-222222222222'
     await db
@@ -522,6 +563,7 @@ describe('Agent V1 API', () => {
     const created = await agentController.createRun({
       prompt: '找视频',
       allow_external_text: true,
+      allow_external_visual: true,
     })
 
     await expect(
@@ -549,6 +591,7 @@ describe('Agent V1 API', () => {
     const created = await agentController.createRun({
       prompt: '找视频',
       allow_external_text: true,
+      allow_external_visual: true,
     })
     const startedAt = new Date(Date.now() + 1_000)
     const claim = await claimNextAgentRun(db, {
@@ -601,6 +644,7 @@ describe('Agent V1 API', () => {
     const created = await agentController.createRun({
       prompt: '找视频',
       allow_external_text: true,
+      allow_external_visual: true,
     })
     await db
       .update(agentRuns)
@@ -649,9 +693,20 @@ describe('Agent V1 API', () => {
     const created = await agentController.createRun({
       prompt: '找出并导出红色汽车片段',
       allow_external_text: true,
+      allow_external_visual: true,
       media_types: ['video'],
     })
     const candidate = await seedExportCandidate(created.run_id)
+    const ordinaryDetail = await agentController.getRun(created.run_id)
+    expect(ordinaryDetail.candidates).toEqual([
+      expect.objectContaining({
+        candidate_key: candidate.candidateKey,
+        rank: 1,
+      }),
+    ])
+    expect(JSON.stringify(ordinaryDetail.candidates)).not.toContain('relevance_score')
+    expect(JSON.stringify(ordinaryDetail.candidates)).not.toContain('rrf_score')
+    expect(JSON.stringify(ordinaryDetail.candidates)).not.toContain('retrieval')
     await db
       .update(agentRuns)
       .set({ enforcedScopeJson: { library_ids: [42], media_types: ['video'] } })
@@ -725,6 +780,7 @@ describe('Agent V1 API', () => {
     const created = await agentController.createRun({
       prompt: '导出汽车片段',
       allow_external_text: true,
+      allow_external_visual: true,
       media_types: ['video'],
     })
     const candidate = await seedExportCandidate(created.run_id)
@@ -796,4 +852,14 @@ describe('Agent V1 API', () => {
       export_job: { id: first.job_id, status: 'queued' },
     })
   })
+
+test('任务详情在检索结束前返回安全进度，不泄露轨迹原始正文', async () => {
+  const run = await createDurableAgentRun(db, { prompt: 'test', allowExternalText: true, allowExternalVisual: false, libraryIds: [], mediaTypes: ['audio'] })
+  await db.update(agentRuns).set({ status: 'searching' }).where(eq(agentRuns.id, run.id))
+  const trace = await startAgentTraceSpan(db, { runId: run.id, component: 'search-service', operation: 'rrf', requestSummaryJson: { secret: 'PRIVATE_TEXT' }, attributesJson: { private_value: 'PRIVATE_PATH' } })
+  const response = await agentController.getRun(run.id)
+  expect(response.progress).toContainEqual(expect.objectContaining({ id: trace.spanId, label: 'RRF 排名融合', status: 'running', finished_at: null }))
+  expect(JSON.stringify(response.progress)).not.toMatch(/PRIVATE_TEXT|PRIVATE_PATH|requestSummaryJson/)
+})
+
 })

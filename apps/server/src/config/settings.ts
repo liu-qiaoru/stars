@@ -10,8 +10,23 @@ export interface Settings {
   allowExternalLlm: boolean
   anthropicApiKey?: string
   agentModel: string
+  agentRetrievalMaxNoProgress?: number
+  agentRetrievalMaxRetries?: number
+  agentRetrievalTimeoutMs?: number
+  agentRetrievalMaxToolCalls?: number
+  agentRetrievalMaxSearchCalls?: number
+  agentRetrievalMaxDetailCalls?: number
+  agentRetrievalMaxModelCalls?: number
+  agentRetrievalQualityReport?: string
+  /** 模型切换须显式配置；旧GLM质量记录不能授予新模型资格。 */
+  agentRetrievalModel?: 'glm-5.3' | 'deepseek-v4-flash'
+  agentSceneInspectionEnabled?: boolean
+  /** 新图文协议显式启用；历史任务和GLM兼容路径不自动升级。 */
+  agentRetrievalEvidenceMode?: 'overview' | 'matched_multimodal'
   agentMaxSteps: number
   agentToolTimeoutMs: number
+  /** 外部意图/决策模型的等待上限，单位毫秒；旧 Settings 替身缺失时使用 60 秒。 */
+  agentModelTimeoutMs?: number
   rightCodeBaseUrl?: string
   rightCodeApiKey?: string
   agentExecutorEnabled: boolean
@@ -104,6 +119,18 @@ const settingsSchema = z.object({
     .transform((value) => value === 'true'),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   AGENT_MODEL: z.string().min(1).default('disabled'),
+  // 分类额度独立于旧总工具上限；未显式设置新总额度时保留已有部署的费用边界。
+  AGENT_RETRIEVAL_QUALITY_REPORT: z.string().min(1).optional(),
+  AGENT_RETRIEVAL_MODEL: z.enum(['glm-5.3', 'deepseek-v4-flash']).default('glm-5.3'),
+  AGENT_RETRIEVAL_EVIDENCE_MODE: z.enum(['overview', 'matched_multimodal']).default('overview'),
+  AGENT_SCENE_INSPECTION_ENABLED: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+  AGENT_RETRIEVAL_MAX_TOOL_CALLS: z.coerce.number().int().min(1).max(12).optional(),
+  AGENT_RETRIEVAL_MAX_SEARCH_CALLS: z.coerce.number().int().min(1).max(3).default(3),
+  AGENT_RETRIEVAL_MAX_DETAIL_CALLS: z.coerce.number().int().min(1).max(6).default(6),
+  AGENT_RETRIEVAL_MAX_MODEL_CALLS: z.coerce.number().int().min(1).max(12).default(8),
+  AGENT_RETRIEVAL_MAX_NO_PROGRESS: z.coerce.number().int().min(1).max(5).default(2),
+  AGENT_RETRIEVAL_MAX_RETRIES: z.coerce.number().int().min(0).max(2).default(1),
+  AGENT_RETRIEVAL_TIMEOUT_MS: z.coerce.number().int().min(1000).max(3600000).default(600000),
   AGENT_MAX_STEPS: z
     .string()
     .default('4')
@@ -132,9 +159,11 @@ const settingsSchema = z.object({
       }
       return timeout
     }),
+  // 外部模型可能需要排队和推理，不能沿用本地搜索/详情工具的 10 秒上限。
+  AGENT_MODEL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(60_000),
   RIGHT_CODE_BASE_URL: z.string().url('RIGHT_CODE_BASE_URL must be a valid URL').optional(),
   RIGHT_CODE_API_KEY: z.string().min(1).optional(),
-  // Phase B 已注册 qwen3.7-plus AgentIntent handler，但执行器仍默认关闭。
+  // Agent 已注册 glm-5.3 意图与检索决策 handler，但执行器仍默认关闭。
   // 部署者必须在确认 RightAPI 配置与文本外发边界后显式开启，避免仅填凭证就产生调用。
   AGENT_EXECUTOR_ENABLED: z
     .enum(['true', 'false'])
@@ -455,15 +484,21 @@ const settingsSchema = z.object({
 })
 
 export function createSettings(env: Env = process.env): Settings {
-  const parsed = settingsSchema.parse(env)
+  const parsed = settingsSchema.parse({ ...env,
+    // 新协议仅使用DeepSeek；未指定模型时显式选择它，指定GLM则拒绝而非悄悄外发。
+    ...(env.AGENT_RETRIEVAL_EVIDENCE_MODE === 'matched_multimodal' && !env.AGENT_RETRIEVAL_MODEL
+      ? { AGENT_RETRIEVAL_MODEL: 'deepseek-v4-flash' } : {}),
+  })
+  if (parsed.AGENT_RETRIEVAL_EVIDENCE_MODE === 'matched_multimodal' && parsed.AGENT_RETRIEVAL_MODEL !== 'deepseek-v4-flash')
+    throw new Error('matched_multimodal requires AGENT_RETRIEVAL_MODEL=deepseek-v4-flash')
   // 租约必须覆盖最长的活动/Provider 硬超时，并冻结 5 秒给结果校验和最后一次短事务提交。
   // 否则请求刚返回时就可能被另一执行器接管，造成合法结果必然成为迟到结果。
   const agentCommitMarginMs = 5_000
   const minimumAgentLeaseMs =
-    Math.max(parsed.AGENT_ACTIVITY_TIMEOUT_MS, parsed.AGENT_TOOL_TIMEOUT_MS) + agentCommitMarginMs
+    Math.max(parsed.AGENT_ACTIVITY_TIMEOUT_MS, parsed.AGENT_TOOL_TIMEOUT_MS, parsed.AGENT_MODEL_TIMEOUT_MS) + agentCommitMarginMs
   if (parsed.AGENT_LEASE_DURATION_MS < minimumAgentLeaseMs) {
     throw new Error(
-      'AGENT_LEASE_DURATION_MS must be at least max(AGENT_ACTIVITY_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS) + 5000',
+      'AGENT_LEASE_DURATION_MS must be at least max(AGENT_ACTIVITY_TIMEOUT_MS, AGENT_TOOL_TIMEOUT_MS, AGENT_MODEL_TIMEOUT_MS) + 5000',
     )
   }
   if (
@@ -498,7 +533,19 @@ export function createSettings(env: Env = process.env): Settings {
     anthropicApiKey: parsed.ANTHROPIC_API_KEY,
     agentModel: parsed.AGENT_MODEL,
     agentMaxSteps: parsed.AGENT_MAX_STEPS,
+    agentRetrievalQualityReport: parsed.AGENT_RETRIEVAL_QUALITY_REPORT,
+    agentRetrievalModel: parsed.AGENT_RETRIEVAL_MODEL,
+    agentRetrievalEvidenceMode: parsed.AGENT_RETRIEVAL_EVIDENCE_MODE,
+    agentSceneInspectionEnabled: parsed.AGENT_SCENE_INSPECTION_ENABLED,
+    agentRetrievalMaxToolCalls: parsed.AGENT_RETRIEVAL_MAX_TOOL_CALLS,
+    agentRetrievalMaxSearchCalls: parsed.AGENT_RETRIEVAL_MAX_SEARCH_CALLS,
+    agentRetrievalMaxDetailCalls: parsed.AGENT_RETRIEVAL_MAX_DETAIL_CALLS,
+    agentRetrievalMaxModelCalls: parsed.AGENT_RETRIEVAL_MAX_MODEL_CALLS,
+    agentRetrievalTimeoutMs: parsed.AGENT_RETRIEVAL_TIMEOUT_MS,
+    agentRetrievalMaxNoProgress: parsed.AGENT_RETRIEVAL_MAX_NO_PROGRESS,
+    agentRetrievalMaxRetries: parsed.AGENT_RETRIEVAL_MAX_RETRIES,
     agentToolTimeoutMs: parsed.AGENT_TOOL_TIMEOUT_MS,
+    agentModelTimeoutMs: parsed.AGENT_MODEL_TIMEOUT_MS,
     rightCodeBaseUrl: parsed.RIGHT_CODE_BASE_URL,
     rightCodeApiKey: parsed.RIGHT_CODE_API_KEY,
     agentExecutorEnabled: parsed.AGENT_EXECUTOR_ENABLED,

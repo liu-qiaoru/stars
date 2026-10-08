@@ -949,7 +949,8 @@ export const agentRunCandidates = pgTable(
   ],
 )
 
-// 产品 Rerank 与不可变的 Agent RRF 候选分表保存。每个 Agent run 最多一个实验 run；
+// 产品 Rerank 与不可变的 Agent RRF 候选分表保存。同一个 Agent run 可以在明确授权后
+// 创建多次尝试，但每次尝试都有独立 attempt_no，旧失败/未知记录不会被后一次覆盖。
 // dispatched 会在网络请求前提交，Server 重启后只能转为 outcome_unknown，禁止自动重放。
 export const agentRerankRuns = pgTable(
   'agent_rerank_runs',
@@ -958,6 +959,12 @@ export const agentRerankRuns = pgTable(
     agentRunId: uuid('agent_run_id')
       .notNull()
       .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    // attempt_no 在同一 Agent run 内从 1 单调递增。它既是并发重试的唯一约束，
+    // 也是审计页区分多次真实外部请求的稳定编号。
+    attemptNo: integer('attempt_no').notNull().default(1),
+    // 搜索步骤在冻结候选时同时保存成功后的目标状态。Rerank 即使跨 Server 重启完成，
+    // 也不需要重新读取模型输出或根据当前页面猜测下一步。
+    completionStatus: text('completion_status'),
     protocolVersion: text('protocol_version').notNull(),
     status: text('status').notNull().default('preparing_evidence'),
     externalCallStatus: text('external_call_status').notNull().default('not_dispatched'),
@@ -986,7 +993,7 @@ export const agentRerankRuns = pgTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex('agent_rerank_runs_agent_run_unique').on(table.agentRunId),
+    uniqueIndex('agent_rerank_runs_agent_attempt_unique').on(table.agentRunId, table.attemptNo),
     index('agent_rerank_runs_status_idx').on(table.status, table.createdAt),
   ],
 )
@@ -1093,6 +1100,40 @@ export const agentRunEvents = pgTable(
   (table) => [index('agent_run_events_run_id_idx').on(table.runId)],
 )
 
+// Trace 是一次 Agent run 的持久化调用轨迹；每一行 Span 只保存安全摘要和时间信息。
+// 它不替代 agent_run_steps/events 的业务事实，也不保存 API Key、Base64 图片、大向量、
+// 本地绝对路径、完整 Caption/转录或模型隐藏思考内容。
+export const agentRunTraceSpans = pgTable(
+  'agent_run_trace_spans',
+  {
+    id: uuid('id').primaryKey().notNull(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    spanId: uuid('span_id').notNull(),
+    parentSpanId: uuid('parent_span_id'),
+    component: text('component').notNull(),
+    operation: text('operation').notNull(),
+    status: text('status').notNull().default('running'),
+    attemptNo: integer('attempt_no').notNull().default(1),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    // duration_ms 使用 bigint，避免异常长的后台任务超过普通 integer；单位固定为毫秒。
+    durationMs: bigint('duration_ms', { mode: 'number' }),
+    externalCallStatus: text('external_call_status').notNull().default('not_dispatched'),
+    requestSummaryJson: jsonb('request_summary_json').notNull().default({}),
+    responseSummaryJson: jsonb('response_summary_json'),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    attributesJson: jsonb('attributes_json').notNull().default({}),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('agent_run_trace_spans_run_span_unique').on(table.runId, table.spanId),
+    index('agent_run_trace_spans_run_started_idx').on(table.runId, table.startedAt),
+  ],
+)
+
 export const agentToolCalls = pgTable(
   'agent_tool_calls',
   {
@@ -1174,4 +1215,5 @@ export const agentRunsRelations = relations(agentRuns, ({ many }) => ({
   sideEffects: many(agentSideEffects),
   candidates: many(agentRunCandidates),
   rerankRuns: many(agentRerankRuns),
+  traceSpans: many(agentRunTraceSpans),
 }))

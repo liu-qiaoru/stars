@@ -87,6 +87,72 @@ export const shadowRerankResponseSchema = z
     }
   })
 
+// Agent 产品允许 1～20 个视觉候选：素材不足 20 条时仍应精排已有结果，不能为了复用
+// Phase E 的固定实验 Schema 而伪造候选或退回 RRF。top_n 等于 min(10, 候选数)。
+export const agentRerankRequestSchema = z
+  .object({
+    model: z.literal('qwen3-vl-rerank'),
+    query: unicodeStringSchema('query', 4000),
+    top_n: z.number().int().min(1).max(10),
+    documents: z.array(shadowRerankDocumentSchema).min(1).max(20),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.top_n !== Math.min(10, value.documents.length)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'top_n must equal min(10, documents.length)',
+        path: ['top_n'],
+      })
+    }
+    if (value.documents.some((document, position) => document.index !== position)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'documents must use contiguous zero-based indices in request order',
+        path: ['documents'],
+      })
+    }
+  })
+
+export function agentRerankResponseSchema(documentCount: number) {
+  const resultCount = Math.min(10, documentCount)
+  return z
+    .object({
+      results: z
+        .array(
+          z
+            .object({
+              index: z.number().int().min(0).max(documentCount - 1),
+              relevance_score: z.number().finite(),
+            })
+            .strict(),
+        )
+        .length(resultCount),
+    })
+    .strict()
+    .superRefine((value, context) => {
+      if (new Set(value.results.map((result) => result.index)).size !== resultCount) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'results must contain unique document indices',
+          path: ['results'],
+        })
+      }
+      if (
+        value.results.some(
+          (result, index) =>
+            index > 0 && result.relevance_score > value.results[index - 1]!.relevance_score,
+        )
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'results must be ordered by non-increasing relevance_score',
+          path: ['results'],
+        })
+      }
+    })
+}
+
 // Phase F 只冻结“原查询 + Server 分配的原子条件 + 1～12 张独立索引帧”。
 // Provider 不得修改条件、发明帧 ID 或把 Phase E 的 rerank 模型代替为复核模型。
 export const vlmReviewConditionKindSchema = z.enum(['must_have', 'optional', 'exclusion'])
@@ -319,6 +385,9 @@ export const agentRunStatusSchema = z.enum([
   'extracting_intent',
   'waiting_for_user_input',
   'searching',
+  // 本地 RRF 候选已经冻结，但最终 Rerank 尚未完成。该状态不是终态，普通用户
+  // 只能看到进度；完整 RRF 候选只通过只读审计接口提供。
+  'ranking',
   'waiting_for_export_selection',
   'waiting_for_confirmation',
   'succeeded',
@@ -331,7 +400,7 @@ export const agentRunStatusSchema = z.enum([
   'outcome_unknown',
 ])
 
-export const agentNextStepSchema = z.enum(['extracting_intent', 'searching'])
+export const agentNextStepSchema = z.enum(['extracting_intent', 'searching', 'reranking'])
 export const agentExternalCallStatusSchema = z.enum([
   'not_dispatched',
   'dispatched',
@@ -381,27 +450,19 @@ export const agentIntentSchema = z
 export const createAgentRunInputSchema = z
   .object({
     prompt: unicodeStringSchema('prompt', 4000),
+    // 客户端明确选择时是硬范围；省略才由意图模型解析，不能悄悄从词语全文改为画面搜索。
+    search_scope: z.enum(['visual', 'spoken', 'all']).optional(),
     // 文本和视觉授权必须分开。允许发 prompt 不等于允许发候选帧。
     allow_external_text: z.boolean(),
+    workflow: z.enum(['retrieval_agent', 'legacy']).optional().default('retrieval_agent'),
+    allow_external_media_text: z.boolean().optional().default(false),
     allow_external_visual: z.boolean().optional().default(false),
+    // RightAPI场景看图与百炼最终重排是两个目的地，必须分别授权。
+    allow_external_scene_visual: z.boolean().optional().default(false),
+    // 20候选单帧图文决策，与3候选额外帧观察及最终重排独立授权。
+    allow_external_retrieval_visual: z.boolean().optional().default(false),
     library_ids: z.array(uuidSchema).max(100).optional().default([]),
     media_types: z.array(z.enum(mediaTypes)).max(4).optional().default([]),
-  })
-  .strict()
-
-// 产品 Rerank 是用户对当前 Agent run 的显式选择。一次调用固定比较 RRF Top-20，
-// 因此浏览器只需确认视觉外发和本次最高预算，不能提交候选列表或模型参数。
-export const startAgentRerankInputSchema = z
-  .object({
-    confirmed: z.literal(true),
-    max_cost_cny: z.number().positive().max(0.5),
-  })
-  .strict()
-
-// 反馈是同一批候选的成对比较，不把 Rerank 分数误当成用户满意度。
-export const agentRerankFeedbackInputSchema = z
-  .object({
-    verdict: z.enum(['rerank_better', 'rrf_better', 'same']),
   })
   .strict()
 
@@ -410,7 +471,12 @@ export const resumeAgentRunInputSchema = z
     waiting_step_id: uuidSchema,
     client_request_id: z.string().min(1).max(200),
     // Phase B 不允许模型二次解释自由文本；该动作明确覆盖为无副作用只读搜索。
-    response: z.literal('continue_as_read_only_search_with_resolved_scope'),
+    response: unicodeStringSchema('response', 2000),
+    allow_external_media_text: z.boolean().optional(),
+    // 最终图片重排的独立授权；自由文本不能代替这个字段。
+    allow_external_visual: z.boolean().optional(),
+    allow_external_scene_visual: z.boolean().optional(),
+    allow_external_retrieval_visual: z.boolean().optional(),
   })
   .strict()
 
@@ -724,3 +790,15 @@ export const jobOutputSchemas = {
   build_candidate_evidence: buildCandidateEvidenceOutputSchema,
   export_clip: exportClipOutputSchema,
 } satisfies Record<z.infer<typeof jobTypeSchema>, z.ZodTypeAny>
+
+export { retrievalActionSchema, retrievalActionJsonSchema, RETRIEVAL_EVIDENCE_LIMITS, retrievalOverviewSchema,
+  type RetrievalOverview, type RetrievalAction } from './retrieval-agent.js'
+
+export { retrievalQualityQualificationSchema, type RetrievalQualityQualification } from './retrieval-agent.js'
+export { retrievalSourceMatchSchema, type RetrievalSourceMatch, MATCHED_EVIDENCE_LIMITS, retrievalMatchedActionSchema, retrievalMatchedActionJsonSchema } from './retrieval-agent.js'
+export { retrievalMatchedEvidenceSchema, type RetrievalMatchedEvidence } from './retrieval-agent.js'
+export { MATCHED_DECISION_POLICY_VERSION, retrievalStopBasisSchema, type RetrievalStopBasis } from './retrieval-agent.js'
+
+export { retrievalVisualVerificationSchema, type RetrievalVisualVerification } from './retrieval-agent.js'
+
+export { sceneObservationSchema, sceneObservationJsonSchema, sceneObservationNormalizationSchema, SCENE_INSPECTION_LIMITS, type SceneObservationNormalization, type SceneObservation } from './retrieval-agent.js'

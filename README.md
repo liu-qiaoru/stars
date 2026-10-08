@@ -73,7 +73,7 @@
 | 层            | 技术                                                                                                                  |
 | ------------- | --------------------------------------------------------------------------------------------------------------------- |
 | 前端          | Next.js 16 / React 19 / Tailwind 4 / TypeScript                                                                       |
-| 后端 API      | NestJS（Express adapter）/ Zod；Agent V1 Phase C 使用一次 qwen3.7-plus 意图分类、一次本地原文搜索和事务性安全导出确认 |
+| 后端 API      | NestJS（Express adapter）/ Zod；检索 Agent 显式命中图文模式使用 RightAPI deepseek-v4-flash 判断证据与补搜；旧配置保留 glm-5.3，导出仍需确认 |
 | 数据库        | PostgreSQL 16（Drizzle ORM + node-postgres）                                                                          |
 | 向量库        | Qdrant（JS client + Python HTTP client）                                                                              |
 | Python worker | FFmpeg、ffprobe、PySceneDetect、SigLIP2（torch/transformers）、faster-whisper、Qwen2.5-VL（可选 Caption）             |
@@ -455,3 +455,5 @@ pnpm py:test
 - **搜索没有 caption_match**：确认 `.env` 中 `CAPTION_SEARCH_ENABLED=true`，并检查 `vector_refs` 里 `caption_text_vectors` 是否已变成 `indexed`。
 - **首次运行很慢**：SigLIP2 / faster-whisper / Qwen2.5-VL 首次需要从网络下载模型权重并缓存到本机，后续运行复用缓存。
 - **macOS 内存紧张**：把 `.env` 中 `SIGLIP_DEVICE` 设为 `cpu`（默认 `auto` 在 Apple Silicon 上会选 `mps`）。
+
+检索 Agent 的启动、独立素材文字授权、恢复和限制见 [检索 Agent 使用说明](docs/retrieval-agent.md)。

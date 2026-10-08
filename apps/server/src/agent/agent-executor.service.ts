@@ -48,7 +48,11 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
     @Inject(DATABASE) private readonly db: Database,
     @Inject(SETTINGS) private readonly settings: Settings,
     @Inject(AGENT_STEP_HANDLER) private readonly stepHandler: AgentStepHandler,
-    @Optional() private readonly runtimeConfig?: AgentRuntimeConfigService,
+    // tsx/esbuild 不生成 design:paramtypes 元数据,按类型注入会静默得到 undefined;
+    // 可选依赖同样必须显式 @Inject 类令牌(见 agent.service.ts 同类注释)。
+    @Optional()
+    @Inject(AgentRuntimeConfigService)
+    private readonly runtimeConfig?: AgentRuntimeConfigService,
   ) {}
 
   onApplicationBootstrap() {
@@ -132,14 +136,28 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
       // execute 可能等待 Provider 或 SearchService，此时没有打开的数据库事务或行锁。
       // Promise.race 让当前执行器自身也能执行硬超时；否则 isRunning 会阻止同实例的
       // 下一次维护扫描，单 Server 部署中的挂起调用就可能永远停留在活动态。
+      const isRetrieval = (claim.run.enforcedScopeJson as { retrieval_agent?: boolean }).retrieval_agent === true
+      // 模型与本地工具使用独立上限，否则内部允许等 60 秒，外层仍会在 10 秒丢弃结果。
+      // 活动步骤和整任务剩余时间仍是总约束；延长单次模型等待不能绕过它们。
+      const stepTimeoutMs = prepared.external ? runtime.model_timeout_ms : runtime.tool_timeout_ms
+      const executionTimeoutMs = isRetrieval
+        ? Math.max(1, Math.min(
+            runtime.activity_timeout_ms,
+            stepTimeoutMs,
+            (this.settings.agentRetrievalTimeoutMs ?? 600_000) - (Date.now() - claim.run.createdAt.getTime()),
+          ))
+        : runtime.activity_timeout_ms
       const executePromise = prepared.execute()
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined
       const execution = await Promise.race([
-        executePromise.then((result) => ({ kind: 'completed' as const, result })),
+        executePromise.then((result) => ({ kind: 'completed' as const, result }), (error: unknown) => {
+          if (timeoutHandle) clearTimeout(timeoutHandle)
+          throw error
+        }),
         new Promise<{ kind: 'timed_out' }>((resolve) => {
           timeoutHandle = setTimeout(
             () => resolve({ kind: 'timed_out' }),
-            runtime.activity_timeout_ms,
+            executionTimeoutMs,
           )
         }),
       ])
@@ -155,13 +173,18 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
               errorMessage: '外部请求已派发，但活动硬超时前未收到可确认的响应。',
               outcomeUnknown: true,
             },
-            new Date(now.getTime() + runtime.activity_timeout_ms),
+            isRetrieval ? new Date() : new Date(now.getTime() + runtime.activity_timeout_ms),
           )
         } else {
-          await timeoutActiveAgentRuns(this.db, {
-            activityTimeoutMs: runtime.activity_timeout_ms,
-            now: new Date(now.getTime() + runtime.activity_timeout_ms),
-          })
+          if (isRetrieval) {
+            await commitAgentStep(this.db, { ...activeContext, leaseOwner: this.leaseOwner,
+              transition: { status: 'timed_out' }, outputJson: prepared.timeoutOutputJson ?? { stop_reason: 'tool_timeout' } }, new Date())
+          } else {
+            await timeoutActiveAgentRuns(this.db, {
+              activityTimeoutMs: runtime.activity_timeout_ms,
+              now: new Date(now.getTime() + runtime.activity_timeout_ms),
+            })
+          }
         }
         // JavaScript Promise 不能强制终止任意底层调用。这里明确不再 await，也不提交其
         // 迟到结果；外部步骤已是 outcome_unknown，本地步骤已是 timed_out。
@@ -184,6 +207,7 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
           transition: result.transition,
           outputJson: result.outputJson,
           candidates: result.candidates,
+          rerankAttempt: result.rerankAttempt,
         },
         new Date(),
       )
@@ -207,13 +231,14 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
           errorCode: stepError.code,
           errorMessage: stepError.message,
           outcomeUnknown: stepError.outcomeUnknown,
+          diagnostics: stepError.diagnostics,
         })
       }
       // 日志只包含稳定身份和脱敏错误码。不得输出 Provider 原始体、密钥、本地路径或媒体文本。
       const identity = activeContext
         ? ` run_id=${activeContext.runId} step_attempt_id=${activeContext.stepAttemptId} lease_version=${activeContext.leaseVersion}`
         : ''
-      this.logger.error(`Agent executor iteration failed:${identity} code=${stepError.code}`)
+      this.logger.error(`Agent executor iteration failed:${identity} code=${stepError.code}${stepError.diagnostics ? ` diagnostics=${JSON.stringify(stepError.diagnostics)}` : ''}`)
     } finally {
       this.isRunning = false
     }
@@ -223,6 +248,8 @@ export class AgentExecutorService implements OnApplicationBootstrap, OnApplicati
     return (
       this.runtimeConfig?.values() ?? {
         enabled: this.settings.agentExecutorEnabled,
+        tool_timeout_ms: this.settings.agentToolTimeoutMs,
+        model_timeout_ms: this.settings.agentModelTimeoutMs ?? 60_000,
         lease_duration_ms: this.settings.agentLeaseDurationMs,
         activity_timeout_ms: this.settings.agentActivityTimeoutMs,
         executor_interval_ms: this.settings.agentExecutorIntervalMs,
